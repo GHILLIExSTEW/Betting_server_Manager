@@ -285,11 +285,10 @@ class DataSyncService:
                             )
                         all_processed_teams.extend(processed_teams)
                         logger.debug(f"Upserted {len(processed_teams)} teams for league {league['id']}")
-                    await asyncio.sleep(0.5) # Small delay between leagues
-                  
-                    except Exception as e:
-                        logger.exception(f"Error syncing teams for league {league.get('id', 'N/A')} in sport {sport}: {e}")
-            logger.info(f"Finished syncing teams. Total teams processed: {len(all_processed_teams)}")
+                        await asyncio.sleep(0.5) # Small delay between leagues
+                   except Exception as e:
+                       logger.exception(f"Error syncing teams for league {league.get('id', 'N/A')} in sport {sport}: {e}")
+                       logger.info(f"Finished syncing teams. Total teams processed: {len(all_processed_teams)}")
 
 
     async def _sync_schedules(self, leagues: List[Dict], days_ahead: int):
