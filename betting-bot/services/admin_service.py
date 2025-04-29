@@ -5,6 +5,7 @@ import logging
 import aiosqlite
 from typing import Dict, Any, Optional
 from utils.errors import AdminServiceError
+from data.db_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
