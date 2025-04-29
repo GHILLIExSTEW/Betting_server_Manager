@@ -1,21 +1,65 @@
-class BetServiceError(Exception):
-    """Base exception for bet service errors."""
+class ServiceError(Exception):
+    """Base class for all service-related errors."""
     pass
 
-class ValidationError(BetServiceError):
-    """Exception raised for validation errors."""
+class BetServiceError(ServiceError):
+    """Raised when there's an error in the bet service."""
     pass
 
-class DatabaseError(BetServiceError):
-    """Exception raised for database errors."""
+class GameServiceError(ServiceError):
+    """Raised when there's an error in the game service."""
     pass
 
-class CacheError(BetServiceError):
-    """Exception raised for cache errors."""
+class AnalyticsServiceError(ServiceError):
+    """Raised when there's an error in the analytics service."""
     pass
 
-class AuthorizationError(BetServiceError):
-    """Exception raised for authorization errors."""
+class AdminServiceError(ServiceError):
+    """Raised when there's an error in the admin service."""
+    pass
+
+class DatabaseError(Exception):
+    """Raised when there's an error in database operations."""
+    pass
+
+class ValidationError(Exception):
+    """Raised when input validation fails."""
+    pass
+
+class AuthenticationError(Exception):
+    """Raised when authentication fails."""
+    pass
+
+class AuthorizationError(Exception):
+    """Raised when authorization fails."""
+    pass
+
+class RateLimitError(Exception):
+    """Raised when rate limits are exceeded."""
+    pass
+
+class APIError(Exception):
+    """Raised when there's an error in external API calls."""
+    pass
+
+class CacheError(Exception):
+    """Raised when there's an error in cache operations."""
+    pass
+
+class ConfigurationError(Exception):
+    """Raised when there's an error in configuration."""
+    pass
+
+class NotificationError(Exception):
+    """Raised when there's an error in notification operations."""
+    pass
+
+class PaymentError(Exception):
+    """Raised when there's an error in payment operations."""
+    pass
+
+class VoiceError(Exception):
+    """Raised when there's an error in voice operations."""
     pass
 
 class GameNotFoundError(BetServiceError):
@@ -38,14 +82,6 @@ class InvalidUnitsError(ValidationError):
     """Exception raised for invalid units."""
     pass
 
-class GameServiceError(Exception):
-    """Base exception for game service errors."""
-    pass
-
-class APIError(GameServiceError):
-    """Exception raised for API-related errors."""
-    pass
-
 class GameDataError(GameServiceError):
     """Exception raised for game data errors."""
     pass
@@ -56,10 +92,6 @@ class LeagueNotFoundError(GameServiceError):
 
 class ScheduleError(GameServiceError):
     """Exception raised for schedule-related errors."""
-    pass
-
-class AnalyticsServiceError(Exception):
-    """Base exception for analytics service errors."""
     pass
 
 class StatsGenerationError(AnalyticsServiceError):

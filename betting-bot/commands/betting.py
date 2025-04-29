@@ -1,12 +1,12 @@
 import discord
-from discord import app_commands
+from discord import app_commands, ButtonStyle
 import logging
 from typing import Optional, List, Dict
 from datetime import datetime
 import aiosqlite
 from services.bet_service import BetService
 from services.game_service import GameService
-from discord.ui import View, Select, Modal, TextInput, Button, ButtonStyle
+from discord.ui import View, Select, Modal, TextInput, Button
 
 logger = logging.getLogger(__name__)
 
@@ -110,17 +110,17 @@ class ChannelSelect(Select):
         await interaction.response.defer()
         self.view.stop()
 
-async def setup(tree: app_commands.CommandTree, bot):
-    """Setup function for betting commands."""
-    bet_service = BetService(bot)
-    game_service = GameService(bot)
-    
-    @tree.command(
-        name="bet",
-        description="Start the bet placement flow"
-    )
-    async def bet(interaction: discord.Interaction):
-        """Start the bet placement flow."""
+class Betting(discord.app_commands.Group):
+    """Group of commands for betting operations."""
+    def __init__(self, bot):
+        super().__init__(name="bet", description="Betting commands")
+        self.bot = bot
+        self.bet_service = BetService(bot)
+        self.game_service = GameService(bot)
+
+    @app_commands.command(name="place", description="Place a new bet")
+    async def place(self, interaction: discord.Interaction):
+        """Place a new bet."""
         try:
             # Check if user is authorized to bet
             async with aiosqlite.connect('betting_bot/data/betting.db') as db:
@@ -166,7 +166,7 @@ async def setup(tree: app_commands.CommandTree, bot):
 
             # Step 3: Game Selection
             if view.selected_league != "Other":
-                games = await game_service.get_league_games(interaction.guild_id, view.selected_league)
+                games = await self.game_service.get_league_games(interaction.guild_id, view.selected_league)
                 view = View()
                 view.add_item(GameSelect(games))
                 await interaction.followup.send(
@@ -243,7 +243,7 @@ async def setup(tree: app_commands.CommandTree, bot):
                 return
 
             # Create bet
-            bet_id = await bet_service.create_bet(
+            bet_id = await self.bet_service.create_bet(
                 guild_id=interaction.guild_id,
                 user_id=interaction.user.id,
                 game_id=view.selected_game if hasattr(view, 'selected_game') else None,
@@ -266,10 +266,15 @@ async def setup(tree: app_commands.CommandTree, bot):
                 ephemeral=True
             )
 
-    @bet.error
-    async def bet_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    @place.error
+    async def place_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
         logger.error(f"Error in bet command: {str(error)}")
         await interaction.response.send_message(
             "❌ An unexpected error occurred.",
             ephemeral=True
-        ) 
+        )
+
+async def setup(bot):
+    """Add the betting commands to the bot."""
+    betting_group = Betting(bot)
+    bot.tree.add_command(betting_group) 

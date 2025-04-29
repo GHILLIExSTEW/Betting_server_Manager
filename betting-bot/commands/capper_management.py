@@ -1,7 +1,9 @@
 import discord
 from discord import app_commands
 import logging
+from typing import Optional
 import aiosqlite
+from utils.errors import AdminServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -105,10 +107,117 @@ class RemoveUserView(discord.ui.View):
                 ephemeral=True
             )
 
-async def setup(tree: app_commands.CommandTree):
-    """Setup function for the remove user command."""
-    
-    @tree.command(
+class CapperManagement(discord.app_commands.Group):
+    """Group of commands for managing cappers."""
+    def __init__(self, bot):
+        super().__init__(name="capper", description="Capper management commands")
+        self.bot = bot
+
+    @app_commands.command(name="add", description="Add a user as a capper")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def add(self, interaction: discord.Interaction, user: discord.Member):
+        """Add a user as a capper."""
+        try:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+                await db.execute(
+                    """
+                    INSERT OR REPLACE INTO cappers 
+                    (guild_id, user_id, username) 
+                    VALUES (?, ?, ?)
+                    """,
+                    (interaction.guild_id, user.id, user.name)
+                )
+                await db.commit()
+
+            await interaction.response.send_message(
+                f"✅ Successfully added {user.mention} as a capper",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error adding capper: {str(e)}")
+            await interaction.response.send_message(
+                "❌ Failed to add capper. Check logs for details.",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="remove", description="Remove a user as a capper")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def remove(self, interaction: discord.Interaction, user: discord.Member):
+        """Remove a user as a capper."""
+        try:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+                await db.execute(
+                    """
+                    DELETE FROM cappers 
+                    WHERE guild_id = ? AND user_id = ?
+                    """,
+                    (interaction.guild_id, user.id)
+                )
+                await db.commit()
+
+            await interaction.response.send_message(
+                f"✅ Successfully removed {user.mention} as a capper",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error removing capper: {str(e)}")
+            await interaction.response.send_message(
+                "❌ Failed to remove capper. Check logs for details.",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="list", description="List all cappers in the server")
+    async def list(self, interaction: discord.Interaction):
+        """List all cappers in the server."""
+        try:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+                async with db.execute(
+                    """
+                    SELECT user_id, username 
+                    FROM cappers 
+                    WHERE guild_id = ?
+                    ORDER BY username
+                    """,
+                    (interaction.guild_id,)
+                ) as cursor:
+                    cappers = await cursor.fetchall()
+
+            if not cappers:
+                await interaction.response.send_message(
+                    "No cappers found in this server.",
+                    ephemeral=True
+                )
+                return
+
+            embed = discord.Embed(
+                title="Server Cappers",
+                description="List of all cappers in this server",
+                color=discord.Color.blue()
+            )
+
+            for user_id, username in cappers:
+                user = interaction.guild.get_member(user_id)
+                if user:
+                    embed.add_field(
+                        name=user.display_name,
+                        value=f"ID: {user_id}",
+                        inline=False
+                    )
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except Exception as e:
+            logger.error(f"Error listing cappers: {str(e)}")
+            await interaction.response.send_message(
+                "❌ Failed to list cappers. Check logs for details.",
+                ephemeral=True
+            )
+
+async def setup(bot):
+    """Add the capper management commands to the bot."""
+    capper_group = CapperManagement(bot)
+    bot.tree.add_command(capper_group)
+
+    @bot.tree.command(
         name="remove_user",
         description="Remove a user from the cappers list"
     )

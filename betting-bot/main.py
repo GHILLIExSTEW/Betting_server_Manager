@@ -13,6 +13,7 @@ from services.game_service import GameService
 from services.bet_service import BetService
 from services.admin_service import AdminService
 from services.analytics_service import AnalyticsService
+from commands import setup as setup_commands
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -38,23 +39,25 @@ class BettingBot(commands.Bot):
         self.bet_service = BetService(self)
         self.admin_service = AdminService(self)
         self.analytics_service = AnalyticsService(self)
-        
-        # Load extensions
-        self.initial_extensions = [
-            'commands.betting',
-            'commands.admin',
-            'commands.stats'
-        ]
 
     async def setup_hook(self):
-        for extension in self.initial_extensions:
-            try:
-                await self.load_extension(extension)
-                logger.info(f'Loaded extension {extension}')
-            except Exception as e:
-                logger.error(f'Failed to load extension {extension}: {e}')
+        """Setup function that runs before the bot starts."""
+        try:
+            # Setup all commands
+            await setup_commands(self)
+            logger.info("Successfully set up all commands")
+            
+            # Start services
+            await self.game_service.start()
+            await self.bet_service.start()
+            logger.info("Successfully started all services")
+            
+        except Exception as e:
+            logger.error(f"Error during setup: {e}")
+            raise
 
     async def on_ready(self):
+        """Called when the bot is ready."""
         logger.info(f'Logged in as {self.user.name} ({self.user.id})')
         logger.info('------')
 

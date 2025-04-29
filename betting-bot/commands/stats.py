@@ -157,14 +157,16 @@ class StatsView(discord.ui.View):
             logger.error(f"Error populating cappers: {str(e)}")
             raise
 
-async def setup(tree: app_commands.CommandTree, bot):
-    """Setup function for the stats command."""
-    @tree.command(
-        name="stats",
-        description="View betting statistics for cappers or the server"
-    )
-    async def stats(interaction: discord.Interaction):
-        """Stats command for viewing betting statistics."""
+class Stats(discord.app_commands.Group):
+    """Group of commands for statistics operations."""
+    def __init__(self, bot):
+        super().__init__(name="stats", description="Statistics commands")
+        self.bot = bot
+        self.analytics_service = AnalyticsService(bot)
+
+    @app_commands.command(name="view", description="View betting statistics for cappers or the server")
+    async def view(self, interaction: discord.Interaction):
+        """View betting statistics."""
         try:
             # Check if the guild has access to the stats command
             async with aiosqlite.connect('betting-bot/data/betting.db') as db:
@@ -184,7 +186,7 @@ async def setup(tree: app_commands.CommandTree, bot):
                         )
                         return
 
-            view = StatsView(bot, interaction.guild_id)
+            view = StatsView(self.bot, interaction.guild_id)
             await view.populate_cappers(interaction)
             await interaction.response.send_message(
                 "Select a capper to view their statistics:",
@@ -196,4 +198,9 @@ async def setup(tree: app_commands.CommandTree, bot):
             await interaction.response.send_message(
                 "❌ An error occurred while processing the stats command.",
                 ephemeral=True
-            ) 
+            )
+
+async def setup(bot):
+    """Add the stats commands to the bot."""
+    stats_group = Stats(bot)
+    bot.tree.add_command(stats_group) 

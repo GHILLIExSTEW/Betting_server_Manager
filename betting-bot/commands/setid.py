@@ -7,6 +7,8 @@ import requests
 from io import BytesIO
 from PIL import Image
 import uuid
+from typing import Optional
+from utils.errors import AdminServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -164,101 +166,88 @@ class ImageURLModal(discord.ui.Modal, title="Image URL"):
                 ephemeral=True
             )
 
-async def setup(tree: app_commands.CommandTree):
-    """Setup function for the setid command."""
-    
-    @tree.command(
-        name="setid",
-        description="Set up your capper profile"
-    )
-    async def setid(interaction: discord.Interaction):
-        """Set up your capper profile."""
+class SetID(discord.app_commands.Group):
+    """Group of commands for setting user IDs."""
+    def __init__(self, bot):
+        super().__init__(name="setid", description="Set user ID commands")
+        self.bot = bot
+
+    @app_commands.command(name="user", description="Set your user ID")
+    async def user(self, interaction: discord.Interaction, user_id: str):
+        """Set your user ID."""
         try:
-            # Check if user is already a capper
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                async with db.execute(
-                    """
-                    SELECT user_id 
-                    FROM cappers 
-                    WHERE guild_id = ? AND user_id = ?
-                    """,
-                    (interaction.guild_id, interaction.user.id)
-                ) as cursor:
-                    if await cursor.fetchone():
-                        await interaction.response.send_message(
-                            "❌ You are already set up as a capper in this server.",
-                            ephemeral=True
-                        )
-                        return
-
-                # Check if server has paid subscription
-                async with db.execute(
-                    """
-                    SELECT is_paid 
-                    FROM server_settings 
-                    WHERE guild_id = ?
-                    """,
-                    (interaction.guild_id,)
-                ) as cursor:
-                    result = await cursor.fetchone()
-                    is_paid = result and result[0] if result else False
-
-            if is_paid:
-                # Show modal for paid tier
-                modal = CapperModal(interaction.guild_id, interaction.user.id)
-                await interaction.response.send_modal(modal)
-
-                # Show image upload view after modal submission
-                view = ImageUploadView(interaction.guild_id, interaction.user.id)
-                await interaction.followup.send(
-                    "Please choose how you want to set your profile picture:",
-                    view=view,
-                    ephemeral=True
-                )
-            else:
-                # Free tier - just create basic entry
-                async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                    await db.execute(
-                        """
-                        INSERT INTO cappers (
-                            guild_id, 
-                            user_id, 
-                            display_name, 
-                            bet_won, 
-                            bet_loss, 
-                            updated_at
-                        ) VALUES (?, ?, ?, 0, 0, datetime('now'))
-                        """,
-                        (
-                            interaction.guild_id,
-                            interaction.user.id,
-                            interaction.user.display_name
-                        )
-                    )
-                    await db.commit()
-
+            # Validate user ID format
+            if not user_id.isdigit():
                 await interaction.response.send_message(
-                    "✅ You have been set up as a capper!",
+                    "❌ Invalid user ID format. Please provide a numeric ID.",
                     ephemeral=True
                 )
+                return
 
-        except Exception as e:
-            logger.error(f"Error in setid command: {str(e)}")
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+                await db.execute(
+                    """
+                    INSERT OR REPLACE INTO user_ids 
+                    (guild_id, user_id, discord_id) 
+                    VALUES (?, ?, ?)
+                    """,
+                    (interaction.guild_id, user_id, interaction.user.id)
+                )
+                await db.commit()
+
             await interaction.response.send_message(
-                "❌ An error occurred while setting up your profile.",
+                f"✅ Successfully set your user ID to {user_id}",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error setting user ID: {str(e)}")
+            await interaction.response.send_message(
+                "❌ Failed to set user ID. Check logs for details.",
                 ephemeral=True
             )
 
-    @setid.error
-    async def setid_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-        logger.error(f"Error in setid command: {str(error)}")
-        await interaction.response.send_message(
-            "❌ An unexpected error occurred.",
-            ephemeral=True
-        )
+    @app_commands.command(name="admin", description="Set a user's ID (Admin only)")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def admin(self, interaction: discord.Interaction, user: discord.Member, user_id: str):
+        """Set a user's ID (Admin only)."""
+        try:
+            # Validate user ID format
+            if not user_id.isdigit():
+                await interaction.response.send_message(
+                    "❌ Invalid user ID format. Please provide a numeric ID.",
+                    ephemeral=True
+                )
+                return
+
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+                await db.execute(
+                    """
+                    INSERT OR REPLACE INTO user_ids 
+                    (guild_id, user_id, discord_id) 
+                    VALUES (?, ?, ?)
+                    """,
+                    (interaction.guild_id, user_id, user.id)
+                )
+                await db.commit()
+
+            await interaction.response.send_message(
+                f"✅ Successfully set {user.mention}'s user ID to {user_id}",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error setting user ID: {str(e)}")
+            await interaction.response.send_message(
+                "❌ Failed to set user ID. Check logs for details.",
+                ephemeral=True
+            )
+
+async def setup(bot):
+    """Add the setid commands to the bot."""
+    setid_group = SetID(bot)
+    bot.tree.add_command(setid_group)
 
     # Handle image uploads
-    @tree.listen('on_message')
+    @bot.tree.listen('on_message')
     async def on_message(message: discord.Message):
         if message.author.bot:
             return
