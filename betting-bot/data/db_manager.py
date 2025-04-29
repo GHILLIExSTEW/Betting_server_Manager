@@ -48,6 +48,10 @@ class DatabaseManager:
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
+    async def fetch(self, query: str, *args) -> Optional[Dict[str, Any]]:
+        """Execute a query and return a single row (alias for fetch_one)."""
+        return await self.fetch_one(query, *args)
+
     async def initialize_db(self) -> None:
         """Initialize the database with required tables."""
         try:

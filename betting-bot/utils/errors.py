@@ -18,6 +18,10 @@ class AdminServiceError(ServiceError):
     """Raised when there's an error in the admin service."""
     pass
 
+class DataSyncError(ServiceError):
+    """Raised when there's an error in data synchronization."""
+    pass
+
 class DatabaseError(Exception):
     """Raised when there's an error in database operations."""
     pass
