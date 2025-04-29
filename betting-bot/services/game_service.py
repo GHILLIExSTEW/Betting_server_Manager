@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 import json
 import aiohttp
 import asyncio
-from data.db_manager import DatabaseManager
-from data.cache_manager import CacheManager
-from bot.utils.errors import GameServiceError, APIError, GameDataError, LeagueNotFoundError, ScheduleError
+from ..data.db_manager import DatabaseManager
+from ..data.cache_manager import CacheManager
+from ..utils.errors import GameServiceError, APIError, GameDataError, LeagueNotFoundError, ScheduleError
 from bot.config.settings import (
     API_KEY,
     API_BASE_URL,
