@@ -15,7 +15,7 @@ from utils.errors import (
     LeagueNotFoundError,
     ScheduleError
 )
-from ..config.api_settings import (
+from config.api_settings import (
     API_ENABLED,
     API_HOSTS,
     API_KEY,
