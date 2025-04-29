@@ -4,8 +4,8 @@ import logging
 from typing import Optional, List, Dict
 from datetime import datetime
 import aiosqlite
-from ..services.bet_service import BetService
-from ..services.game_service import GameService
+from betting_bot.services.bet_service import BetService
+from betting_bot.services.game_service import GameService
 from discord.ui import View, Select, Modal, TextInput, Button, ButtonStyle
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,7 @@ async def setup(tree: app_commands.CommandTree, bet_service: BetService, game_se
         """Start the bet placement flow."""
         try:
             # Check if user is authorized to bet
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting_bot/data/betting.db') as db:
                 async with db.execute(
                     """
                     SELECT user_id 

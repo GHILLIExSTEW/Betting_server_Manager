@@ -3,8 +3,8 @@ from discord import app_commands
 import logging
 from typing import Optional
 from datetime import datetime, timedelta
-from ..services.analytics_service import AnalyticsService
-from ..utils.stats_image_generator import StatsImageGenerator
+from betting_bot.services.analytics_service import AnalyticsService
+from betting_bot.utils.stats_image_generator import StatsImageGenerator
 import aiosqlite
 import os
 
@@ -116,7 +116,7 @@ class StatsView(discord.ui.View):
     async def populate_cappers(self, interaction: discord.Interaction):
         """Populate the select menu with cappers from the guild."""
         try:
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting_bot/data/betting.db') as db:
                 # Get all cappers from the guild
                 async with db.execute(
                     """
@@ -167,7 +167,7 @@ async def setup(tree: app_commands.CommandTree, analytics_service: AnalyticsServ
         """Stats command for viewing betting statistics."""
         try:
             # Check if the guild has access to the stats command
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting_bot/data/betting.db') as db:
                 async with db.execute(
                     """
                     SELECT commands_registered 
