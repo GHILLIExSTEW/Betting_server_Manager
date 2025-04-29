@@ -28,6 +28,13 @@ from config.settings import (
 )
 from ..api.sports_api import SportsAPI
 import aiosqlite
+import sys
+import os
+
+# Add the parent directory to the Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(parent_dir)
 
 logger = logging.getLogger(__name__)
 
