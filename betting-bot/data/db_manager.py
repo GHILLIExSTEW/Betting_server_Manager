@@ -43,6 +43,8 @@ class DatabaseManager:
                     async with conn.cursor() as cursor:
                         await cursor.execute("SELECT 1")
                 logger.info("MySQL connection pool created and tested successfully.")
+                # Initialize database schema
+                await self.initialize_db()
             except Exception as e:
                 logger.critical(f"FATAL: Failed to connect to MySQL: {e}", exc_info=True)
                 self._pool = None
