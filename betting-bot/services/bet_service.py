@@ -84,11 +84,11 @@ class BetService:
                 expiration_threshold = datetime.now(timezone.utc) - timedelta(days=7)
 
                 # Use self.db (the passed-in DatabaseManager)
-                # Assumes PostgreSQL syntax ($ placeholders)
+                # Updated to use MySQL syntax (%s placeholders)
                 expired_bets = await self.db.fetch_all("""
                     SELECT bet_id, guild_id, user_id FROM bets
-                    WHERE status = $1
-                    AND created_at < $2
+                    WHERE status = %s
+                    AND created_at < %s
                 """, 'pending', expiration_threshold)
 
                 for bet in expired_bets:
@@ -145,18 +145,19 @@ class BetService:
                 db_game_id = None # Handle non-integer game_ids
 
             # Use the shared DatabaseManager instance (self.db)
-            # Query assumes PostgreSQL ($ placeholders, RETURNING)
+            # Updated to use MySQL syntax (%s placeholders)
             result = await self.db.fetch_one("""
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type,
                     selection, units, odds, channel_id,
                     created_at, status, updated_at, expiration_time
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $9, $10)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s)
                 RETURNING bet_id -- Get the generated bet_id back
             """, (
                 guild_id, user_id, db_game_id, bet_type,
                 selection, units, odds, channel_id,
                 datetime.now(timezone.utc), # Use timezone-aware timestamp
+                datetime.now(timezone.utc), # updated_at
                 expiration_time # Pass expiration if applicable, otherwise NULL
             ))
 
@@ -198,11 +199,11 @@ class BetService:
         """Update the status, result description, and result value of a bet."""
         try:
              # Use the shared DatabaseManager instance
-            # Query assumes PostgreSQL syntax
+            # Updated to use MySQL syntax
             status_code = await self.db.execute("""
                 UPDATE bets
-                SET status = $1, result_value = $2, updated_at = $3, result_description = $4
-                WHERE bet_id = $5
+                SET status = %s, result_value = %s, updated_at = %s, result_description = %s
+                WHERE bet_id = %s
             """, status, result_value, datetime.now(timezone.utc), result, bet_id)
             # Check status_code (e.g., "UPDATE 1") to confirm update happened
             success = status_code is not None and 'UPDATE 1' in status_code
@@ -219,7 +220,7 @@ class BetService:
     async def get_bet(self, bet_id: int) -> Optional[Dict]:
          """Get a single bet by its ID."""
          try:
-              return await self.db.fetch_one("SELECT * FROM bets WHERE bet_id = $1", bet_id)
+              return await self.db.fetch_one("SELECT * FROM bets WHERE bet_id = %s", bet_id)
          except Exception as e:
               self.logger.exception(f"Error retrieving bet {bet_id}: {e}")
               return None
@@ -231,7 +232,7 @@ class BetService:
             # Query the cappers table
             result = await self.db.fetch_one("""
                 SELECT 1 FROM cappers
-                WHERE guild_id = $1 AND user_id = $2
+                WHERE guild_id = %s AND user_id = %s
             """, guild_id, user_id)
             return bool(result) # Returns True if a row is found, False otherwise
         except Exception as e:
@@ -248,7 +249,7 @@ class BetService:
              await self.db.execute(
                  """
                  INSERT INTO unit_records (bet_id, guild_id, user_id, year, month, units, odds, result_value, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                  """,
                  bet_id, guild_id, user_id, now.year, now.month, units, odds, result_value, now
              )
@@ -262,7 +263,7 @@ class BetService:
          try:
               await self.db.execute(
                   """
-                  DELETE FROM unit_records WHERE bet_id = $1
+                  DELETE FROM unit_records WHERE bet_id = %s
                   """,
                   bet_id
               )
