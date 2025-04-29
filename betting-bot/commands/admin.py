@@ -156,7 +156,7 @@ class ServerSettingsView(discord.ui.View):
     async def save_settings(self, interaction: discord.Interaction):
         try:
             # Create guild directory for logos
-            guild_logos_dir = f"bot/assets/logos/{interaction.guild.id}"
+            guild_logos_dir = f"betting-bot/assets/logos/{interaction.guild.id}"
             os.makedirs(guild_logos_dir, exist_ok=True)
             logger.info(f"Created guild logos directory: {guild_logos_dir}")
 
@@ -187,7 +187,7 @@ class ServerSettingsView(discord.ui.View):
                         return
 
             # Save settings to database
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 # Check if guild exists in settings
                 async with db.execute(
                     "SELECT guild_id FROM server_settings WHERE guild_id = ?",
@@ -332,7 +332,7 @@ class AdminView(discord.ui.View):
     async def handle_view_settings(self, interaction: discord.Interaction):
         """Handle viewing current server settings."""
         try:
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 async with db.execute(
                     "SELECT * FROM server_settings WHERE guild_id = ?",
                     (interaction.guild.id,)

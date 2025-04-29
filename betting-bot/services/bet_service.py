@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 import discord
 from discord import Embed, Color, Button, ButtonStyle
 from discord.ui import View, Select, Modal, TextInput
-from ..data.db_manager import DatabaseManager
-from ..data.cache_manager import CacheManager
+from data.db_manager import DatabaseManager
+from data.cache_manager import CacheManager
 from bot.utils.errors import BetServiceError, ValidationError
 from bot.config.settings import MIN_UNITS, MAX_UNITS, DEFAULT_UNITS
 from ..utils.image_generator import BetSlipGenerator
@@ -429,23 +429,21 @@ class BetService:
         except Exception as e:
             logger.error(f"Error sending bet status notification: {str(e)}")
 
-    async def place_bet(
+    async def create_bet(
         self,
         guild_id: int,
         user_id: int,
-        game_id: int,
+        game_id: Optional[int],
         bet_type: str,
         selection: str,
         units: int,
-        odds: int,
-        channel_id: int,
-        bet_id: str
-    ) -> Dict:
-        """Place a new bet."""
+        odds: float,
+        channel_id: int
+    ) -> int:
+        """Create a new bet."""
         try:
-            # Validate units
-            if units not in [1, 2, 3]:
-                raise BetServiceError("Units must be 1, 2, or 3")
+            # Generate bet ID
+            bet_id = self._generate_bet_id()
 
             # Create bet
             await self.db.execute(
@@ -486,46 +484,15 @@ class BetService:
                 self.bets[guild_id] = {}
             self.bets[guild_id][bet_id] = bet
 
-            return bet
+            return bet_id
         except Exception as e:
-            logger.error(f"Error placing bet: {str(e)}")
-            raise BetServiceError(f"Failed to place bet: {str(e)}")
+            logger.error(f"Error creating bet: {str(e)}")
+            raise BetServiceError(f"Failed to create bet: {str(e)}")
 
-    async def update_bet_status(
-        self,
-        guild_id: int,
-        bet_id: int,
-        status: str,
-        result: Optional[str] = None
-    ) -> Dict:
-        """Update the status of a bet."""
-        try:
-            # Update bet in database
-            await self.db.execute(
-                """
-                UPDATE bets
-                SET status = ?, result = ?, updated_at = ?
-                WHERE bet_id = ? AND guild_id = ?
-                """,
-                status, result, datetime.utcnow(), bet_id, guild_id
-            )
-
-            # Get updated bet
-            bet = await self.db.fetch_one(
-                """
-                SELECT * FROM bets WHERE bet_id = ?
-                """,
-                bet_id
-            )
-
-            # Update cache
-            if guild_id in self.bets and bet_id in self.bets[guild_id]:
-                self.bets[guild_id][bet_id] = bet
-
-            return bet
-        except Exception as e:
-            logger.error(f"Error updating bet status: {str(e)}")
-            raise BetServiceError(f"Failed to update bet status: {str(e)}")
+    def _generate_bet_id(self) -> str:
+        """Generate a bet ID in format DDMMYYYYHHMMSS."""
+        now = datetime.now()
+        return f"{now.day:02d}{now.month:02d}{now.year}{now.hour:02d}{now.minute:02d}{now.second:02d}"
 
     async def get_bet(self, guild_id: int, bet_id: int) -> Optional[Dict]:
         """Get details of a specific bet."""
@@ -607,60 +574,6 @@ class BetService:
             logger.error(f"Error getting guild bets: {str(e)}")
             return []
 
-    async def _validate_bet(
-        self,
-        guild_id: int,
-        user_id: int,
-        game_id: int,
-        bet_type: str,
-        selection: str,
-        units: float
-    ) -> bool:
-        """Validate bet parameters."""
-        try:
-            # Check if game exists and is active
-            game = await self.db.fetch_one(
-                """
-                SELECT * FROM games
-                WHERE game_id = $1 AND guild_id = $2
-                AND status = 'active'
-                """,
-                game_id, guild_id
-            )
-            if not game:
-                return False
-
-            # Check if bet type is valid
-            valid_types = await self.db.fetch(
-                """
-                SELECT bet_type FROM valid_bet_types
-                WHERE game_id = $1
-                """,
-                game_id
-            )
-            if bet_type not in [t['bet_type'] for t in valid_types]:
-                return False
-
-            # Check if selection is valid for bet type
-            valid_selections = await self.db.fetch(
-                """
-                SELECT selection FROM valid_selections
-                WHERE game_id = $1 AND bet_type = $2
-                """,
-                game_id, bet_type
-            )
-            if selection not in [s['selection'] for s in valid_selections]:
-                return False
-
-            # Check if units are within limits
-            if units <= 0 or units > 100:  # Example limits
-                return False
-
-            return True
-        except Exception as e:
-            logger.error(f"Error validating bet: {str(e)}")
-            return False
-
     async def _update_bets(self) -> None:
         """Periodically update bet statuses."""
         while self.running:
@@ -707,6 +620,42 @@ class BetService:
             except Exception as e:
                 logger.error(f"Error in bet update loop: {str(e)}")
                 await asyncio.sleep(60)
+
+    async def update_bet_status(
+        self,
+        guild_id: int,
+        bet_id: int,
+        status: str,
+        result: Optional[str] = None
+    ) -> Dict:
+        """Update the status of a bet."""
+        try:
+            # Update bet in database
+            await self.db.execute(
+                """
+                UPDATE bets
+                SET status = ?, result = ?, updated_at = ?
+                WHERE bet_id = ? AND guild_id = ?
+                """,
+                status, result, datetime.utcnow(), bet_id, guild_id
+            )
+
+            # Get updated bet
+            bet = await self.db.fetch_one(
+                """
+                SELECT * FROM bets WHERE bet_id = ?
+                """,
+                bet_id
+            )
+
+            # Update cache
+            if guild_id in self.bets and bet_id in self.bets[guild_id]:
+                self.bets[guild_id][bet_id] = bet
+
+            return bet
+        except Exception as e:
+            logger.error(f"Error updating bet status: {str(e)}")
+            raise BetServiceError(f"Failed to update bet status: {str(e)}")
 
     async def start_bet_flow(self, interaction: discord.Interaction):
         """Start the bet placement flow."""
@@ -868,16 +817,15 @@ class BetService:
             await view.wait()
             if view.children[0].style == ButtonStyle.green:
                 # Place bet
-                await self.place_bet(
+                await self.create_bet(
                     guild_id=interaction.guild_id,
                     user_id=interaction.user.id,
                     game_id=view.selected_game if hasattr(view, 'selected_game') else None,
                     bet_type=view.bet_type,
                     selection=view.bet_details.get('player_name', ''),
                     units=view.selected_units,
-                    odds=int(view.bet_details['odds']),
-                    channel_id=view.selected_channel,
-                    bet_id=bet_id
+                    odds=float(view.bet_details['odds']),
+                    channel_id=view.selected_channel
                 )
 
                 # Post in selected channel
@@ -894,11 +842,6 @@ class BetService:
                 "An error occurred while processing your bet. Please try again.",
                 ephemeral=True
             )
-
-    def _generate_bet_id(self) -> str:
-        """Generate a bet ID in format DDMMYYYYHHMMSS."""
-        now = datetime.now()
-        return f"{now.day:02d}{now.month:02d}{now.year}{now.hour:02d}{now.minute:02d}{now.second:02d}"
 
     async def _fetch_games(self, league: str) -> List[Dict]:
         """Fetch games from API for the given league."""

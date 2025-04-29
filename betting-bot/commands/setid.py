@@ -44,7 +44,7 @@ class CapperModal(discord.ui.Modal, title="Capper Profile Setup"):
                 return
 
             # Create the capper entry
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 await db.execute(
                     """
                     INSERT INTO cappers (
@@ -142,7 +142,7 @@ class ImageURLModal(discord.ui.Modal, title="Image URL"):
             image.save(image_path)
 
             # Update database
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 await db.execute(
                     """
                     UPDATE cappers 
@@ -175,7 +175,7 @@ async def setup(tree: app_commands.CommandTree):
         """Set up your capper profile."""
         try:
             # Check if user is already a capper
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 async with db.execute(
                     """
                     SELECT user_id 
@@ -217,7 +217,7 @@ async def setup(tree: app_commands.CommandTree):
                 )
             else:
                 # Free tier - just create basic entry
-                async with aiosqlite.connect('bot/data/betting.db') as db:
+                async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                     await db.execute(
                         """
                         INSERT INTO cappers (
@@ -274,7 +274,7 @@ async def setup(tree: app_commands.CommandTree):
                 return
 
             # Check if user is a capper
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 async with db.execute(
                     """
                     SELECT guild_id, user_id 
@@ -317,7 +317,7 @@ async def setup(tree: app_commands.CommandTree):
             image.save(image_path)
 
             # Update database
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 await db.execute(
                     """
                     UPDATE cappers 

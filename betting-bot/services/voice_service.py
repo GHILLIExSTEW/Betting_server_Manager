@@ -4,8 +4,8 @@ from typing import Dict, List, Optional, Set, Any
 from datetime import datetime, timedelta
 import asyncio
 from discord import VoiceChannel
-from ..data.db_manager import DatabaseManager
-from ..data.cache_manager import CacheManager
+from data.db_manager import DatabaseManager
+from data.cache_manager import CacheManager
 import aiosqlite
 
 logger = logging.getLogger(__name__)

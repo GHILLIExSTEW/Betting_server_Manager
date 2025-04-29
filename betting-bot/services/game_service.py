@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 import json
 import aiohttp
 import asyncio
-from bot.data.db_manager import db_manager
-from bot.data.cache_manager import cache_manager
+from data.db_manager import DatabaseManager
+from data.cache_manager import CacheManager
 from bot.utils.errors import GameServiceError, APIError
 from bot.config.settings import (
     API_KEY,
@@ -16,8 +16,6 @@ from bot.config.settings import (
     LEAGUE_CACHE_TTL,
     TEAM_CACHE_TTL
 )
-from ..data.cache_manager import CacheManager
-from ..data.db_manager import DatabaseManager
 from ..api.sports_api import SportsAPI
 import aiosqlite
 
@@ -182,7 +180,7 @@ class GameService:
         """View active games"""
         try:
             if league:
-                games = await db_manager.fetch(
+                games = await self.db.fetch(
                     """
                     SELECT * FROM games
                     WHERE league = %s AND status = 'active'
@@ -191,7 +189,7 @@ class GameService:
                     (league,)
                 )
             else:
-                games = await db_manager.fetch(
+                games = await self.db.fetch(
                     """
                     SELECT * FROM games
                     WHERE status = 'active'
@@ -233,12 +231,12 @@ class GameService:
         """View odds for a specific game"""
         try:
             # Try to get from cache first
-            cached_game = await cache_manager.get_json(f"game:{game_id}")
+            cached_game = await self.cache.get_json(f"game:{game_id}")
             if cached_game:
                 game = cached_game
             else:
                 # Get from database
-                game = await db_manager.fetch_one(
+                game = await self.db.fetch_one(
                     """
                     SELECT * FROM games
                     WHERE game_id = %s

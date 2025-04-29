@@ -43,7 +43,7 @@ async def setup(tree: app_commands.CommandTree):
                 return
 
             # Create directories if they don't exist
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            base_dir = os.path.dirname(os.path.dirname(__file__))
             if is_league:
                 target_dir = os.path.join(base_dir, 'utils', 'assets', 'leagues')
             else:

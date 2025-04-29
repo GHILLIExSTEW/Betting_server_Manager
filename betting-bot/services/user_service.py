@@ -2,9 +2,9 @@ import discord
 from discord import app_commands
 from typing import Dict, Optional, List, Any
 import logging
-from datetime import datetime
-from bot.data.db_manager import db_manager
-from bot.data.cache_manager import cache_manager
+from datetime import datetime, timedelta
+from data.db_manager import DatabaseManager
+from data.cache_manager import CacheManager
 from bot.utils.errors import UserServiceError
 from bot.config.settings import USER_CACHE_TTL
 import aiosqlite
@@ -70,7 +70,7 @@ class UserService:
         """Get user data by ID"""
         try:
             # Try cache first
-            cached_user = await cache_manager.get_json(f"user:{user_id}")
+            cached_user = await CacheManager.get_json(f"user:{user_id}")
             if cached_user:
                 return cached_user
 
@@ -80,7 +80,7 @@ class UserService:
                     row = await cursor.fetchone()
                     if row:
                         # Update cache
-                        await cache_manager.set(
+                        await CacheManager.set(
                             f"user:{user_id}",
                             dict(row),
                             ttl=USER_CACHE_TTL
@@ -139,7 +139,7 @@ class UserService:
 
             # Update cache
             user['balance'] = new_balance
-            await cache_manager.set(
+            await CacheManager.set(
                 f"user:{user_id}",
                 user,
                 ttl=USER_CACHE_TTL

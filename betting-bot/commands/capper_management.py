@@ -24,7 +24,7 @@ class RemoveUserSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             user_id = int(self.values[0])
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 # Get display_name before deleting
                 async with db.execute(
                     """
@@ -71,7 +71,7 @@ class RemoveUserView(discord.ui.View):
 
     async def populate_users(self, interaction: discord.Interaction):
         try:
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 # Get all users from the guild
                 async with db.execute(
                     """
@@ -117,7 +117,7 @@ async def setup(tree: app_commands.CommandTree):
         """Remove a user from the cappers list."""
         try:
             # Check if the guild has access to the command
-            async with aiosqlite.connect('bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 async with db.execute(
                     """
                     SELECT commands_registered 

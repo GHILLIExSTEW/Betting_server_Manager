@@ -3,8 +3,8 @@ from discord import app_commands
 import logging
 from typing import Optional
 from datetime import datetime, timedelta
-from bot.services.analytics_service import AnalyticsService
-from bot.utils.stats_image_generator import StatsImageGenerator
+from ..services.analytics_service import AnalyticsService
+from ..utils.stats_image_generator import StatsImageGenerator
 import aiosqlite
 import os
 
