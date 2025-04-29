@@ -218,190 +218,189 @@ class DataSyncService:
 
 
     async def _sync_teams(self, leagues: List[Dict]):
-         """Fetch and store/update teams for the given leagues."""
-         logger.debug(f"Syncing teams for {len(leagues)} leagues...")
-         if not leagues: return
+        """Fetch and store/update teams for the given leagues."""
+        logger.debug(f"Syncing teams for {len(leagues)} leagues...")
+        if not leagues: return
 
-         leagues_by_sport: Dict[str, List[Dict]] = {}
-         for league in leagues:
-              sport = league.get('sport')
-              if not sport: continue # Skip leagues without sport info
-              if sport not in leagues_by_sport: leagues_by_sport[sport] = []
-              leagues_by_sport[sport].append(league)
+        leagues_by_sport: Dict[str, List[Dict]] = {}
+        for league in leagues:
+            sport = league.get('sport')
+            if not sport: continue # Skip leagues without sport info
+            if sport not in leagues_by_sport: leagues_by_sport[sport] = []
+            leagues_by_sport[sport].append(league)
 
-         all_processed_teams = []
-         for sport, sport_leagues in leagues_by_sport.items():
-              logger.info(f"Syncing teams for {len(sport_leagues)} leagues in sport: {sport}")
-              for league in sport_leagues:
-                   league_id = league.get('id')
-                   if not league_id: continue
-                   try:
-                        season = league.get('season') or datetime.now(timezone.utc).year
-                        response_data = await self.game_service._make_request(
-                             sport,
-                             "teams",
-                             params={'league': str(league_id), 'season': str(season)}
-                        )
-                        teams_api = response_data.get('response', [])
-                        if not teams_api: continue
+        all_processed_teams = []
+        for sport, sport_leagues in leagues_by_sport.items():
+            logger.info(f"Syncing teams for {len(sport_leagues)} leagues in sport: {sport}")
+            for league in sport_leagues:
+                league_id = league.get('id')
+                if not league_id: continue
+                try:
+                    season = league.get('season') or datetime.now(timezone.utc).year
+                    response_data = await self.game_service._make_request(
+                        sport,
+                        "teams",
+                        params={'league': str(league_id), 'season': str(season)}
+                    )
+                    teams_api = response_data.get('response', [])
+                    if not teams_api: continue
 
-                        processed_teams = []
-                        for team_entry in teams_api:
-                             team = team_entry.get('team', {})
-                             venue = team_entry.get('venue', {})
-                             if not team.get('id'): continue
+                    processed_teams = []
+                    for team_entry in teams_api:
+                        team = team_entry.get('team', {})
+                        venue = team_entry.get('venue', {})
+                        if not team.get('id'): continue
 
-                             normalized_team = {
-                                  'id': team['id'], 'name': team.get('name'), 'code': team.get('code'),
-                                  'country': team.get('country'), 'founded': team.get('founded'),
-                                  'national': team.get('national', False), 'logo': team.get('logo'),
-                                  'venue_name': venue.get('name'), 'venue_address': venue.get('address'),
-                                  'venue_city': venue.get('city'), 'venue_capacity': venue.get('capacity'),
-                                  'venue_surface': venue.get('surface'), 'venue_image': venue.get('image'),
-                                  'sport': sport
-                             }
-                             processed_teams.append(normalized_team)
+                        normalized_team = {
+                            'id': team['id'], 'name': team.get('name'), 'code': team.get('code'),
+                            'country': team.get('country'), 'founded': team.get('founded'),
+                            'national': team.get('national', False), 'logo': team.get('logo'),
+                            'venue_name': venue.get('name'), 'venue_address': venue.get('address'),
+                            'venue_city': venue.get('city'), 'venue_capacity': venue.get('capacity'),
+                            'venue_surface': venue.get('surface'), 'venue_image': venue.get('image'),
+                            'sport': sport
+                        }
+                        processed_teams.append(normalized_team)
 
-                         # Upsert teams into DB using transaction
-                         if processed_teams:
-                              async with self.db._pool.acquire() as conn:
-                                   async with conn.transaction():
-                                        for team in processed_teams:
-                                             await conn.execute(
-                                                  """
-                                                  INSERT INTO teams (id, name, code, country, founded, national, logo,
-                                                                    venue_name, venue_address, venue_city, venue_capacity,
-                                                                    venue_surface, venue_image, sport)
-                                                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                                                  ON CONFLICT (id) DO UPDATE SET
-                                                      name=EXCLUDED.name, code=EXCLUDED.code, country=EXCLUDED.country,
-                                                      founded=EXCLUDED.founded, national=EXCLUDED.national, logo=EXCLUDED.logo,
-                                                      venue_name=EXCLUDED.venue_name, venue_address=EXCLUDED.venue_address,
-                                                      venue_city=EXCLUDED.venue_city, venue_capacity=EXCLUDED.venue_capacity,
-                                                      venue_surface=EXCLUDED.venue_surface, venue_image=EXCLUDED.venue_image,
-                                                      sport=EXCLUDED.sport
-                                                  """,
-                                                  team['id'], team['name'], team['code'], team['country'], team['founded'],
-                                                  team['national'], team['logo'], team['venue_name'], team['venue_address'],
-                                                  team['venue_city'], team['venue_capacity'], team['venue_surface'],
-                                                  team['venue_image'], team['sport']
-                                             )
-                              all_processed_teams.extend(processed_teams)
-                              logger.debug(f"Upserted {len(processed_teams)} teams for league {league_id}")
-                         await asyncio.sleep(0.5) # Small delay between leagues
+                    # Upsert teams into DB using transaction
+                    if processed_teams:
+                        async with self.db._pool.acquire() as conn:
+                            async with conn.transaction():
+                                for team in processed_teams:
+                                    await conn.execute(
+                                        """
+                                        INSERT INTO teams (id, name, code, country, founded, national, logo,
+                                                          venue_name, venue_address, venue_city, venue_capacity,
+                                                          venue_surface, venue_image, sport)
+                                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                                        ON CONFLICT (id) DO UPDATE SET
+                                            name=EXCLUDED.name, code=EXCLUDED.code, country=EXCLUDED.country,
+                                            founded=EXCLUDED.founded, national=EXCLUDED.national, logo=EXCLUDED.logo,
+                                            venue_name=EXCLUDED.venue_name, venue_address=EXCLUDED.venue_address,
+                                            venue_city=EXCLUDED.venue_city, venue_capacity=EXCLUDED.venue_capacity,
+                                            venue_surface=EXCLUDED.venue_surface, venue_image=EXCLUDED.venue_image,
+                                            sport=EXCLUDED.sport
+                                        """,
+                                        team['id'], team['name'], team['code'], team['country'], team['founded'],
+                                        team['national'], team['logo'], team['venue_name'], team['venue_address'],
+                                        team['venue_city'], team['venue_capacity'], team['venue_surface'],
+                                        team['venue_image'], team['sport']
+                                    )
+                        all_processed_teams.extend(processed_teams)
+                        logger.debug(f"Upserted {len(processed_teams)} teams for league {league_id}")
+                    await asyncio.sleep(0.5) # Small delay between leagues
 
-                   except Exception as e:
-                        logger.exception(f"Error syncing teams for league {league_id} in sport {sport}: {e}")
-         logger.info(f"Finished syncing teams. Total teams processed: {len(all_processed_teams)}")
+                except Exception as e:
+                    logger.exception(f"Error syncing teams for league {league_id} in sport {sport}: {e}")
+        logger.info(f"Finished syncing teams. Total teams processed: {len(all_processed_teams)}")
 
 
     async def _sync_schedules(self, leagues: List[Dict], days_ahead: int):
-         """Fetch and store/update game schedules for the upcoming days."""
-         logger.debug(f"Syncing schedules for {len(leagues)} leagues, {days_ahead} days ahead...")
-         if not leagues: return
+        """Fetch and store/update game schedules for the upcoming days."""
+        logger.debug(f"Syncing schedules for {len(leagues)} leagues, {days_ahead} days ahead...")
+        if not leagues: return
 
-         start_date = datetime.now(timezone.utc)
-         end_date = start_date + timedelta(days=days_ahead)
+        start_date = datetime.now(timezone.utc)
+        end_date = start_date + timedelta(days=days_ahead)
 
-         leagues_by_sport: Dict[str, List[Dict]] = {}
-         for league in leagues:
-              sport = league.get('sport')
-              if not sport: continue
-              if sport not in leagues_by_sport: leagues_by_sport[sport] = []
-              leagues_by_sport[sport].append(league)
+        leagues_by_sport: Dict[str, List[Dict]] = {}
+        for league in leagues:
+            sport = league.get('sport')
+            if not sport: continue
+            if sport not in leagues_by_sport: leagues_by_sport[sport] = []
+            leagues_by_sport[sport].append(league)
 
-         all_processed_games = []
-         for sport, sport_leagues in leagues_by_sport.items():
-             logger.info(f"Syncing schedules for {len(sport_leagues)} leagues in sport: {sport}")
-             for league in sport_leagues:
-                  league_id = league.get('id')
-                  if not league_id: continue
-                  try:
-                      # Use game_service method which includes caching logic
-                      schedule_api = await self.game_service.get_league_schedule(
-                           sport, str(league_id), start_date, end_date
-                      )
-                      if not schedule_api: continue
+        all_processed_games = []
+        for sport, sport_leagues in leagues_by_sport.items():
+            logger.info(f"Syncing schedules for {len(sport_leagues)} leagues in sport: {sport}")
+            for league in sport_leagues:
+                league_id = league.get('id')
+                if not league_id: continue
+                try:
+                    # Use game_service method which includes caching logic
+                    schedule_api = await self.game_service.get_league_schedule(
+                        sport, str(league_id), start_date, end_date
+                    )
+                    if not schedule_api: continue
 
-                      processed_games = []
-                      for game_entry in schedule_api:
-                          fixture = game_entry.get('fixture', {})
-                          league_data = game_entry.get('league', {})
-                          teams_data = game_entry.get('teams', {})
-                          goals_data = game_entry.get('goals', {})
-                          score_full = game_entry.get('score', {})
+                    processed_games = []
+                    for game_entry in schedule_api:
+                        fixture = game_entry.get('fixture', {})
+                        league_data = game_entry.get('league', {})
+                        teams_data = game_entry.get('teams', {})
+                        goals_data = game_entry.get('goals', {})
+                        score_full = game_entry.get('score', {})
 
-                          if not fixture.get('id'): continue
+                        if not fixture.get('id'): continue
 
-                          game_timestamp_str = fixture.get('date')
-                          game_start_time = None
-                          if game_timestamp_str:
-                               try:
-                                    game_start_time = datetime.fromisoformat(game_timestamp_str.replace('Z', '+00:00')).astimezone(timezone.utc)
-                               except ValueError:
-                                    logger.warning(f"Could not parse timestamp {game_timestamp_str} for game {fixture['id']}")
+                        game_timestamp_str = fixture.get('date')
+                        game_start_time = None
+                        if game_timestamp_str:
+                            try:
+                                game_start_time = datetime.fromisoformat(game_timestamp_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+                            except ValueError:
+                                logger.warning(f"Could not parse timestamp {game_timestamp_str} for game {fixture['id']}")
 
-                          # Extract simple score for storage if needed, or store full JSON
-                          score_dict = {
-                              'home': goals_data.get('home'), 'away': goals_data.get('away'),
-                              'halftime_home': score_full.get('halftime', {}).get('home'),
-                              'halftime_away': score_full.get('halftime', {}).get('away'),
-                              'fulltime_home': score_full.get('fulltime', {}).get('home'),
-                              'fulltime_away': score_full.get('fulltime', {}).get('away'),
-                              # Add extratime, penalty if relevant for the sport
-                          }
-                          score_json = json.dumps(score_dict)
+                        # Extract simple score for storage if needed, or store full JSON
+                        score_dict = {
+                            'home': goals_data.get('home'), 'away': goals_data.get('away'),
+                            'halftime_home': score_full.get('halftime', {}).get('home'),
+                            'halftime_away': score_full.get('halftime', {}).get('away'),
+                            'fulltime_home': score_full.get('fulltime', {}).get('home'),
+                            'fulltime_away': score_full.get('fulltime', {}).get('away'),
+                            # Add extratime, penalty if relevant for the sport
+                        }
+                        score_json = json.dumps(score_dict)
 
+                        normalized_game = {
+                            'id': fixture['id'], 'league_id': league_data.get('id', league_id),
+                            'home_team_id': teams_data.get('home', {}).get('id'),
+                            'away_team_id': teams_data.get('away', {}).get('id'),
+                            'home_team_name': teams_data.get('home', {}).get('name'),
+                            'away_team_name': teams_data.get('away', {}).get('name'),
+                            'home_team_logo': teams_data.get('home', {}).get('logo'),
+                            'away_team_logo': teams_data.get('away', {}).get('logo'),
+                            'start_time': game_start_time,
+                            'status': fixture.get('status', {}).get('short', 'TBD'),
+                            'score': score_json, # Store as JSON string
+                            'venue': fixture.get('venue', {}).get('name'),
+                            'referee': fixture.get('referee'),
+                            'sport': sport,
+                            'updated_at': datetime.now(timezone.utc)
+                        }
+                        processed_games.append(normalized_game)
 
-                          normalized_game = {
-                              'id': fixture['id'], 'league_id': league_data.get('id', league_id),
-                              'home_team_id': teams_data.get('home', {}).get('id'),
-                              'away_team_id': teams_data.get('away', {}).get('id'),
-                              'home_team_name': teams_data.get('home', {}).get('name'),
-                              'away_team_name': teams_data.get('away', {}).get('name'),
-                              'home_team_logo': teams_data.get('home', {}).get('logo'),
-                              'away_team_logo': teams_data.get('away', {}).get('logo'),
-                              'start_time': game_start_time,
-                              'status': fixture.get('status', {}).get('short', 'TBD'),
-                              'score': score_json, # Store as JSON string
-                              'venue': fixture.get('venue', {}).get('name'),
-                              'referee': fixture.get('referee'),
-                              'sport': sport,
-                              'updated_at': datetime.now(timezone.utc)
-                          }
-                          processed_games.append(normalized_game)
+                    # Upsert games into DB using transaction
+                    if processed_games:
+                        async with self.db._pool.acquire() as conn:
+                            async with conn.transaction():
+                                for game in processed_games:
+                                    await conn.execute(
+                                        """
+                                        INSERT INTO games (id, league_id, home_team_id, away_team_id, home_team_name,
+                                                          away_team_name, home_team_logo, away_team_logo, start_time,
+                                                          status, score, venue, referee, sport, updated_at)
+                                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15) -- Cast to JSONB
+                                        ON CONFLICT (id) DO UPDATE SET
+                                            league_id=EXCLUDED.league_id, home_team_id=EXCLUDED.home_team_id,
+                                            away_team_id=EXCLUDED.away_team_id, home_team_name=EXCLUDED.home_team_name,
+                                            away_team_name=EXCLUDED.away_team_name, start_time=EXCLUDED.start_time,
+                                            status=EXCLUDED.status, score=EXCLUDED.score, venue=EXCLUDED.venue,
+                                            referee=EXCLUDED.referee, sport=EXCLUDED.sport, updated_at=EXCLUDED.updated_at,
+                                            home_team_logo=EXCLUDED.home_team_logo, away_team_logo=EXCLUDED.away_team_logo
+                                        """,
+                                        game['id'], game['league_id'], game['home_team_id'], game['away_team_id'],
+                                        game['home_team_name'], game['away_team_name'], game['home_team_logo'],
+                                        game['away_team_logo'], game['start_time'], game['status'], game['score'],
+                                        game['venue'], game['referee'], game['sport'], game['updated_at']
+                                    )
+                        all_processed_games.extend(processed_games)
+                        logger.debug(f"Upserted {len(processed_games)} schedule games for league {league_id}")
+                    await asyncio.sleep(0.5) # Small delay
 
-                      # Upsert games into DB using transaction
-                      if processed_games:
-                           async with self.db._pool.acquire() as conn:
-                                async with conn.transaction():
-                                    for game in processed_games:
-                                          await conn.execute(
-                                               """
-                                               INSERT INTO games (id, league_id, home_team_id, away_team_id, home_team_name,
-                                                                 away_team_name, home_team_logo, away_team_logo, start_time,
-                                                                 status, score, venue, referee, sport, updated_at)
-                                               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15) -- Cast to JSONB
-                                               ON CONFLICT (id) DO UPDATE SET
-                                                   league_id=EXCLUDED.league_id, home_team_id=EXCLUDED.home_team_id,
-                                                   away_team_id=EXCLUDED.away_team_id, home_team_name=EXCLUDED.home_team_name,
-                                                   away_team_name=EXCLUDED.away_team_name, start_time=EXCLUDED.start_time,
-                                                   status=EXCLUDED.status, score=EXCLUDED.score, venue=EXCLUDED.venue,
-                                                   referee=EXCLUDED.referee, sport=EXCLUDED.sport, updated_at=EXCLUDED.updated_at,
-                                                   home_team_logo=EXCLUDED.home_team_logo, away_team_logo=EXCLUDED.away_team_logo
-                                               """,
-                                               game['id'], game['league_id'], game['home_team_id'], game['away_team_id'],
-                                               game['home_team_name'], game['away_team_name'], game['home_team_logo'],
-                                               game['away_team_logo'], game['start_time'], game['status'], game['score'], # Pass JSON string
-                                               game['venue'], game['referee'], game['sport'], game['updated_at']
-                                          )
-                           all_processed_games.extend(processed_games)
-                           logger.debug(f"Upserted {len(processed_games)} schedule games for league {league_id}")
-                      await asyncio.sleep(0.5) # Small delay
-
-                 except Exception as e:
-                      logger.exception(f"Error syncing schedule for league {league_id} in sport {sport}: {e}")
-         logger.info(f"Finished syncing schedules. Total games processed: {len(all_processed_games)}")
+                except Exception as e:
+                    logger.exception(f"Error syncing schedule for league {league_id} in sport {sport}: {e}")
+        logger.info(f"Finished syncing schedules. Total games processed: {len(all_processed_games)}")
 
 
     async def _sync_standings(self, leagues: List[Dict]):
