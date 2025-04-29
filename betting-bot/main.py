@@ -87,6 +87,7 @@ class BettingBot(commands.Bot):
 def main():
     bot = BettingBot()
     bot.run(os.getenv('DISCORD_TOKEN'))
+    bot.run(os.getenv('TES_GUILD_ID'))
 
 if __name__ == '__main__':
     main() 
