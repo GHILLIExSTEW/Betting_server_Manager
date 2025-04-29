@@ -24,7 +24,7 @@ from config.settings import (
     LEAGUE_CACHE_TTL,
     TEAM_CACHE_TTL
 )
-from ..api.sports_api import SportsAPI
+from api.sports_api import SportsAPI
 import aiosqlite
 import sys
 import os
@@ -34,9 +34,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Add the parent directory to the Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(os.path.dirname(current_dir))
-sys.path.append(parent_dir)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 logger = logging.getLogger(__name__)
 
