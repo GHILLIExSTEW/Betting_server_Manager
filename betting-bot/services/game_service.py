@@ -6,10 +6,16 @@ from datetime import datetime, timedelta
 import json
 import aiohttp
 import asyncio
-from betting_bot.data.db_manager import DatabaseManager
-from betting_bot.data.cache_manager import CacheManager
-from betting_bot.utils.errors import GameServiceError, APIError, GameDataError, LeagueNotFoundError, ScheduleError
-from bot.config.settings import (
+from data.db_manager import DatabaseManager
+from data.cache_manager import CacheManager
+from utils.errors import (
+    GameServiceError,
+    APIError,
+    GameDataError,
+    LeagueNotFoundError,
+    ScheduleError
+)
+from config.settings import (
     API_KEY,
     API_BASE_URL,
     GAME_CACHE_TTL,
