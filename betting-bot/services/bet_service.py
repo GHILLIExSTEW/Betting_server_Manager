@@ -5,11 +5,11 @@ from datetime import datetime, timedelta
 import discord
 from discord import Embed, Color, Button, ButtonStyle
 from discord.ui import View, Select, Modal, TextInput
-from ..data.db_manager import DatabaseManager
-from ..data.cache_manager import CacheManager
-from ..utils.errors import BetServiceError, ValidationError
-from ..config.settings import MIN_UNITS, MAX_UNITS, DEFAULT_UNITS
-from ..utils.image_generator import BetSlipGenerator
+from betting_bot.data.db_manager import DatabaseManager
+from betting_bot.data.cache_manager import CacheManager
+from betting_bot.utils.errors import BetServiceError, ValidationError
+from betting_bot.config.settings import MIN_UNITS, MAX_UNITS, DEFAULT_UNITS
+from betting_bot.utils.image_generator import BetSlipGenerator
 import json
 import os
 import aiosqlite
