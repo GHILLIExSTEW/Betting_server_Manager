@@ -5,10 +5,10 @@ from datetime import datetime, timedelta
 import discord
 from discord import Embed, Color, Button, ButtonStyle
 from discord.ui import View, Select, Modal, TextInput
-from data.db_manager import DatabaseManager
-from data.cache_manager import CacheManager
-from bot.utils.errors import BetServiceError, ValidationError
-from bot.config.settings import MIN_UNITS, MAX_UNITS, DEFAULT_UNITS
+from ..data.db_manager import DatabaseManager
+from ..data.cache_manager import CacheManager
+from ..utils.errors import BetServiceError, ValidationError
+from ..config.settings import MIN_UNITS, MAX_UNITS, DEFAULT_UNITS
 from ..utils.image_generator import BetSlipGenerator
 import json
 import os
@@ -164,7 +164,7 @@ class BetService:
         self.bets: Dict[int, Dict] = {}  # guild_id -> bets
         self.pending_reactions: Dict[int, Dict] = {}  # message_id -> bet_info
         self.image_generator = BetSlipGenerator()
-        self.db_path = 'bot/data/betting.db'
+        self.db_path = 'data/betting.db'
 
     async def start(self) -> None:
         """Start the bet service."""
