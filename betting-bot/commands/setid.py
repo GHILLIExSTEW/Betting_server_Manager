@@ -8,6 +8,7 @@ from io import BytesIO
 from PIL import Image
 import uuid
 from typing import Optional
+from services.admin_service import AdminService
 from utils.errors import AdminServiceError
 
 logger = logging.getLogger(__name__)
@@ -167,84 +168,63 @@ class ImageURLModal(discord.ui.Modal, title="Image URL"):
             )
 
 class SetID(discord.app_commands.Group):
-    """Group of commands for setting user IDs."""
+    """Group of commands for setting IDs."""
     def __init__(self, bot):
-        super().__init__(name="setid", description="Set user ID commands")
+        super().__init__(name="setid", description="Set ID commands")
         self.bot = bot
+        self.admin_service = AdminService(bot)
 
-    @app_commands.command(name="user", description="Set your user ID")
-    async def user(self, interaction: discord.Interaction, user_id: str):
-        """Set your user ID."""
-        try:
-            # Validate user ID format
-            if not user_id.isdigit():
-                await interaction.response.send_message(
-                    "❌ Invalid user ID format. Please provide a numeric ID.",
-                    ephemeral=True
-                )
-                return
-
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                await db.execute(
-                    """
-                    INSERT OR REPLACE INTO user_ids 
-                    (guild_id, user_id, discord_id) 
-                    VALUES (?, ?, ?)
-                    """,
-                    (interaction.guild_id, user_id, interaction.user.id)
-                )
-                await db.commit()
-
-            await interaction.response.send_message(
-                f"✅ Successfully set your user ID to {user_id}",
-                ephemeral=True
-            )
-        except Exception as e:
-            logger.error(f"Error setting user ID: {str(e)}")
-            await interaction.response.send_message(
-                "❌ Failed to set user ID. Check logs for details.",
-                ephemeral=True
-            )
-
-    @app_commands.command(name="admin", description="Set a user's ID (Admin only)")
+    @app_commands.command(name="admin", description="Set admin ID")
     @app_commands.checks.has_permissions(administrator=True)
-    async def admin(self, interaction: discord.Interaction, user: discord.Member, user_id: str):
-        """Set a user's ID (Admin only)."""
+    async def admin(self, interaction: discord.Interaction, user_id: str):
+        """Set admin ID for the server."""
         try:
-            # Validate user ID format
-            if not user_id.isdigit():
-                await interaction.response.send_message(
-                    "❌ Invalid user ID format. Please provide a numeric ID.",
-                    ephemeral=True
-                )
-                return
-
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                await db.execute(
-                    """
-                    INSERT OR REPLACE INTO user_ids 
-                    (guild_id, user_id, discord_id) 
-                    VALUES (?, ?, ?)
-                    """,
-                    (interaction.guild_id, user_id, user.id)
-                )
-                await db.commit()
-
+            await self.admin_service.set_admin_id(interaction.guild_id, user_id)
             await interaction.response.send_message(
-                f"✅ Successfully set {user.mention}'s user ID to {user_id}",
+                f"✅ Admin ID set to {user_id}",
                 ephemeral=True
             )
-        except Exception as e:
-            logger.error(f"Error setting user ID: {str(e)}")
+        except AdminServiceError as e:
             await interaction.response.send_message(
-                "❌ Failed to set user ID. Check logs for details.",
+                f"❌ Error setting admin ID: {str(e)}",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="user", description="Set user ID")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def user(self, interaction: discord.Interaction, user_id: str):
+        """Set user ID for the server."""
+        try:
+            await self.admin_service.set_user_id(interaction.guild_id, user_id)
+            await interaction.response.send_message(
+                f"✅ User ID set to {user_id}",
+                ephemeral=True
+            )
+        except AdminServiceError as e:
+            await interaction.response.send_message(
+                f"❌ Error setting user ID: {str(e)}",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="remove", description="Remove user ID")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def remove(self, interaction: discord.Interaction, user_id: str):
+        """Remove user ID from the server."""
+        try:
+            await self.admin_service.remove_user_id(interaction.guild_id, user_id)
+            await interaction.response.send_message(
+                f"✅ User ID {user_id} removed",
+                ephemeral=True
+            )
+        except AdminServiceError as e:
+            await interaction.response.send_message(
+                f"❌ Error removing user ID: {str(e)}",
                 ephemeral=True
             )
 
 async def setup(bot):
-    """Add the setid commands to the bot."""
-    setid_group = SetID(bot)
-    bot.tree.add_command(setid_group)
+    """Setup function for the SetID commands."""
+    await bot.add_cog(SetID(bot))
 
     # Handle image uploads
     @bot.tree.listen('on_message')

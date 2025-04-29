@@ -7,7 +7,6 @@ import logging
 from .betting import Betting
 from .stats import Stats
 from .admin import Admin
-from .capper_management import CapperManagement
 from .setid import SetID
 
 logger = logging.getLogger(__name__)
@@ -21,7 +20,6 @@ class CommandManager:
             Betting,
             Stats,
             Admin,
-            CapperManagement,
             SetID
         ]
     
