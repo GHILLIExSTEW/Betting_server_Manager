@@ -1,8 +1,10 @@
+# betting-bot/services/game_service.py
+
 import discord
 from discord import app_commands
 from typing import Dict, List, Optional, Tuple, Any
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone # Ensure timezone is imported
 import json
 import aiohttp
 import asyncio
@@ -10,501 +12,482 @@ import sys
 import os
 from dotenv import load_dotenv
 
-# Add the parent directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# --- Relative Imports (assuming services/ is a sibling to config/, data/, utils/, api/) ---
+# Adjust these paths if your project structure is different
+try:
+    from ..config.api_settings import (
+        API_ENABLED,
+        API_HOSTS,
+        API_KEY,
+        API_TIMEOUT,
+        API_RETRY_ATTEMPTS,
+        API_RETRY_DELAY
+    )
+    from ..utils.errors import (
+        GameServiceError,
+        APIError,
+        GameDataError,
+        LeagueNotFoundError,
+        ScheduleError
+    )
+    from ..api.sports_api import SportsAPI
+    # Import CacheManager if you instantiate it here, otherwise not needed if passed in
+    from ..data.cache_manager import CacheManager
+    # Import DatabaseManager only for type hinting if needed, don't instantiate
+    # from ..data.db_manager import DatabaseManager
+except ImportError:
+    # Fallback for different execution contexts or structures
+    from config.api_settings import API_ENABLED, API_HOSTS, API_KEY, API_TIMEOUT, API_RETRY_ATTEMPTS, API_RETRY_DELAY
+    from utils.errors import GameServiceError, APIError, GameDataError, LeagueNotFoundError, ScheduleError
+    from api.sports_api import SportsAPI
+    from data.cache_manager import CacheManager
+    # from data.db_manager import DatabaseManager
 
-# Now import the config settings
-from config.api_settings import (
-    API_ENABLED,
-    API_HOSTS,
-    API_KEY,
-    API_TIMEOUT,
-    API_RETRY_ATTEMPTS,
-    API_RETRY_DELAY
-)
-
-# Import other modules after path setup
-from data.db_manager import DatabaseManager
-from data.cache_manager import CacheManager
-from utils.errors import (
-    GameServiceError,
-    APIError,
-    GameDataError,
-    LeagueNotFoundError,
-    ScheduleError
-)
-from api.sports_api import SportsAPI
-import aiosqlite
-
-# Load environment variables
-load_dotenv()
+# load_dotenv() # Usually loaded once in main entry point (main.py)
 
 logger = logging.getLogger(__name__)
 
 class GameService:
-    def __init__(self, bot):
+    # Corrected __init__ signature
+    def __init__(self, bot, db_manager): # Accept bot and the shared db_manager instance
         self.bot = bot
+        self.db = db_manager # Use the passed-in db_manager instance
+        self.cache = CacheManager() # Instantiate CacheManager here (or pass it in if managed centrally)
         self.session: Optional[aiohttp.ClientSession] = None
         self.update_task: Optional[asyncio.Task] = None
-        self.active_games: Dict[str, Dict] = {}
-        self.games: Dict[int, Dict] = {}  # guild_id -> games
+        self.active_games: Dict[str, Dict] = {} # In-memory state (consider if needed long-term)
+        self.games: Dict[int, Dict] = {}  # In-memory state (consider if needed long-term)
         self.api = SportsAPI() if API_ENABLED else None
-        self.db = DatabaseManager()
-        self.cache = CacheManager()
         self._poll_task: Optional[asyncio.Task] = None
         self.running = False
-        self.db_path = 'bot/data/betting.db'
-        self.api_hosts = API_HOSTS
+        # self.db_path = '...' # Not needed if db_manager is passed
+        self.api_hosts = API_HOSTS # Use imported config
+
 
     async def start(self):
-        """Initialize the game service"""
+        """Initialize the game service's async components."""
         try:
             self.session = aiohttp.ClientSession()
-            await self._setup_commands()
-            if API_ENABLED:
-                await self.api.start()
+            logger.info("GameService aiohttp session created.")
+
+            # Ensure cache connects if it has an async connect method
+            if hasattr(self.cache, 'connect'):
+                 await self.cache.connect()
+                 logger.info("GameService CacheManager connected.")
+
+            if API_ENABLED and self.api:
+                if hasattr(self.api, 'start'):
+                    await self.api.start()
+                    logger.info("GameService SportsAPI started.")
+                # Fetch initial data immediately after starting API
                 await self._fetch_initial_games()
+                # Start background tasks
                 self.update_task = asyncio.create_task(self._update_games())
                 self._poll_task = asyncio.create_task(self._poll_games())
+                logger.info("GameService background tasks created.")
+            else:
+                 logger.info("API is disabled, skipping initial fetch and polling.")
+
             self.running = True
-            logger.info("Game service started successfully")
+            logger.info("Game service started successfully.")
         except Exception as e:
-            logger.error(f"Failed to start game service: {e}")
+            logger.exception(f"Failed to start game service: {e}")
+            # Cleanup partially started resources
+            if self.session: await self.session.close()
+            if API_ENABLED and self.api and hasattr(self.api, 'close'): await self.api.close()
+            if hasattr(self.cache, 'close'): await self.cache.close()
             raise GameServiceError("Failed to start game service")
 
     async def stop(self):
-        """Clean up resources"""
+        """Clean up resources used by the game service."""
+        self.running = False # Signal loops to stop
+        logger.info("Stopping GameService...")
+        tasks_to_wait_for = []
         if self.update_task:
             self.update_task.cancel()
+            tasks_to_wait_for.append(self.update_task)
+            logger.info("Game service update task cancellation requested.")
+        if self._poll_task:
+             self._poll_task.cancel()
+             tasks_to_wait_for.append(self._poll_task)
+             logger.info("Game service poll task cancellation requested.")
+
+        # Wait for tasks to finish cancelling
+        if tasks_to_wait_for:
             try:
-                await self.update_task
+                await asyncio.wait(tasks_to_wait_for, timeout=5.0) # Wait max 5 seconds
+            except asyncio.TimeoutError:
+                 logger.warning("GameService background tasks did not finish cancelling within timeout.")
             except asyncio.CancelledError:
-                pass
+                 pass # Expected
+            except Exception as e:
+                 logger.error(f"Error awaiting task cancellation: {e}")
+
+
         if self.session:
             await self.session.close()
-        if self.db:
-            await self.db.close()
+            logger.info("Game service aiohttp session closed.")
+        # DB pool closing is handled centrally by the main bot class
+
         self.active_games.clear()
         self.games.clear()
-        if API_ENABLED:
-            await self.api.close()
-        self.running = False
+        if API_ENABLED and self.api:
+             if hasattr(self.api, 'close'):
+                 await self.api.close()
+                 logger.info("GameService SportsAPI closed.")
+        if hasattr(self.cache, 'close'):
+             await self.cache.close()
+             logger.info("GameService CacheManager closed.")
         logger.info("Game service stopped successfully")
 
     async def _setup_commands(self):
-        """Setup slash commands for the game service."""
-        # Commands have been moved to individual command files
+        """(Deprecated here - Command setup should be centralized)."""
+        # Commands have been moved to individual command files or a central manager
         pass
 
     async def _update_games(self):
-        """Periodically update game statuses."""
+        """Periodically update game statuses based on scheduled times."""
+        await self.bot.wait_until_ready() # Ensure bot cache is ready
         while self.running:
             try:
-                # Get all active guilds
-                guilds = await self.db.fetch(
-                    "SELECT guild_id FROM guild_settings WHERE is_active = true"
+                logger.debug("Running periodic game status update...")
+                now_utc = datetime.now(timezone.utc)
+
+                # Find games scheduled to start
+                starting_games = await self.db.fetch_all(
+                    """
+                    SELECT id, guild_id, league_id, home_team_name, away_team_name FROM games
+                    WHERE status = $1 AND start_time <= $2
+                    """, 'scheduled', now_utc
                 )
 
-                for guild in guilds:
-                    guild_id = guild['guild_id']
-
-                    # Get scheduled games that should start
-                    starting_games = await self.db.fetch(
-                        """
-                        SELECT * FROM games
-                        WHERE guild_id = $1
-                        AND status = 'scheduled'
-                        AND start_time <= $2
-                        """,
-                        guild_id, datetime.utcnow()
+                for game in starting_games:
+                    logger.info(f"Game starting: ID {game['id']} in guild {game['guild_id']}")
+                    await self.update_game_status(
+                        game['guild_id'], game['id'], 'live'
                     )
-
-                    for game in starting_games:
-                        # Update game status to live
-                        await self.update_game_status(
-                            guild_id,
-                            game['game_id'],
-                            'live'
-                        )
-
-                        # Add game start event
-                        await self.add_game_event(
-                            guild_id,
-                            game['game_id'],
-                            'game_start',
-                            'Game has started'
-                        )
-
-                    # Get live games that should end
-                    ending_games = await self.db.fetch(
-                        """
-                        SELECT * FROM games
-                        WHERE guild_id = $1
-                        AND status = 'live'
-                        AND end_time <= $2
-                        """,
-                        guild_id, datetime.utcnow()
+                    await self.add_game_event(
+                        game['guild_id'], game['id'], 'game_start', 'Game has started'
                     )
+                    # TODO: Notify relevant channels/users
 
-                    for game in ending_games:
-                        # Update game status to completed
-                        await self.update_game_status(
-                            guild_id,
-                            game['game_id'],
-                            'completed',
-                            game.get('score', '0-0')
-                        )
+                # Find games scheduled to end (use estimated duration or API end time if available)
+                # This requires an 'end_time' column or estimated duration logic
+                # Placeholder logic assuming an 'end_time' column exists:
+                ending_games = await self.db.fetch_all(
+                     """
+                     SELECT id, guild_id, score FROM games
+                     WHERE status = $1 AND end_time IS NOT NULL AND end_time <= $2
+                     """, 'live', now_utc
+                 )
 
-                        # Add game end event
-                        await self.add_game_event(
-                            guild_id,
-                            game['game_id'],
-                            'game_end',
-                            'Game has ended'
-                        )
+                for game in ending_games:
+                     logger.info(f"Game ending: ID {game['id']} in guild {game['guild_id']}")
+                     # Fetch final score if needed from API before marking completed
+                     final_score_str = json.dumps(game.get('score', {})) # Get score from DB or fetch final
+                     await self.update_game_status(
+                         game['guild_id'],
+                         game['id'],
+                         'completed',
+                         final_score_str # Pass final score as JSON string
+                     )
+                     await self.add_game_event(
+                         game['guild_id'],
+                         game['id'],
+                         'game_end',
+                         f"Game has ended. Final Score: {final_score_str}"
+                     )
+                     # TODO: Trigger bet resolution for this game
 
-                await asyncio.sleep(60)  # Check every minute
+                await asyncio.sleep(60) # Check every minute
             except asyncio.CancelledError:
+                logger.info("Game status update loop cancelled.")
                 break
             except Exception as e:
-                logger.error(f"Error in game update loop: {str(e)}")
-                await asyncio.sleep(60)
-
-    async def _view_games(self, interaction: discord.Interaction, league: Optional[str] = None):
-        """View active games"""
-        try:
-            if league:
-                games = await self.db.fetch_all(
-                    """
-                    SELECT * FROM games
-                    WHERE league = ? AND status = 'active'
-                    ORDER BY start_time
-                    """,
-                    league
-                )
-            else:
-                games = await self.db.fetch_all(
-                    """
-                    SELECT * FROM games
-                    WHERE status = 'active'
-                    ORDER BY start_time
-                    """
-                )
-
-            if not games:
-                await interaction.response.send_message(
-                    "No active games found.",
-                    ephemeral=True
-                )
-                return
-
-            embed = discord.Embed(
-                title="Active Games",
-                color=discord.Color.blue()
-            )
-
-            for game in games:
-                score = json.loads(game['score'])
-                embed.add_field(
-                    name=f"{game['home_team']} vs {game['away_team']}",
-                    value=(
-                        f"League: {game['league']}\n"
-                        f"Status: {game['status']}\n"
-                        f"Score: {score.get('home', 0)} - {score.get('away', 0)}\n"
-                        f"Start Time: {game['start_time']}"
-                    ),
-                    inline=False
-                )
-
-            await interaction.response.send_message(embed=embed)
-        except Exception as e:
-            logger.error(f"Error viewing games: {e}")
-            raise GameServiceError("Failed to view games")
-
-    async def _view_odds(self, interaction: discord.Interaction, game_id: str):
-        """View odds for a specific game"""
-        try:
-            # Try to get from cache first
-            cached_game = await self.cache.get_json(f"game:{game_id}")
-            if cached_game:
-                game = cached_game
-            else:
-                # Get from database
-                game = await self.db.fetch_one(
-                    """
-                    SELECT * FROM games
-                    WHERE game_id = %s
-                    """,
-                    (game_id,)
-                )
-                if not game:
-                    raise GameServiceError(f"Game {game_id} not found")
-
-            odds = json.loads(game['odds'])
-            embed = discord.Embed(
-                title=f"Odds for {game['home_team']} vs {game['away_team']}",
-                color=discord.Color.green()
-            )
-
-            for market, values in odds.items():
-                embed.add_field(
-                    name=market,
-                    value=(
-                        f"Home: {values.get('home', 'N/A')}\n"
-                        f"Away: {values.get('away', 'N/A')}\n"
-                        f"Draw: {values.get('draw', 'N/A')}"
-                    ),
-                    inline=True
-                )
-
-            await interaction.response.send_message(embed=embed)
-        except Exception as e:
-            logger.error(f"Error viewing odds: {e}")
-            raise GameServiceError("Failed to view odds")
-
-    async def get_game(self, game_id: int) -> Optional[Dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute('SELECT * FROM games WHERE id = ?', (game_id,)) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    return dict(row)
-                return None
-
-    async def create_game(self, name: str, description: str) -> int:
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute(
-                'INSERT INTO games (name, description, created_at) VALUES (?, ?, datetime("now"))',
-                (name, description)
-            )
-            await db.commit()
-            return cursor.lastrowid
+                logger.exception(f"Error in game status update loop: {e}")
+                await asyncio.sleep(120) # Wait longer after an error
 
     async def _fetch_initial_games(self) -> None:
-        """Fetch initial game data for all supported leagues."""
-        if not API_ENABLED:
-            logger.info("API is disabled, skipping initial game fetch")
+        """Fetch initial game data for supported leagues on startup."""
+        if not API_ENABLED or not self.api:
+            logger.info("API disabled or not initialized, skipping initial game fetch.")
             return
-
+        logger.info("Fetching initial game data...")
         try:
-            # Get all supported leagues from settings
-            leagues = await self.db.fetch_all(
-                "SELECT league_code FROM supported_leagues WHERE is_active = true"
+            # Get configured/supported leagues from DB (assuming 'leagues' table exists)
+            supported_leagues = await self.db.fetch_all(
+                "SELECT id, sport FROM leagues" # Fetch sport too if needed by API call
             )
-            
-            for league in leagues:
-                league_code = league['league_code']
-                games = await self.api.get_live_fixtures(league_code)
-                if games:
-                    self.games[league_code] = {game['id']: game for game in games}
-                    # Cache the games
-                    await self.cache.set(
-                        f"games:{league_code}",
-                        self.games[league_code],
-                        ttl=3600  # Cache for 1 hour
-                    )
+            if not supported_leagues:
+                 logger.warning("No supported leagues found in the database for initial fetch.")
+                 return
+
+            today = datetime.now(timezone.utc)
+            # Fetch games for today and maybe tomorrow? Adjust range as needed.
+            fetch_tasks = []
+            for league in supported_leagues:
+                 league_id = league['id']
+                 sport = league['sport'] # Assumes sport column exists
+                 # Schedule fetching task
+                 fetch_tasks.append(self.get_games(sport, str(league_id), today))
+
+            # Run fetches concurrently
+            results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+            # Process results (and store in DB/cache)
+            for idx, result in enumerate(results):
+                league_id = supported_leagues[idx]['id']
+                if isinstance(result, Exception):
+                     logger.error(f"Error fetching initial games for league {league_id}: {result}")
+                elif isinstance(result, list):
+                     logger.info(f"Fetched {len(result)} initial games for league {league_id}.")
+                     # TODO: Store these fetched games in the database (games table)
+                     # You'll need to adapt the game structure from the API response
+                     # to match your 'games' table schema.
+                else:
+                     logger.warning(f"Unexpected result type fetching initial games for league {league_id}: {type(result)}")
+
         except Exception as e:
-            logger.error(f"Error fetching initial games: {str(e)}")
-            raise GameServiceError(f"Failed to fetch initial games: {str(e)}")
+            logger.exception(f"Error fetching initial games overall: {e}")
+            # Don't raise here, allow service to continue running
 
     async def _poll_games(self) -> None:
-        """Periodically poll for game updates."""
-        if not API_ENABLED:
-            logger.info("API is disabled, skipping game polling")
+        """Periodically poll external API for live game updates."""
+        if not API_ENABLED or not self.api:
+            logger.info("API disabled or not initialized, skipping game polling.")
             return
 
-        while True:
+        await self.bot.wait_until_ready()
+        while self.running:
             try:
-                # Get all active leagues
-                leagues = await self.db.fetch_all(
-                    "SELECT league_code FROM supported_leagues WHERE is_active = true"
+                logger.debug("Polling for live game updates...")
+                # Get leagues with currently live games from our DB
+                live_game_leagues = await self.db.fetch_all(
+                    """
+                    SELECT DISTINCT league_id, sport
+                    FROM games
+                    WHERE status = $1
+                    """, 'live'
                 )
-                
-                for league in leagues:
-                    league_code = league['league_code']
-                    # Get live fixtures
-                    games = await self.api.get_live_fixtures(league_code)
-                    if games:
-                        # Update games dictionary
-                        self.games[league_code] = {game['id']: game for game in games}
-                        # Update cache
-                        await self.cache.set(
-                            f"games:{league_code}",
-                            self.games[league_code],
-                            ttl=3600
-                        )
-                        # Notify about game updates
-                        await self._notify_game_updates(league_code, games)
-                
-                # Wait before next poll
-                await asyncio.sleep(60)  # Poll every minute
+                if not live_game_leagues:
+                     logger.debug("No leagues with live games found in DB to poll.")
+                     await asyncio.sleep(120) # Poll less frequently if nothing is live
+                     continue
+
+                poll_tasks = []
+                for league in live_game_leagues:
+                    league_id = league['league_id']
+                    sport = league['sport']
+                    # Schedule polling task for this league's live fixtures
+                    # Note: API might need specific 'live' parameter, adjust SportsAPI call
+                    poll_tasks.append(self.api.get_live_fixtures(sport, str(league_id))) # Assuming get_live_fixtures exists
+
+                # Run polls concurrently
+                results = await asyncio.gather(*poll_tasks, return_exceptions=True)
+
+                # Process results
+                for idx, result in enumerate(results):
+                     league_id = live_game_leagues[idx]['league_id']
+                     if isinstance(result, Exception):
+                          logger.error(f"Error polling live games for league {league_id}: {result}")
+                     elif isinstance(result, list):
+                          logger.debug(f"Polled {len(result)} live games for league {league_id}.")
+                          # Compare with DB/cache and update if scores/status changed
+                          await self._process_live_game_updates(league_id, result)
+                     else:
+                          logger.warning(f"Unexpected result type polling live games for league {league_id}: {type(result)}")
+
+                await asyncio.sleep(60) # Poll every 60 seconds (adjust as needed)
             except asyncio.CancelledError:
+                logger.info("Game polling loop cancelled.")
                 break
             except Exception as e:
-                logger.error(f"Error in game polling: {str(e)}")
-                await asyncio.sleep(60)  # Wait before retrying
+                logger.exception(f"Error in game polling loop: {e}")
+                await asyncio.sleep(120) # Wait longer after error
 
-    async def _notify_game_updates(self, league_code: str, games: List[Dict]) -> None:
-        """Notify about game updates to relevant channels."""
-        try:
-            # Get channels subscribed to this league
-            channels = await self.db.fetch(
-                """
-                SELECT channel_id FROM league_subscriptions
-                WHERE league_code = $1 AND is_active = true
-                """,
-                league_code
-            )
-            
-            for channel in channels:
-                channel_id = channel['channel_id']
-                discord_channel = self.bot.get_channel(channel_id)
-                if discord_channel:
-                    for game in games:
-                        # Create and send game update embed
-                        embed = self._create_game_embed(game)
-                        await discord_channel.send(embed=embed)
-        except Exception as e:
-            logger.error(f"Error notifying game updates: {str(e)}")
+    async def _process_live_game_updates(self, league_id: int, api_games: List[Dict]):
+        """Compare API results with stored data and update DB/notify."""
+        # This function needs detailed logic:
+        # 1. Fetch current live games for this league_id from your DB.
+        # 2. Create a map of game_id -> db_game_data.
+        # 3. Iterate through api_games:
+        #    a. If game exists in your DB map:
+        #       i. Compare score, status, time from API with DB data.
+        #       ii. If changed, call self.update_game_status() and self.add_game_event().
+        #       iii. Maybe update cache.
+        #       iv. Potentially trigger notifications via self._notify_game_updates().
+        #    b. If game *doesn't* exist in DB map (e.g., started between polls):
+        #       i. Add the new game to your DB.
+        #       ii. Trigger notifications.
+        # 4. Potentially check for games in DB map that are *not* in api_games (maybe they finished?).
+        logger.debug(f"Processing {len(api_games)} live updates for league {league_id}...")
+        # Placeholder for actual comparison logic
+        pass
+
+
+    async def _notify_game_updates(self, game_data: Dict) -> None:
+        """Notify relevant channels about a specific game update."""
+        # This function needs detailed logic:
+        # 1. Find relevant guilds/channels subscribed to this game's league or teams.
+        # 2. Format an embed using _create_game_embed().
+        # 3. Send the embed to the appropriate channels.
+        logger.debug(f"Notifying about update for game {game_data.get('id')}")
+        # Placeholder
+        pass
 
     def _create_game_embed(self, game: Dict) -> discord.Embed:
         """Create a Discord embed for a game update."""
+        # Adapt based on your actual 'games' table structure / API response stored
+        home_team = game.get('home_team_name', 'Home')
+        away_team = game.get('away_team_name', 'Away')
+        league = game.get('league_name', game.get('league_id', 'N/A')) # Need league name ideally
+        status = game.get('status', 'N/A')
+        score_data = game.get('score', {})
+        if isinstance(score_data, str): # Handle if score is stored as JSON string
+            try:
+                score_data = json.loads(score_data)
+            except json.JSONDecodeError:
+                score_data = {}
+        home_score = score_data.get('home', score_data.get('homescore', '?'))
+        away_score = score_data.get('away', score_data.get('awayscore', '?'))
+        game_time = game.get('time_elapsed', game.get('current_period', '')) # Example: get time/period if available
+
         embed = discord.Embed(
-            title=f"{game['home_team']} vs {game['away_team']}",
-            description=f"League: {game['league']}",
-            color=discord.Color.blue()
+            title=f"{home_team} vs {away_team}",
+            description=f"League: {league}",
+            color=discord.Color.blue() if status.lower() == 'live' else discord.Color.greyple()
         )
-        
-        # Add game details
-        embed.add_field(name="Score", value=f"{game['home_score']} - {game['away_score']}", inline=True)
-        embed.add_field(name="Time", value=game['time'], inline=True)
-        embed.add_field(name="Status", value=game['status'], inline=True)
-        
-        # Add timestamp
-        embed.timestamp = datetime.utcnow()
-        
+        embed.add_field(name="Score", value=f"{home_score} - {away_score}", inline=True)
+        if game_time:
+             embed.add_field(name="Time/Period", value=str(game_time), inline=True)
+        embed.add_field(name="Status", value=status.title(), inline=True)
+        embed.timestamp = datetime.now(timezone.utc)
         return embed
 
-    async def get_league_games(self, guild_id: int, league: str, status: Optional[str] = None, limit: int = 20) -> List[Dict]:
-        """Get games for a specific league."""
+    # --- Methods for Commands ---
+
+    async def get_game(self, game_id: int) -> Optional[Dict[str, Any]]:
+        """Get a specific game by its database ID."""
         try:
+             # Use the shared db manager instance
+            return await self.db.fetch_one('SELECT * FROM games WHERE id = $1', game_id)
+        except Exception as e:
+             logger.exception(f"Error getting game {game_id}: {e}")
+             return None
+
+    async def get_league_games(self, guild_id: int, league: str, status: Optional[str] = None, limit: int = 20) -> List[Dict]:
+        """Get games for a specific league, optionally filtered by status."""
+        try:
+            # This query might need adjustment - assumes 'league' is a name/code in the games table
+            # Ideally, query by league_id
             query = """
-                SELECT * FROM games
-                WHERE guild_id = $1 AND league = $2
+                SELECT g.*, l.name as league_name -- Join to get league name
+                FROM games g
+                LEFT JOIN leagues l ON g.league_id = l.id
+                WHERE g.guild_id = $1 AND l.name = $2 -- Assuming league name search
             """
-            params = [guild_id, league]
+            params: List[Any] = [guild_id, league]
+            param_index = 3 # Start parameter index at 3
 
             if status:
-                query += " AND status = $3"
+                query += f" AND g.status = ${param_index}"
                 params.append(status)
+                param_index += 1
 
-            query += " ORDER BY start_time DESC LIMIT $4"
+            query += f" ORDER BY g.start_time DESC NULLS LAST LIMIT ${param_index}"
             params.append(limit)
 
-            return await self.db.fetch(query, *params)
+            return await self.db.fetch_all(query, *params)
         except Exception as e:
-            logger.error(f"Error getting league games: {str(e)}")
+            logger.exception(f"Error getting league games for league '{league}': {e}")
             return []
 
     async def get_upcoming_games(self, guild_id: int, hours: int = 24, limit: int = 20) -> List[Dict]:
-        """Get upcoming games within the specified hours."""
+        """Get upcoming scheduled games within the specified hours."""
         try:
-            return await self.db.fetch(
+            now_utc = datetime.now(timezone.utc)
+            future_utc = now_utc + timedelta(hours=hours)
+            return await self.db.fetch_all(
                 """
                 SELECT * FROM games
                 WHERE guild_id = $1
-                AND start_time BETWEEN $2 AND $3
-                AND status = 'scheduled'
+                AND status = $2
+                AND start_time BETWEEN $3 AND $4
                 ORDER BY start_time ASC
-                LIMIT $4
+                LIMIT $5
                 """,
                 guild_id,
-                datetime.utcnow(),
-                datetime.utcnow() + timedelta(hours=hours),
+                'scheduled',
+                now_utc,
+                future_utc,
                 limit
             )
         except Exception as e:
-            logger.error(f"Error getting upcoming games: {str(e)}")
+            logger.exception(f"Error getting upcoming games: {e}")
             return []
 
     async def get_live_games(self, guild_id: int, limit: int = 20) -> List[Dict]:
         """Get currently live games."""
         try:
-            return await self.db.fetch(
+            return await self.db.fetch_all(
                 """
                 SELECT * FROM games
                 WHERE guild_id = $1
-                AND status = 'live'
+                AND status = $2
                 ORDER BY start_time DESC
-                LIMIT $2
+                LIMIT $3
                 """,
-                guild_id, limit
+                guild_id, 'live', limit
             )
         except Exception as e:
-            logger.error(f"Error getting live games: {str(e)}")
+            logger.exception(f"Error getting live games: {e}")
             return []
 
-    async def update_game_status(self, guild_id: int, game_id: int, status: str, score: Optional[str] = None) -> Dict:
-        """Update the status of a game."""
+    async def update_game_status(self, guild_id: int, game_id: int, status: str, score: Optional[str] = None) -> Optional[Dict]:
+        """Update the status and score of a game."""
         try:
             # Update game in database
             await self.db.execute(
                 """
                 UPDATE games
-                SET status = $1, score = $2, updated_at = $3
-                WHERE game_id = $4 AND guild_id = $5
+                SET status = $1, score = $2::jsonb, updated_at = $3 -- Cast score string to JSONB
+                WHERE id = $4 AND guild_id = $5
                 """,
-                status, score, datetime.utcnow(), game_id, guild_id
+                status, score, datetime.now(timezone.utc), game_id, guild_id
             )
-
-            # Get updated game
-            game = await self.db.fetch_one(
-                """
-                SELECT * FROM games WHERE game_id = $1
-                """,
-                game_id
-            )
-
-            # Update cache
-            if guild_id in self.games and game_id in self.games[guild_id]:
-                self.games[guild_id][game_id] = game
-
-            return game
+            # Fetch the updated game data to return (optional)
+            updated_game = await self.get_game(game_id)
+            logger.info(f"Updated status for game {game_id} to {status}")
+            # TODO: Update cache if implementing game caching
+            return updated_game
         except Exception as e:
-            logger.error(f"Error updating game status: {str(e)}")
+            logger.exception(f"Error updating game status for game {game_id}: {e}")
             raise GameServiceError(f"Failed to update game status: {str(e)}")
 
-    async def add_game_event(self, guild_id: int, game_id: int, event_type: str, details: str) -> Dict:
-        """Add an event to a game."""
+    async def add_game_event(self, guild_id: int, game_id: int, event_type: str, details: str) -> Optional[Dict]:
+        """Add an event to a game's record."""
         try:
             # Add event to database
-            event_id = await self.db.execute(
+            event = await self.db.fetch_one( # Use fetch_one with RETURNING
                 """
                 INSERT INTO game_events (
                     guild_id, game_id, event_type, details, created_at
                 )
                 VALUES ($1, $2, $3, $4, $5)
-                RETURNING event_id
+                RETURNING * -- Return the newly inserted row
                 """,
-                guild_id, game_id, event_type, details, datetime.utcnow()
+                guild_id, game_id, event_type, details, datetime.now(timezone.utc)
             )
-
-            # Get event details
-            event = await self.db.fetch_one(
-                """
-                SELECT * FROM game_events WHERE event_id = $1
-                """,
-                event_id
-            )
-
+            logger.info(f"Added event '{event_type}' for game {game_id}")
             return event
         except Exception as e:
-            logger.error(f"Error adding game event: {str(e)}")
+            logger.exception(f"Error adding game event for game {game_id}: {e}")
             raise GameServiceError(f"Failed to add game event: {str(e)}")
 
     async def get_game_events(self, guild_id: int, game_id: int, limit: int = 10) -> List[Dict]:
-        """Get events for a specific game."""
+        """Get the most recent events for a specific game."""
         try:
-            return await self.db.fetch(
+            return await self.db.fetch_all(
                 """
                 SELECT * FROM game_events
                 WHERE guild_id = $1 AND game_id = $2
@@ -514,127 +497,187 @@ class GameService:
                 guild_id, game_id, limit
             )
         except Exception as e:
-            logger.error(f"Error getting game events: {str(e)}")
+            logger.exception(f"Error getting game events for game {game_id}: {e}")
             return []
 
-    async def _make_request(self, sport: str, endpoint: str, params: Dict = None) -> Dict:
-        """Make an API request with retry logic."""
-        if not self.session:
-            raise GameServiceError("Game service not started")
+    # --- API Interaction Helper ---
+    async def _make_request(self, sport: str, endpoint: str, params: Optional[Dict] = None) -> Dict:
+        """Make an API request via SportsAPI with retry logic."""
+        if not API_ENABLED or not self.api:
+             raise GameServiceError("API support is not enabled or initialized.")
+        if not self.session or self.session.closed:
+            logger.warning("aiohttp session closed or not initialized. Recreating.")
+            self.session = aiohttp.ClientSession()
 
-        if sport not in self.api_hosts or not self.api_hosts[sport]:
-            raise GameServiceError(f"Unsupported sport or missing API host: {sport}")
-
-        base_url = self.api_hosts[sport]
-        headers = {
-            "x-rapidapi-key": API_KEY,
-            "x-rapidapi-host": base_url.split('//')[1]
-        }
-
-        for attempt in range(API_RETRY_ATTEMPTS):
-            try:
-                async with self.session.get(
-                    f"{base_url}/{endpoint}",
-                    params=params,
-                    headers=headers,
-                    timeout=API_TIMEOUT
-                ) as response:
-                    if response.status == 200:
-                        return await response.json()
-                    elif response.status == 404:
-                        raise LeagueNotFoundError(f"League not found: {endpoint}")
-                    else:
-                        raise APIError(f"API request failed with status {response.status}")
-            except asyncio.TimeoutError:
-                if attempt == API_RETRY_ATTEMPTS - 1:
-                    raise APIError("API request timed out")
-                await asyncio.sleep(API_RETRY_DELAY)
-            except Exception as e:
-                if attempt == API_RETRY_ATTEMPTS - 1:
-                    raise APIError(f"API request failed: {str(e)}")
-                await asyncio.sleep(API_RETRY_DELAY)
-
-    async def get_games(self, sport: str, league: str, date: Optional[datetime] = None) -> List[Dict]:
-        """Get games for a specific sport, league and date."""
+        # Use the SportsAPI instance for the actual call if it encapsulates logic
+        # Or implement retry logic here directly. Assuming SportsAPI handles it for now.
         try:
+            # This assumes SportsAPI has methods corresponding to endpoints
+            # e.g., self.api.get_fixtures(sport=sport, endpoint=endpoint, params=params)
+            # Or a generic method:
+            # return await self.api.make_request(sport=sport, endpoint=endpoint, params=params)
+
+            # --- Direct Implementation Example ---
+            if sport not in self.api_hosts or not self.api_hosts[sport]:
+                raise GameServiceError(f"Unsupported sport or missing API host: {sport}")
+
+            base_url = self.api_hosts[sport]
+            # Ensure API_KEY is loaded
+            if not API_KEY:
+                 raise ConfigurationError("API_KEY is not configured.")
+
+            headers = {
+                "x-rapidapi-key": API_KEY,
+                "x-rapidapi-host": base_url.split('//')[1] # Extract host from URL
+            }
+            full_url = f"{base_url}/{endpoint}" # Ensure endpoint doesn't have leading /
+
+            for attempt in range(API_RETRY_ATTEMPTS):
+                try:
+                    logger.debug(f"API Request (Attempt {attempt+1}/{API_RETRY_ATTEMPTS}): GET {full_url} PARAMS: {params}")
+                    async with self.session.get(
+                        full_url,
+                        params=params,
+                        headers=headers,
+                        timeout=API_TIMEOUT
+                    ) as response:
+                        logger.debug(f"API Response Status: {response.status}")
+                        if response.status == 200:
+                            data = await response.json()
+                            if not isinstance(data, dict) or 'response' not in data:
+                                 logger.error(f"Invalid API response format: {data}")
+                                 raise GameDataError("Invalid response format from API")
+                            # Rate limit headers (example, adjust to actual API)
+                            limit_remaining = response.headers.get('X-RateLimit-Remaining')
+                            if limit_remaining: logger.debug(f"API Rate Limit Remaining: {limit_remaining}")
+                            return data # Return the full response dict
+                        elif response.status == 404:
+                            logger.warning(f"API endpoint not found (404): {full_url} with params {params}")
+                            raise LeagueNotFoundError(f"API resource not found: {endpoint}")
+                        elif response.status == 429:
+                            logger.warning(f"API rate limit hit (429). Retrying in {API_RETRY_DELAY}s...")
+                            await asyncio.sleep(API_RETRY_DELAY * (attempt + 1)) # Exponential backoff basic
+                            continue # Go to next attempt
+                        else:
+                            error_text = await response.text()
+                            logger.error(f"API request failed: Status {response.status}, URL: {full_url}, Response: {error_text[:200]}")
+                            raise APIError(f"API request failed with status {response.status}")
+                except asyncio.TimeoutError:
+                    logger.warning(f"API request timed out: {full_url}. Attempt {attempt+1}/{API_RETRY_ATTEMPTS}")
+                    if attempt == API_RETRY_ATTEMPTS - 1:
+                        raise APIError("API request timed out after multiple retries")
+                    await asyncio.sleep(API_RETRY_DELAY * (attempt + 1)) # Exponential backoff basic
+                except aiohttp.ClientError as ce:
+                     logger.error(f"API client error: {ce}. Attempt {attempt+1}/{API_RETRY_ATTEMPTS}")
+                     if attempt == API_RETRY_ATTEMPTS - 1:
+                          raise APIError(f"API request failed after multiple retries: {ce}")
+                     await asyncio.sleep(API_RETRY_DELAY * (attempt + 1))
+
+            # If loop finishes without returning/raising specifically, something went wrong
+            raise APIError("API request failed after all retry attempts.")
+            # --- End Direct Implementation Example ---
+
+        except Exception as e:
+            logger.exception(f"Error making API request to {endpoint}: {e}")
+            raise # Re-raise exceptions like GameServiceError, APIError, etc.
+
+
+    # --- Specific API Call Methods ---
+    # These might call _make_request or go via self.api
+
+    async def get_games(self, sport: str, league_id: str, date: Optional[datetime] = None) -> List[Dict]:
+        """Get games for a specific sport, league ID and date."""
+        try:
+            # Standardize date format if provided
+            date_str = date.strftime("%Y-%m-%d") if date else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            cache_key = f"games:{sport}:{league_id}:{date_str}"
+
             # Check cache first
-            cache_key = f"games_{sport}_{league}_{date.strftime('%Y-%m-%d') if date else 'today'}"
-            cached_games = self.cache.get(cache_key)
-            if cached_games:
+            cached_games = await self.cache.get(cache_key) # Use await if cache methods are async
+            if cached_games and isinstance(cached_games, list):
+                logger.debug(f"Cache hit for {cache_key}")
                 return cached_games
 
+            logger.debug(f"Cache miss for {cache_key}. Fetching from API.")
             # Make API request
-            params = {"league": league}
-            if date:
-                params["date"] = date.strftime("%Y-%m-%d")
-            
-            response = await self._make_request(sport, "fixtures", params)
-            
-            # Validate response
-            if not isinstance(response, dict) or 'response' not in response:
-                raise GameDataError("Invalid response format from API")
+            params = {"league": league_id, "date": date_str, "season": str(datetime.now(timezone.utc).year)}
+            response_data = await self._make_request(sport, "fixtures", params)
+
+            games_list = response_data.get('response', [])
 
             # Cache the results
-            self.cache.set(cache_key, response['response'], ttl=3600)
-            
-            return response['response']
+            # Consider appropriate TTL from config/settings.py: from config.settings import GAME_CACHE_TTL
+            await self.cache.set(cache_key, games_list, ttl=300) # Cache for 5 mins example
+
+            return games_list
 
         except Exception as e:
-            logger.error(f"Error getting games: {str(e)}")
-            raise
+            logger.exception(f"Error getting games for {sport}/{league_id}: {e}")
+            # Don't raise here? Or raise specific error? Depends on desired behavior.
+            return [] # Return empty list on error
 
-    async def get_game_details(self, sport: str, game_id: str) -> Dict:
-        """Get detailed information about a specific game."""
+
+    async def get_game_details(self, sport: str, game_id: str) -> Optional[Dict]:
+        """Get detailed information about a specific game by API ID."""
+        # Note: game_id here is likely the API's ID, not your DB's primary key 'id'
         try:
-            # Check cache first
-            cache_key = f"game_{sport}_{game_id}"
-            cached_game = self.cache.get(cache_key)
-            if cached_game:
+            cache_key = f"game_detail:{sport}:{game_id}"
+            cached_game = await self.cache.get(cache_key)
+            if cached_game and isinstance(cached_game, dict):
+                logger.debug(f"Cache hit for {cache_key}")
                 return cached_game
 
-            # Make API request
-            response = await self._make_request(sport, f"fixtures/{game_id}")
-            
-            # Validate response
-            if not isinstance(response, dict) or 'response' not in response:
-                raise GameDataError("Invalid response format from API")
+            logger.debug(f"Cache miss for {cache_key}. Fetching from API.")
+            # Endpoint might be fixtures?id=xxx or similar depending on API
+            params = {"id": game_id}
+            response_data = await self._make_request(sport, "fixtures", params) # Assuming 'fixtures' endpoint takes 'id'
 
-            # Cache the results
-            self.cache.set(cache_key, response['response'], ttl=3600)
-            
-            return response['response']
+            game_details_list = response_data.get('response', [])
+            if not game_details_list:
+                 logger.warning(f"No game details found in API response for {sport} game ID {game_id}")
+                 return None
+
+            game_detail = game_details_list[0] # Assuming ID lookup returns a list with one item
+
+            # Cache the results (short TTL for potentially live games?)
+            await self.cache.set(cache_key, game_detail, ttl=120) # Cache for 2 mins example
+
+            return game_detail
 
         except Exception as e:
-            logger.error(f"Error getting game details: {str(e)}")
-            raise
+            logger.exception(f"Error getting game details for {sport} game ID {game_id}: {e}")
+            return None
 
-    async def get_league_schedule(self, sport: str, league: str, start_date: datetime, end_date: datetime) -> List[Dict]:
+
+    async def get_league_schedule(self, sport: str, league_id: str, start_date: datetime, end_date: datetime) -> List[Dict]:
         """Get the schedule for a league between two dates."""
         try:
-            # Check cache first
-            cache_key = f"schedule_{sport}_{league}_{start_date.strftime('%Y-%m-%d')}_{end_date.strftime('%Y-%m-%d')}"
-            cached_schedule = self.cache.get(cache_key)
-            if cached_schedule:
+            start_str = start_date.strftime("%Y-%m-%d")
+            end_str = end_date.strftime("%Y-%m-%d")
+            cache_key = f"schedule:{sport}:{league_id}:{start_str}_{end_str}"
+
+            cached_schedule = await self.cache.get(cache_key)
+            if cached_schedule and isinstance(cached_schedule, list):
+                logger.debug(f"Cache hit for {cache_key}")
                 return cached_schedule
 
+            logger.debug(f"Cache miss for {cache_key}. Fetching from API.")
             # Make API request
             params = {
-                "league": league,
-                "from": start_date.strftime("%Y-%m-%d"),
-                "to": end_date.strftime("%Y-%m-%d")
+                "league": league_id,
+                "season": str(start_date.year), # Season might be needed
+                "from": start_str,
+                "to": end_str
             }
-            
-            response = await self._make_request(sport, "fixtures", params)
-            
-            # Validate response
-            if not isinstance(response, dict) or 'response' not in response:
-                raise ScheduleError("Invalid response format from API")
+            response_data = await self._make_request(sport, "fixtures", params) # Assuming 'fixtures' handles date ranges
 
-            # Cache the results
-            self.cache.set(cache_key, response['response'], ttl=3600)
-            
-            return response['response']
+            schedule_list = response_data.get('response', [])
+
+            # Cache the results (longer TTL for schedules?)
+            await self.cache.set(cache_key, schedule_list, ttl=3600) # Cache for 1 hour example
+
+            return schedule_list
 
         except Exception as e:
-            logger.error(f"Error getting league schedule: {str(e)}")
-            raise 
+            logger.exception(f"Error getting league schedule for {sport}/{league_id}: {e}")
+            return [] # Return empty list on error
