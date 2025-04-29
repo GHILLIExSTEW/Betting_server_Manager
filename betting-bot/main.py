@@ -4,6 +4,15 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+import logging
+from betting_bot.services.admin_service import AdminService
+from betting_bot.services.bet_service import BetService
+from betting_bot.services.game_service import GameService
+from betting_bot.services.analytics_service import AnalyticsService
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Add the current directory to the Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -14,7 +23,7 @@ load_dotenv()
 # Get Discord token from environment
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 if not DISCORD_TOKEN:
-    print("Error: DISCORD_TOKEN not found in environment variables")
+    logger.error("DISCORD_TOKEN not found in environment variables")
     sys.exit(1)
 
 # Initialize bot with intents
@@ -30,28 +39,39 @@ class BettingBot(commands.Bot):
             intents=intents,
             help_command=None
         )
+        # Initialize services
+        self.admin_service = AdminService()
+        self.bet_service = BetService()
+        self.game_service = GameService()
+        self.analytics_service = AnalyticsService()
+        
         self.initial_extensions = [
-            'betting-bot.commands.admin',
-            'betting-bot.commands.betting',
-            'betting-bot.commands.games',
-            'betting-bot.commands.voice',
-            'betting-bot.commands.stats',
-            'betting-bot.commands.setid'
+            'betting_bot.commands.admin',
+            'betting_bot.commands.betting',
+            'betting_bot.commands.stats',
+            'betting_bot.commands.setid'
         ]
 
     async def setup_hook(self):
         """Load extensions and perform setup tasks"""
         for ext in self.initial_extensions:
             try:
-                await self.load_extension(ext)
-                print(f"Loaded extension {ext}")
+                if ext == 'betting_bot.commands.admin':
+                    await self.load_extension(ext)
+                elif ext == 'betting_bot.commands.betting':
+                    await self.load_extension(ext)
+                elif ext == 'betting_bot.commands.stats':
+                    await self.load_extension(ext)
+                elif ext == 'betting_bot.commands.setid':
+                    await self.load_extension(ext)
+                logger.info(f"Loaded extension {ext}")
             except Exception as e:
-                print(f"Failed to load extension {ext}: {e}")
+                logger.error(f"Failed to load extension {ext}: {e}")
 
     async def on_ready(self):
         """Called when the bot is ready"""
-        print(f'Logged in as {self.user} (ID: {self.user.id})')
-        print('------')
+        logger.info(f'Logged in as {self.user} (ID: {self.user.id})')
+        logger.info('------')
 
 async def main():
     """Main function to run the bot"""
