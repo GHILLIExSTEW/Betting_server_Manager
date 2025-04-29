@@ -75,11 +75,9 @@ async def load_logos(
 
 async def setup(tree: app_commands.CommandTree):
     """Setup function for the load_logos command."""
-    tree.add_command(
-        app_commands.Command(
-            name="load_logos",
-            description="Load team and league logos (Admin only)",
-            callback=load_logos,
-            guild=discord.Object(id=TEST_GUILD_ID)
-        )
-    ) 
+    command = app_commands.Command(
+        name="load_logos",
+        description="Load team and league logos (Admin only)",
+        callback=load_logos
+    )
+    tree.add_command(command, guild=discord.Object(id=TEST_GUILD_ID)) 
