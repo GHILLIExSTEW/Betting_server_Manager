@@ -15,14 +15,13 @@ from utils.errors import (
     LeagueNotFoundError,
     ScheduleError
 )
-from config.settings import (
+from config.api_settings import (
+    API_ENABLED,
+    API_HOSTS,
+    API_KEY,
     API_TIMEOUT,
     API_RETRY_ATTEMPTS,
-    API_RETRY_DELAY,
-    CACHE_TTL,
-    GAME_CACHE_TTL,
-    LEAGUE_CACHE_TTL,
-    TEAM_CACHE_TTL
+    API_RETRY_DELAY
 )
 from api.sports_api import SportsAPI
 import aiosqlite
@@ -45,45 +44,24 @@ class GameService:
         self.update_task: Optional[asyncio.Task] = None
         self.active_games: Dict[str, Dict] = {}
         self.games: Dict[int, Dict] = {}  # guild_id -> games
-        self.api = SportsAPI()
+        self.api = SportsAPI() if API_ENABLED else None
         self.db = DatabaseManager()
         self.cache = CacheManager()
         self._poll_task: Optional[asyncio.Task] = None
         self.running = False
         self.db_path = 'bot/data/betting.db'
-        self.api_key = os.getenv('API_KEY')
-        
-        # Load API hosts from environment variables
-        self.api_hosts = {
-            'football': os.getenv('FOOTBALL_API_HOST'),
-            'basketball': os.getenv('BASKETBALL_API_HOST'),
-            'hockey': os.getenv('HOCKEY_API_HOST'),
-            'baseball': os.getenv('BASEBALL_API_HOST'),
-            'american-football': os.getenv('AMERICAN_FOOTBALL_API_HOST'),
-            'rugby': os.getenv('RUGBY_API_HOST'),
-            'handball': os.getenv('HANDBALL_API_HOST'),
-            'volleyball': os.getenv('VOLLEYBALL_API_HOST'),
-            'cricket': os.getenv('CRICKET_API_HOST'),
-            'formula1': os.getenv('FORMULA1_API_HOST'),
-            'mma': os.getenv('MMA_API_HOST'),
-            'tennis': os.getenv('TENNIS_API_HOST'),
-            'golf': os.getenv('GOLF_API_HOST'),
-            'cycling': os.getenv('CYCLING_API_HOST'),
-            'soccer': os.getenv('SOCCER_API_HOST')
-        }
-
-        if not self.api_key:
-            logger.warning("API_KEY not found in environment variables")
+        self.api_hosts = API_HOSTS
 
     async def start(self):
         """Initialize the game service"""
         try:
             self.session = aiohttp.ClientSession()
             await self._setup_commands()
-            await self.api.start()
-            await self._fetch_initial_games()
-            self.update_task = asyncio.create_task(self._update_games())
-            self._poll_task = asyncio.create_task(self._poll_games())
+            if API_ENABLED:
+                await self.api.start()
+                await self._fetch_initial_games()
+                self.update_task = asyncio.create_task(self._update_games())
+                self._poll_task = asyncio.create_task(self._poll_games())
             self.running = True
             logger.info("Game service started successfully")
         except Exception as e:
@@ -100,9 +78,12 @@ class GameService:
                 pass
         if self.session:
             await self.session.close()
+        if self.db:
+            await self.db.close()
         self.active_games.clear()
         self.games.clear()
-        await self.api.close()
+        if API_ENABLED:
+            await self.api.close()
         self.running = False
         logger.info("Game service stopped successfully")
 
@@ -323,6 +304,10 @@ class GameService:
 
     async def _fetch_initial_games(self) -> None:
         """Fetch initial game data for all supported leagues."""
+        if not API_ENABLED:
+            logger.info("API is disabled, skipping initial game fetch")
+            return
+
         try:
             # Get all supported leagues from settings
             leagues = await self.db.fetch_all(
@@ -346,10 +331,14 @@ class GameService:
 
     async def _poll_games(self) -> None:
         """Periodically poll for game updates."""
+        if not API_ENABLED:
+            logger.info("API is disabled, skipping game polling")
+            return
+
         while True:
             try:
                 # Get all active leagues
-                leagues = await self.db.fetch(
+                leagues = await self.db.fetch_all(
                     "SELECT league_code FROM supported_leagues WHERE is_active = true"
                 )
                 
@@ -561,7 +550,7 @@ class GameService:
 
         base_url = self.api_hosts[sport]
         headers = {
-            "x-rapidapi-key": self.api_key,
+            "x-rapidapi-key": API_KEY,
             "x-rapidapi-host": base_url.split('//')[1]
         }
 
@@ -609,7 +598,7 @@ class GameService:
                 raise GameDataError("Invalid response format from API")
 
             # Cache the results
-            self.cache.set(cache_key, response['response'], ttl=GAME_CACHE_TTL)
+            self.cache.set(cache_key, response['response'], ttl=3600)
             
             return response['response']
 
@@ -634,7 +623,7 @@ class GameService:
                 raise GameDataError("Invalid response format from API")
 
             # Cache the results
-            self.cache.set(cache_key, response['response'], ttl=GAME_CACHE_TTL)
+            self.cache.set(cache_key, response['response'], ttl=3600)
             
             return response['response']
 
@@ -665,7 +654,7 @@ class GameService:
                 raise ScheduleError("Invalid response format from API")
 
             # Cache the results
-            self.cache.set(cache_key, response['response'], ttl=LEAGUE_CACHE_TTL)
+            self.cache.set(cache_key, response['response'], ttl=3600)
             
             return response['response']
 
