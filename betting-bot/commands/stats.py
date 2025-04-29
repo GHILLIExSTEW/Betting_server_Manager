@@ -9,6 +9,7 @@ from discord.ui import View, Select
 import logging
 import os
 from io import BytesIO # Needed for sending PIL image
+from typing import Optional # Add Optional type import
 
 # Use relative imports
 try:
