@@ -6,15 +6,15 @@ import discord
 import logging
 # import aiosqlite # Remove direct usage if using db_manager
 from typing import Dict, Any, Optional, Tuple
-# Assuming DatabaseManager type hint comes from the correct path
-# If db_manager is passed, don't need to import it here unless for type hinting
-# from data.db_manager import DatabaseManager # Example path
 
 # Use relative imports assuming services/ is sibling to utils/
 try:
     from ..utils.errors import AdminServiceError
+    # Import DatabaseManager only for type hinting if needed
+    # from ..data.db_manager import DatabaseManager
 except ImportError:
     from utils.errors import AdminServiceError # Fallback
+    # from data.db_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
