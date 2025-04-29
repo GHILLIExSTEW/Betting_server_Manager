@@ -36,12 +36,13 @@ class CommandManager:
             from .load_logos import setup as setup_load_logos
             from .remove_user import setup as setup_remove_user
             
-            await setup_admin(self.bot)
-            await setup_setid(self.bot)
-            await setup_betting(self.bot)
-            await setup_stats(self.bot)
+            # Register global commands
+            await setup_admin(self.bot.tree)
+            await setup_setid(self.bot.tree)
+            await setup_betting(self.bot.tree)
+            await setup_stats(self.bot.tree)
             await setup_load_logos(self.bot.tree)
-            await setup_remove_user(self.bot)
+            await setup_remove_user(self.bot.tree)
             
             # Sync commands with Discord
             await self.bot.tree.sync()
