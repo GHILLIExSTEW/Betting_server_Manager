@@ -5,6 +5,9 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+# Add the current directory to the Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 # Load environment variables
 load_dotenv()
 
@@ -28,11 +31,12 @@ class BettingBot(commands.Bot):
             help_command=None
         )
         self.initial_extensions = [
-            'bot.cogs.admin',
-            'bot.cogs.betting',
-            'bot.cogs.games',
-            'bot.cogs.voice',
-            'bot.cogs.stats'
+            'bot.commands.admin',
+            'bot.commands.betting',
+            'bot.commands.games',
+            'bot.commands.voice',
+            'bot.commands.stats',
+            'bot.commands.setid'
         ]
 
     async def setup_hook(self):
