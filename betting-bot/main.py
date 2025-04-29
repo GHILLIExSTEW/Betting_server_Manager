@@ -22,7 +22,6 @@ from services.analytics_service import AnalyticsService # Corrected import
 from services.user_service import UserService # Corrected import
 from services.voice_service import VoiceService # Corrected import
 from services.data_sync_service import DataSyncService # Corrected import
-from commands.admin import setup as setup_admin_cmds # Corrected import
 
 # --- Logging Setup ---
 logging.basicConfig(
