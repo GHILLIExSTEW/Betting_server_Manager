@@ -3,10 +3,10 @@ import logging
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from services.game_service import GameService
-from services.bet_service import BetService
-from services.admin_service import AdminService
-from services.analytics_service import AnalyticsService
+from betting_bot.services.game_service import GameService
+from betting_bot.services.bet_service import BetService
+from betting_bot.services.admin_service import AdminService
+from betting_bot.services.analytics_service import AnalyticsService
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -35,9 +35,9 @@ class BettingBot(commands.Bot):
         
         # Load extensions
         self.initial_extensions = [
-            'commands.betting',
-            'commands.admin',
-            'commands.stats'
+            'betting_bot.commands.betting',
+            'betting_bot.commands.admin',
+            'betting_bot.commands.stats'
         ]
 
     async def setup_hook(self):
