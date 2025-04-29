@@ -5,13 +5,18 @@ from datetime import datetime, timedelta
 import discord
 from discord import Embed, Color, Button, ButtonStyle
 from discord.ui import View, Select, Modal, TextInput
+import sys
+import os
+
+# Add the parent directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from data.db_manager import DatabaseManager
 from data.cache_manager import CacheManager
 from utils.errors import BetServiceError, ValidationError
 from config.settings import MIN_UNITS, MAX_UNITS, DEFAULT_UNITS
 from utils.image_generator import BetSlipGenerator
 import json
-import os
 import aiosqlite
 
 logger = logging.getLogger(__name__)
