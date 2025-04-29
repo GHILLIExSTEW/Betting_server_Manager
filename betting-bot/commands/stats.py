@@ -159,25 +159,29 @@ class StatsView(discord.ui.View):
             logger.error(f"Error populating cappers: {str(e)}")
             raise
 
+async def stats(interaction: discord.Interaction):
+    """View betting statistics."""
+    try:
+        view = StatsView(interaction.client, interaction.guild_id)
+        await view.populate_cappers(interaction)
+        await interaction.response.send_message(
+            "Select a capper to view their statistics:",
+            view=view,
+            ephemeral=True
+        )
+    except Exception as e:
+        logger.error(f"Error in stats command: {str(e)}")
+        await interaction.response.send_message(
+            "❌ An error occurred while processing the stats command.",
+            ephemeral=True
+        )
+
 async def setup(bot):
     """Add the stats command to the bot."""
-    @bot.tree.command(
-        name="stats",
-        description="View betting statistics"
-    )
-    async def stats(interaction: discord.Interaction):
-        """View betting statistics."""
-        try:
-            view = StatsView(interaction.client, interaction.guild_id)
-            await view.populate_cappers(interaction)
-            await interaction.response.send_message(
-                "Select a capper to view their statistics:",
-                view=view,
-                ephemeral=True
-            )
-        except Exception as e:
-            logger.error(f"Error in stats command: {str(e)}")
-            await interaction.response.send_message(
-                "❌ An error occurred while processing the stats command.",
-                ephemeral=True
-            ) 
+    bot.tree.add_command(
+        app_commands.Command(
+            name="stats",
+            description="View betting statistics",
+            callback=stats
+        )
+    ) 

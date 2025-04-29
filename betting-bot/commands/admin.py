@@ -207,29 +207,33 @@ class AdminView(View):
         
         await interaction.response.send_message(message, ephemeral=True)
 
-async def setup(bot):
+@app_commands.checks.has_permissions(administrator=True)
+async def admin(interaction: discord.Interaction):
+    """Set up server settings and sync commands."""
+    try:
+        view = ServerSettingsView(interaction.guild)
+        await interaction.response.send_message(
+            "Let's set up your server! Follow the steps below:",
+            view=view,
+            ephemeral=True
+        )
+        await view.start_selection(interaction)
+    except Exception as e:
+        logger.error(f"Error in admin command: {e}")
+        await interaction.response.send_message(
+            "❌ An error occurred. Please try again.",
+            ephemeral=True
+        )
+
+async def setup(tree: app_commands.CommandTree):
     """Add the admin command to the bot."""
-    @bot.tree.command(
-        name="admin",
-        description="Set up server settings and sync commands"
+    tree.add_command(
+        app_commands.Command(
+            name="admin",
+            description="Set up server settings and sync commands",
+            callback=admin
+        )
     )
-    @app_commands.checks.has_permissions(administrator=True)
-    async def admin(interaction: discord.Interaction):
-        """Set up server settings and sync commands."""
-        try:
-            view = ServerSettingsView(interaction.guild)
-            await interaction.response.send_message(
-                "Let's set up your server! Follow the steps below:",
-                view=view,
-                ephemeral=True
-            )
-            await view.start_selection(interaction)
-        except Exception as e:
-            logger.error(f"Error in admin command: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred. Please try again.",
-                ephemeral=True
-            )
 
 async def check_subscription_status(guild_id: int) -> bool:
     """Check if a guild has a paid subscription."""

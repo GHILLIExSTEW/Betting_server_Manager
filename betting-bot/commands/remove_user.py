@@ -105,14 +105,18 @@ class RemoveUserView(discord.ui.View):
                 ephemeral=True
             )
 
+@app_commands.checks.has_permissions(administrator=True)
+async def remove_user(interaction: discord.Interaction):
+    """Remove a user from the server."""
+    view = RemoveUserView(interaction.guild_id)
+    await view.populate_users(interaction)
+
 async def setup(bot):
     """Add the remove_user command to the bot."""
-    @bot.tree.command(
-        name="remove_user",
-        description="Remove a user from the server"
-    )
-    @app_commands.checks.has_permissions(administrator=True)
-    async def remove_user(interaction: discord.Interaction):
-        """Remove a user from the server."""
-        view = RemoveUserView(interaction.guild_id)
-        await view.populate_users(interaction) 
+    bot.tree.add_command(
+        app_commands.Command(
+            name="remove_user",
+            description="Remove a user from the server",
+            callback=remove_user
+        )
+    ) 

@@ -33,21 +33,27 @@ ENV/
 
 # Logs
 *.log
-logs/
+
+# Local development settings
+.env
+.env.local
+.env.*.local
 
 # Database
 *.db
-*.sqlite
 *.sqlite3
 
-# Environment variables
-.env
-.env.local
+# Assets and media
+betting-bot/assets/logos/*
+!betting-bot/assets/logos/.gitkeep
+betting-bot/assets/leagues/*
+!betting-bot/assets/leagues/.gitkeep
 
-# OS
+# OS generated files
 .DS_Store
-Thumbs.db
-
-# Project specific
-betting-bot/data/
-betting-bot/assets/logos/ 
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db 

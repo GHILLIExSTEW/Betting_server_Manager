@@ -166,40 +166,44 @@ class ImageURLModal(discord.ui.Modal, title="Image URL"):
                 ephemeral=True
             )
 
+@app_commands.checks.has_permissions(administrator=True)
+async def setid(interaction: discord.Interaction, user: discord.Member):
+    """Set up a user as a capper."""
+    try:
+        # Check if user is already a capper
+        async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+            async with db.execute(
+                """
+                SELECT user_id 
+                FROM cappers 
+                WHERE guild_id = ? AND user_id = ?
+                """,
+                (interaction.guild_id, user.id)
+            ) as cursor:
+                if await cursor.fetchone():
+                    await interaction.response.send_message(
+                        "❌ This user is already set up as a capper.",
+                        ephemeral=True
+                    )
+                    return
+
+        # Show profile setup modal
+        modal = CapperModal(interaction.guild_id, user.id)
+        await interaction.response.send_modal(modal)
+
+    except Exception as e:
+        logger.error(f"Error in setid command: {str(e)}")
+        await interaction.response.send_message(
+            "❌ An error occurred while setting up the user.",
+            ephemeral=True
+        )
+
 async def setup(bot):
     """Add the setid command to the bot."""
-    @bot.tree.command(
-        name="setid",
-        description="Set up a user as a capper"
+    bot.tree.add_command(
+        app_commands.Command(
+            name="setid",
+            description="Set up a user as a capper",
+            callback=setid
+        )
     )
-    @app_commands.checks.has_permissions(administrator=True)
-    async def setid(interaction: discord.Interaction, user: discord.Member):
-        """Set up a user as a capper."""
-        try:
-            # Check if user is already a capper
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                async with db.execute(
-                    """
-                    SELECT user_id 
-                    FROM cappers 
-                    WHERE guild_id = ? AND user_id = ?
-                    """,
-                    (interaction.guild_id, user.id)
-                ) as cursor:
-                    if await cursor.fetchone():
-                        await interaction.response.send_message(
-                            "❌ This user is already set up as a capper.",
-                            ephemeral=True
-                        )
-                        return
-
-            # Show profile setup modal
-            modal = CapperModal(interaction.guild_id, user.id)
-            await interaction.response.send_modal(modal)
-
-        except Exception as e:
-            logger.error(f"Error in setid command: {str(e)}")
-            await interaction.response.send_message(
-                "❌ An error occurred while setting up the user.",
-                ephemeral=True
-            )
