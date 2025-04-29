@@ -12,11 +12,6 @@ LOG_LEVEL = 'INFO'
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 LOG_FILE = 'logs/betting_bot.log'
 
-# Discord Configuration
-DISCORD_TOKEN = ''  # Set this in environment variables
-COMMAND_PREFIX = '!'
-DESCRIPTION = 'A Discord bot for managing sports betting'
-
 # API Configuration
 API_KEY = ''  # Set this in environment variables
 API_TIMEOUT = 30  # seconds
