@@ -107,40 +107,36 @@ class GameService:
         logger.info("Game service stopped successfully")
 
     async def _setup_commands(self):
-        """Register game-related commands"""
-        @self.command_tree.command(
-            name="games",
-            description="View active games"
-        )
-        @app_commands.describe(
-            league="Filter by league (optional)"
-        )
-        async def games(interaction: discord.Interaction, league: Optional[str] = None):
-            try:
+        """Setup slash commands for the game service."""
+        try:
+            @self.bot.tree.command(
+                name="games",
+                description="View active games"
+            )
+            async def view_games(interaction: discord.Interaction, league: Optional[str] = None):
                 await self._view_games(interaction, league)
-            except Exception as e:
-                logger.error(f"Error in games command: {e}")
-                await interaction.response.send_message(
-                    f"An error occurred: {str(e)}",
-                    ephemeral=True
-                )
 
-        @self.command_tree.command(
-            name="odds",
-            description="View odds for a game"
-        )
-        @app_commands.describe(
-            game_id="The game ID"
-        )
-        async def odds(interaction: discord.Interaction, game_id: str):
-            try:
-                await self._view_odds(interaction, game_id)
-            except Exception as e:
-                logger.error(f"Error in odds command: {e}")
-                await interaction.response.send_message(
-                    f"An error occurred: {str(e)}",
-                    ephemeral=True
-                )
+            @self.bot.tree.command(
+                name="odds",
+                description="View odds for a game"
+            )
+            @app_commands.describe(
+                game_id="The game ID"
+            )
+            async def odds(interaction: discord.Interaction, game_id: str):
+                try:
+                    await self._view_odds(interaction, game_id)
+                except Exception as e:
+                    logger.error(f"Error in odds command: {e}")
+                    await interaction.response.send_message(
+                        f"An error occurred: {str(e)}",
+                        ephemeral=True
+                    )
+
+            logger.info("Game service commands registered successfully")
+        except Exception as e:
+            logger.error(f"Error setting up game service commands: {e}")
+            raise GameServiceError("Failed to setup game service commands")
 
     async def _update_games(self):
         """Periodically update game statuses."""
