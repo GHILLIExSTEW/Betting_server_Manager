@@ -8,27 +8,39 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
 
+# --- Path Setup ---
+# Removed sys.path manipulation as relative imports from main.py should work
+# when run from within the betting-bot directory.
+# --- End Path Setup ---
+
 # Load environment variables from .env file (assuming it's one level up from main.py)
+# If .env is in the same directory as main.py, use: load_dotenv()
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
-# .env is in the SAME directory as main.py, just use: load_dotenv()
+
 
 # --- Imports (Relative to betting-bot directory) ---
-from data.db_manager import DatabaseManager # Corrected import
-from services.game_service import GameService # Corrected import
-from services.bet_service import BetService # Corrected import
-from services.admin_service import AdminService # Corrected import
-from services.analytics_service import AnalyticsService # Corrected import
-from services.user_service import UserService # Corrected import
-from services.voice_service import VoiceService # Corrected import
-from services.data_sync_service import DataSyncService # Corrected import
+try:
+    from data.db_manager import DatabaseManager
+    from services.game_service import GameService
+    from services.bet_service import BetService
+    from services.admin_service import AdminService
+    from services.analytics_service import AnalyticsService
+    from services.user_service import UserService
+    from services.voice_service import VoiceService
+    from services.data_sync_service import DataSyncService
+    # Import Command Setup (Choose ONE loading strategy)
+    # from commands import CommandManager
+except ImportError as e:
+     print(f"Import Error: {e}. Ensure you are running from the 'betting-bot' directory "
+           "or the parent directory, and all necessary __init__.py files exist.")
+     sys.exit(1)
 
 # --- Logging Setup ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    # Consider adding file logging from config/settings.py if desired
-    # filename=LOG_FILE
+    # filename='logs/betting_bot.log' # Uncomment to log to file
 )
 logger = logging.getLogger(__name__)
 
@@ -82,23 +94,39 @@ class BettingBot(commands.AutoShardedBot):
             await self.db_manager.connect()
             logger.info("Database pool connected.")
 
-            # --- Load Commands ---
-            # Choose ONE strategy:
-            # Option A: CommandManager
-            # await self.command_manager.register_commands()
-            # Option B: Manual setup (less ideal)
-            # await setup_admin_cmds(self.tree) # Example
-            # ... load other commands ...
-            # Ensure your chosen command loading method (e.g., loading cogs) happens here.
-            # Example using load_extension for cogs placed in 'commands' folder:
-            commands_dir = "commands" # Assuming commands are cogs
-            for filename in os.listdir(f'./{commands_dir}'): # Use relative path
-                if filename.endswith('.py') and not filename.startswith('__'):
-                    try:
-                        await self.load_extension(f'{commands_dir}.{filename[:-3]}')
-                        logger.info(f'Loaded command cog: {filename[:-3]}')
-                    except Exception as e:
-                        logger.error(f'Failed to load command cog {filename[:-3]}: {e}')
+            # --- Load Command Cogs ---
+            # Construct absolute path to the commands directory
+            main_file_dir = os.path.dirname(os.path.abspath(__file__))
+            # Assumes 'commands' directory is in the same directory as main.py
+            commands_dir_path = os.path.join(main_file_dir, "commands")
+
+            logger.info(f"Attempting to load command cogs from: {commands_dir_path}")
+
+            if not os.path.isdir(commands_dir_path):
+                 logger.error(f"Commands directory not found at: {commands_dir_path}")
+                 # Consider raising an error if commands are essential for startup
+                 # raise FileNotFoundError(f"Commands directory not found at: {commands_dir_path}")
+            else:
+                # Iterate through files in the determined commands directory
+                for filename in os.listdir(commands_dir_path):
+                    if filename.endswith('.py') and not filename.startswith('__'):
+                        extension_name = filename[:-3]
+                        try:
+                            # Use the package notation 'commands.filename' for loading
+                            # Assumes 'commands' is a package relative to where main.py is
+                            await self.load_extension(f'commands.{extension_name}')
+                            logger.info(f'Loaded command cog: {extension_name}')
+                        # Catch specific extension errors for better debugging
+                        except commands.ExtensionNotFound:
+                            logger.error(f'Extension not found: commands.{extension_name}')
+                        except commands.ExtensionAlreadyLoaded:
+                            logger.warning(f'Extension already loaded: commands.{extension_name}')
+                        except commands.NoEntryPointError:
+                            logger.error(f'Extension has no setup function: commands.{extension_name}')
+                        except commands.ExtensionFailed as ef:
+                             logger.error(f'Extension setup failed for commands.{extension_name}: {ef.original}', exc_info=True)
+                        except Exception as e:
+                            logger.error(f'Failed to load command cog commands.{extension_name}: {e}', exc_info=True) # Log full traceback
 
             logger.info("Command loading process completed.")
 
@@ -163,7 +191,6 @@ class BettingBot(commands.AutoShardedBot):
         if payload.user_id == self.user.id:
             return
         if hasattr(self.bet_service, 'on_raw_reaction_add'):
-            # Use create_task to avoid blocking the event loop if reaction handling is slow
             asyncio.create_task(self.bet_service.on_raw_reaction_add(payload))
 
 
@@ -172,7 +199,6 @@ class BettingBot(commands.AutoShardedBot):
         if payload.user_id == self.user.id:
             return
         if hasattr(self.bet_service, 'on_raw_reaction_remove'):
-             # Use create_task to avoid blocking the event loop
              asyncio.create_task(self.bet_service.on_raw_reaction_remove(payload))
 
 
@@ -218,9 +244,6 @@ def main():
         logger.exception(f"An error occurred while running the bot: {e}")
     finally:
         # Ensure cleanup happens even on unexpected exit
-        # Using bot.close() within the main loop's exception handling
-        # might be tricky if the loop is already broken.
-        # Rely on KeyboardInterrupt or system signals for graceful shutdown via bot.close().
         logger.info("Bot process finished.")
 
 
