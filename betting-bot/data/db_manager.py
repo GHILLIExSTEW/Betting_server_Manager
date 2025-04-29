@@ -125,7 +125,6 @@ class DatabaseManager:
             return
 
         logger.info("Attempting to initialize database schema...")
-        # Use a transaction to ensure all tables/indexes are created atomically
         async with self._pool.acquire() as conn:
             # Check if tables exist before trying to create
             async def table_exists(conn, table_name):
@@ -135,115 +134,121 @@ class DatabaseManager:
                 return result is not None
 
             try:
-                async with conn.begin():
-                    # --- Bets Table ---
-                    if not await table_exists(conn, 'bets'):
-                        await conn.execute('''
-                            CREATE TABLE bets (
-                                bet_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                                guild_id BIGINT NOT NULL,
-                                user_id BIGINT NOT NULL,
-                                game_id BIGINT,
-                                bet_type TEXT NOT NULL,
-                                selection TEXT NOT NULL,
-                                units INTEGER NOT NULL,
-                                odds REAL NOT NULL,
-                                status TEXT NOT NULL,
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                bet_won BOOLEAN DEFAULT FALSE,
-                                bet_loss BOOLEAN DEFAULT FALSE,
-                                result_value REAL,
-                                result_description TEXT
-                            )
-                        ''')
-                        await conn.execute('CREATE INDEX idx_bets_guild_user ON bets (guild_id, user_id)')
-                        await conn.execute('CREATE INDEX idx_bets_status ON bets (status)')
-                        await conn.execute('CREATE INDEX idx_bets_created_at ON bets (created_at)')
-                        logger.info("Table 'bets' created.")
+                # Start transaction
+                await conn.begin()
+                
+                # --- Bets Table ---
+                if not await table_exists(conn, 'bets'):
+                    await conn.execute('''
+                        CREATE TABLE bets (
+                            bet_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            guild_id BIGINT NOT NULL,
+                            user_id BIGINT NOT NULL,
+                            game_id BIGINT,
+                            bet_type TEXT NOT NULL,
+                            selection TEXT NOT NULL,
+                            units INTEGER NOT NULL,
+                            odds REAL NOT NULL,
+                            status TEXT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            bet_won BOOLEAN DEFAULT FALSE,
+                            bet_loss BOOLEAN DEFAULT FALSE,
+                            result_value REAL,
+                            result_description TEXT
+                        )
+                    ''')
+                    await conn.execute('CREATE INDEX idx_bets_guild_user ON bets (guild_id, user_id)')
+                    await conn.execute('CREATE INDEX idx_bets_status ON bets (status)')
+                    await conn.execute('CREATE INDEX idx_bets_created_at ON bets (created_at)')
+                    logger.info("Table 'bets' created.")
 
-                    # --- Guild Settings Table ---
-                    if not await table_exists(conn, 'guild_settings'):
-                        await conn.execute('''
-                            CREATE TABLE guild_settings (
-                                guild_id BIGINT PRIMARY KEY,
-                                is_active BOOLEAN DEFAULT TRUE,
-                                subscription_level INTEGER DEFAULT 0,
-                                is_paid BOOLEAN DEFAULT FALSE,
-                                embed_channel_1 BIGINT,
-                                command_channel_1 BIGINT,
-                                admin_channel_1 BIGINT,
-                                admin_role BIGINT,
-                                authorized_role BIGINT,
-                                voice_channel_id BIGINT,
-                                yearly_channel_id BIGINT,
-                                total_units_channel_id BIGINT
-                            )
-                        ''')
-                        await conn.execute('CREATE INDEX idx_guild_settings_active ON guild_settings (is_active)')
-                        logger.info("Table 'guild_settings' created.")
+                # --- Guild Settings Table ---
+                if not await table_exists(conn, 'guild_settings'):
+                    await conn.execute('''
+                        CREATE TABLE guild_settings (
+                            guild_id BIGINT PRIMARY KEY,
+                            is_active BOOLEAN DEFAULT TRUE,
+                            subscription_level INTEGER DEFAULT 0,
+                            is_paid BOOLEAN DEFAULT FALSE,
+                            embed_channel_1 BIGINT,
+                            command_channel_1 BIGINT,
+                            admin_channel_1 BIGINT,
+                            admin_role BIGINT,
+                            authorized_role BIGINT,
+                            voice_channel_id BIGINT,
+                            yearly_channel_id BIGINT,
+                            total_units_channel_id BIGINT
+                        )
+                    ''')
+                    await conn.execute('CREATE INDEX idx_guild_settings_active ON guild_settings (is_active)')
+                    logger.info("Table 'guild_settings' created.")
 
-                    # --- Guild Users Table ---
-                    if not await table_exists(conn, 'guild_users'):
-                        await conn.execute('''
-                            CREATE TABLE guild_users (
-                                guild_id BIGINT,
-                                user_id BIGINT,
-                                units_balance REAL DEFAULT 0,
-                                lifetime_units REAL DEFAULT 0,
-                                PRIMARY KEY (guild_id, user_id)
-                            )
-                        ''')
-                        await conn.execute('CREATE INDEX idx_guild_users_balance ON guild_users (guild_id, units_balance DESC)')
-                        logger.info("Table 'guild_users' created.")
+                # --- Guild Users Table ---
+                if not await table_exists(conn, 'guild_users'):
+                    await conn.execute('''
+                        CREATE TABLE guild_users (
+                            guild_id BIGINT,
+                            user_id BIGINT,
+                            units_balance REAL DEFAULT 0,
+                            lifetime_units REAL DEFAULT 0,
+                            PRIMARY KEY (guild_id, user_id)
+                        )
+                    ''')
+                    await conn.execute('CREATE INDEX idx_guild_users_balance ON guild_users (guild_id, units_balance DESC)')
+                    logger.info("Table 'guild_users' created.")
 
-                    # --- Unit Records Table ---
-                    if not await table_exists(conn, 'unit_records'):
-                        await conn.execute('''
-                            CREATE TABLE unit_records (
-                                record_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                                bet_id BIGINT NULL,
-                                guild_id BIGINT,
-                                user_id BIGINT,
-                                year INTEGER,
-                                month INTEGER,
-                                units INTEGER NOT NULL,
-                                odds REAL NOT NULL,
-                                result_value REAL NOT NULL,
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                            )
-                        ''')
-                        await conn.execute('CREATE INDEX idx_unit_records_guild_user_time ON unit_records (guild_id, user_id, year, month)')
-                        await conn.execute('CREATE INDEX idx_unit_records_guild_time ON unit_records (guild_id, created_at)')
-                        await conn.execute('CREATE INDEX idx_unit_records_bet_id ON unit_records (bet_id)')
-                        logger.info("Table 'unit_records' created.")
+                # --- Unit Records Table ---
+                if not await table_exists(conn, 'unit_records'):
+                    await conn.execute('''
+                        CREATE TABLE unit_records (
+                            record_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            bet_id BIGINT NULL,
+                            guild_id BIGINT,
+                            user_id BIGINT,
+                            year INTEGER,
+                            month INTEGER,
+                            units INTEGER NOT NULL,
+                            odds REAL NOT NULL,
+                            result_value REAL NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
+                    await conn.execute('CREATE INDEX idx_unit_records_guild_user_time ON unit_records (guild_id, user_id, year, month)')
+                    await conn.execute('CREATE INDEX idx_unit_records_guild_time ON unit_records (guild_id, created_at)')
+                    await conn.execute('CREATE INDEX idx_unit_records_bet_id ON unit_records (bet_id)')
+                    logger.info("Table 'unit_records' created.")
 
-                    # --- Monthly Totals Table ---
-                    if not await table_exists(conn, 'monthly_totals'):
-                        await conn.execute('''
-                            CREATE TABLE monthly_totals (
-                                guild_id BIGINT NOT NULL,
-                                year INTEGER NOT NULL,
-                                month INTEGER NOT NULL,
-                                total REAL DEFAULT 0,
-                                PRIMARY KEY (guild_id, year, month)
-                            )
-                        ''')
-                        logger.info("Table 'monthly_totals' created.")
+                # --- Monthly Totals Table ---
+                if not await table_exists(conn, 'monthly_totals'):
+                    await conn.execute('''
+                        CREATE TABLE monthly_totals (
+                            guild_id BIGINT NOT NULL,
+                            year INTEGER NOT NULL,
+                            month INTEGER NOT NULL,
+                            total REAL DEFAULT 0,
+                            PRIMARY KEY (guild_id, year, month)
+                        )
+                    ''')
+                    logger.info("Table 'monthly_totals' created.")
 
-                    # --- Yearly Totals Table ---
-                    if not await table_exists(conn, 'yearly_totals'):
-                        await conn.execute('''
-                            CREATE TABLE yearly_totals (
-                                guild_id BIGINT NOT NULL,
-                                year INTEGER NOT NULL,
-                                total REAL DEFAULT 0,
-                                PRIMARY KEY (guild_id, year)
-                            )
-                        ''')
-                        logger.info("Table 'yearly_totals' created.")
+                # --- Yearly Totals Table ---
+                if not await table_exists(conn, 'yearly_totals'):
+                    await conn.execute('''
+                        CREATE TABLE yearly_totals (
+                            guild_id BIGINT NOT NULL,
+                            year INTEGER NOT NULL,
+                            total REAL DEFAULT 0,
+                            PRIMARY KEY (guild_id, year)
+                        )
+                    ''')
+                    logger.info("Table 'yearly_totals' created.")
 
-                    logger.info("Database schema initialization complete.")
+                # Commit transaction
+                await conn.commit()
+                logger.info("Database schema initialization complete.")
             except Exception as e:
+                # Rollback transaction on error
+                await conn.rollback()
                 logger.error(f"Error initializing database: {e}", exc_info=True)
                 raise
