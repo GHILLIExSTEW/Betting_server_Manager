@@ -36,4 +36,24 @@ class InvalidOddsError(ValidationError):
 
 class InvalidUnitsError(ValidationError):
     """Exception raised for invalid units."""
+    pass
+
+class GameServiceError(Exception):
+    """Base exception for game service errors."""
+    pass
+
+class APIError(GameServiceError):
+    """Exception raised for API-related errors."""
+    pass
+
+class GameDataError(GameServiceError):
+    """Exception raised for game data errors."""
+    pass
+
+class LeagueNotFoundError(GameServiceError):
+    """Exception raised when a league is not found."""
+    pass
+
+class ScheduleError(GameServiceError):
+    """Exception raised for schedule-related errors."""
     pass 
