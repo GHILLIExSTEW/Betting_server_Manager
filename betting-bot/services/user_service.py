@@ -5,11 +5,11 @@ import logging
 from datetime import datetime, timedelta
 from data.db_manager import DatabaseManager
 from data.cache_manager import CacheManager
-from bot.utils.errors import UserServiceError
-from bot.config.settings import USER_CACHE_TTL
+from utils.errors import UserServiceError
+from config.settings import USER_CACHE_TTL
 import aiosqlite
 import aiomysql
-from ..config.database import DB_CONFIG
+from config.database import DB_CONFIG
 
 logger = logging.getLogger(__name__)
 

@@ -9,10 +9,12 @@ import sys
 import os
 import aiosqlite
 import aiomysql
-from ..config.database import DB_CONFIG
+from config.database import DB_CONFIG
 
 # Add the parent directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 from data.db_manager import DatabaseManager
 from data.cache_manager import CacheManager
