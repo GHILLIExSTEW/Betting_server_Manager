@@ -216,16 +216,16 @@ class GameService:
         """View active games"""
         try:
             if league:
-                games = await self.db.fetch(
+                games = await self.db.fetch_all(
                     """
                     SELECT * FROM games
-                    WHERE league = %s AND status = 'active'
+                    WHERE league = ? AND status = 'active'
                     ORDER BY start_time
                     """,
-                    (league,)
+                    league
                 )
             else:
-                games = await self.db.fetch(
+                games = await self.db.fetch_all(
                     """
                     SELECT * FROM games
                     WHERE status = 'active'
@@ -325,7 +325,7 @@ class GameService:
         """Fetch initial game data for all supported leagues."""
         try:
             # Get all supported leagues from settings
-            leagues = await self.db.fetch(
+            leagues = await self.db.fetch_all(
                 "SELECT league_code FROM supported_leagues WHERE is_active = true"
             )
             
