@@ -9,7 +9,7 @@ from utils.errors import UserServiceError
 from config.settings import USER_CACHE_TTL
 import aiosqlite
 import aiomysql
-from betting_bot.config.database import DB_CONFIG
+from config.database import DB_CONFIG
 
 logger = logging.getLogger(__name__)
 

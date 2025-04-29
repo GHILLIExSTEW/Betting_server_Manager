@@ -9,7 +9,7 @@ import sys
 import os
 import aiosqlite
 import aiomysql
-from betting_bot.config.database import DB_CONFIG
+from config.database import DB_CONFIG
 
 # Add the parent directory to the Python path
 current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

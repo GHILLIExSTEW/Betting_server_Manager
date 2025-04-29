@@ -1,5 +1,11 @@
 import os
 import sys
+
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import logging
 import discord
 from discord.ext import commands
@@ -19,6 +25,9 @@ from services.bet_service import BetService
 from services.admin_service import AdminService
 from services.analytics_service import AnalyticsService
 from commands import setup as setup_commands
+from services.user_service import UserService
+from config.settings import BOT_TOKEN, TEST_GUILD_ID
+from config.database import DB_CONFIG
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
