@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any, Union
 from datetime import datetime, timedelta
 import discord
 from discord import Embed, Color, Button, ButtonStyle
