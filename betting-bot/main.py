@@ -1,12 +1,19 @@
 import os
+import sys
 import logging
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from betting_bot.services.game_service import GameService
-from betting_bot.services.bet_service import BetService
-from betting_bot.services.admin_service import AdminService
-from betting_bot.services.analytics_service import AnalyticsService
+
+# Add the current directory to the Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
+# Now import the local modules
+from services.game_service import GameService
+from services.bet_service import BetService
+from services.admin_service import AdminService
+from services.analytics_service import AnalyticsService
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -35,9 +42,9 @@ class BettingBot(commands.Bot):
         
         # Load extensions
         self.initial_extensions = [
-            'betting_bot.commands.betting',
-            'betting_bot.commands.admin',
-            'betting_bot.commands.stats'
+            'commands.betting',
+            'commands.admin',
+            'commands.stats'
         ]
 
     async def setup_hook(self):
