@@ -284,7 +284,7 @@ class DataSyncService:
                                team['venue_image'], team['sport']
                             )
                         all_processed_teams.extend(processed_teams)
-                            logger.debug(f"Upserted {len(processed_teams)} teams for league {league['id']}")
+                        logger.debug(f"Upserted {len(processed_teams)} teams for league {league['id']}")
                     await asyncio.sleep(0.5) # Small delay between leagues
                   
                     except Exception as e:
