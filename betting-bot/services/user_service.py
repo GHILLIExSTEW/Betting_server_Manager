@@ -8,6 +8,8 @@ from data.cache_manager import CacheManager
 from bot.utils.errors import UserServiceError
 from bot.config.settings import USER_CACHE_TTL
 import aiosqlite
+import aiomysql
+from ..config.database import DB_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +18,14 @@ class UserService:
         self.bot = bot
         self.active_users: Dict[int, Dict] = {}
         self.db_path = db_path
+        self.pool: Optional[aiomysql.Pool] = None
 
     async def start(self):
         """Initialize the user service"""
         try:
             await self._setup_commands()
-            logger.info("User service started successfully")
+            self.pool = await aiomysql.create_pool(**DB_CONFIG)
+            logger.info("User service started successfully and database connection pool created successfully")
         except Exception as e:
             logger.error(f"Failed to start user service: {e}")
             raise UserServiceError("Failed to start user service")
@@ -29,6 +33,9 @@ class UserService:
     async def stop(self):
         """Clean up resources"""
         self.active_users.clear()
+        if self.pool:
+            self.pool.close()
+            await self.pool.wait_closed()
 
     async def _setup_commands(self):
         """Register user-related commands"""
@@ -44,8 +51,11 @@ class UserService:
                 return cached_user
 
             # Get from database
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute('SELECT * FROM users WHERE id = ?', (user_id,)) as cursor:
+            async with self.pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                    await cursor.execute("""
+                        SELECT * FROM users WHERE id = %s
+                    """, (user_id,))
                     row = await cursor.fetchone()
                     if row:
                         # Update cache
@@ -69,13 +79,14 @@ class UserService:
                 return existing_user['id']
 
             # Create new user
-            async with aiosqlite.connect(self.db_path) as db:
-                cursor = await db.execute(
-                    'INSERT INTO users (id, username, created_at) VALUES (?, ?, datetime("now"))',
-                    (user_id, username)
-                )
-                await db.commit()
-                return cursor.lastrowid
+            async with self.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        INSERT INTO users (id, username, created_at)
+                        VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    """, (user_id, username))
+                    await conn.commit()
+                    return cursor.lastrowid
         except Exception as e:
             logger.error(f"Error creating user {user_id}: {e}")
             raise UserServiceError("Failed to create user")
@@ -99,12 +110,12 @@ class UserService:
                 raise UserServiceError("Insufficient balance")
 
             # Update database
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute(
-                    'UPDATE users SET balance = ? WHERE id = ?',
-                    (new_balance, user_id)
-                )
-                await db.commit()
+            async with self.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        UPDATE users SET balance = %s WHERE id = %s
+                    """, (new_balance, user_id))
+                    await conn.commit()
 
             # Update cache
             user['balance'] = new_balance
@@ -180,12 +191,12 @@ class UserService:
                 )
 
             # Get leaderboard data
-            async with aiosqlite.connect(self.db_path) as db:
-                leaderboard = await db.execute(
-                    'SELECT username, SUM(amount) as total_profit FROM transactions WHERE type = ? AND created_at >= ? GROUP BY user_id, username ORDER BY total_profit DESC LIMIT 10',
-                    ('win', start_date)
-                )
-                rows = await leaderboard.fetchall()
+            async with self.pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                    await cursor.execute("""
+                        SELECT username, SUM(amount) as total_profit FROM transactions WHERE type = %s AND created_at >= %s GROUP BY user_id, username ORDER BY total_profit DESC LIMIT 10
+                    """, ('win', start_date))
+                    rows = await cursor.fetchall()
 
             if not rows:
                 await interaction.response.send_message(
@@ -209,4 +220,50 @@ class UserService:
             await interaction.response.send_message(embed=embed)
         except Exception as e:
             logger.error(f"Error viewing leaderboard: {e}")
-            raise UserServiceError("Failed to view leaderboard") 
+            raise UserServiceError("Failed to view leaderboard")
+
+    async def get_user_balance(self, user_id: int) -> float:
+        """Get a user's current balance"""
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                    await cursor.execute("""
+                        SELECT balance FROM users WHERE user_id = %s
+                    """, (user_id,))
+                    result = await cursor.fetchone()
+                    return result['balance'] if result else 0.0
+        except Exception as e:
+            logger.error(f"Error getting user balance: {e}")
+            return 0.0
+
+    async def update_user_balance(self, user_id: int, amount: float) -> bool:
+        """Update a user's balance"""
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        INSERT INTO users (user_id, balance)
+                        VALUES (%s, %s)
+                        ON DUPLICATE KEY UPDATE balance = balance + %s
+                    """, (user_id, amount, amount))
+                    await conn.commit()
+                    return True
+        except Exception as e:
+            logger.error(f"Error updating user balance: {e}")
+            return False
+
+    async def get_leaderboard(self, limit: int = 10) -> List[Dict]:
+        """Get the top users by balance"""
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                    await cursor.execute("""
+                        SELECT user_id, balance 
+                        FROM users 
+                        ORDER BY balance DESC 
+                        LIMIT %s
+                    """, (limit,))
+                    return await cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error getting leaderboard: {e}")
+            return [] 

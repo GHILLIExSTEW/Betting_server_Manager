@@ -8,6 +8,8 @@ from discord.ui import View, Select, Modal, TextInput
 import sys
 import os
 import aiosqlite
+import aiomysql
+from ..config.database import DB_CONFIG
 
 # Add the parent directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -160,9 +162,77 @@ class ChannelSelect(Select):
         self.view.stop()
 
 class BetService:
-    def __init__(self, bot):
-        self.bot = bot
-        self.db_path = 'betting-bot/data/betting.db'
+    def __init__(self):
+        self.pool: Optional[aiomysql.Pool] = None
+        self.logger = logging.getLogger(__name__)
+        self._update_task = None
+
+    async def start(self):
+        """Initialize the bet service and start the update loop"""
+        try:
+            self.pool = await aiomysql.create_pool(**DB_CONFIG)
+            self.logger.info("Database connection pool created successfully")
+            self._update_task = asyncio.create_task(self._update_bets())
+        except Exception as e:
+            self.logger.error(f"Failed to initialize bet service: {e}")
+            raise
+
+    async def stop(self):
+        """Stop the bet service and cleanup resources"""
+        if self._update_task:
+            self._update_task.cancel()
+            try:
+                await self._update_task
+            except asyncio.CancelledError:
+                pass
+        if self.pool:
+            self.pool.close()
+            await self.pool.wait_closed()
+
+    async def _update_bets(self):
+        """Background task to update bet statuses"""
+        while True:
+            try:
+                if not self.pool:
+                    self.logger.error("Database pool not initialized")
+                    await asyncio.sleep(60)
+                    continue
+
+                async with self.pool.acquire() as conn:
+                    async with conn.cursor(aiomysql.DictCursor) as cursor:
+                        # Get all pending bets
+                        await cursor.execute("""
+                            SELECT * FROM bets 
+                            WHERE status = 'pending' 
+                            AND expiration_time <= NOW()
+                        """)
+                        bets = await cursor.fetchall()
+
+                        for bet in bets:
+                            try:
+                                # Check if bet has expired
+                                if bet['expiration_time'] <= datetime.now():
+                                    # Update bet status to expired
+                                    await cursor.execute("""
+                                        UPDATE bets 
+                                        SET status = 'expired' 
+                                        WHERE id = %s
+                                    """, (bet['id'],))
+                                    await conn.commit()
+                                    continue
+
+                                # Check reactions for win/loss
+                                # ... rest of the bet update logic ...
+
+                            except Exception as e:
+                                self.logger.error(f"Error processing bet {bet['id']}: {e}")
+                                continue
+
+            except Exception as e:
+                self.logger.error(f"Error in bet update loop: {e}")
+                await asyncio.sleep(60)
+            else:
+                await asyncio.sleep(30)  # Check every 30 seconds
 
     async def create_bet(
         self,
@@ -260,38 +330,6 @@ class BetService:
         except Exception as e:
             logger.error(f"Error checking user authorization: {e}")
             raise BetServiceError(f"Failed to check user authorization: {str(e)}")
-
-    async def start(self) -> None:
-        """Start the bet service."""
-        try:
-            self.running = True
-            self._update_task = asyncio.create_task(self._update_bets())
-            self.bot.add_listener(self.on_raw_reaction_add, 'on_raw_reaction_add')
-            self.bot.add_listener(self.on_raw_reaction_remove, 'on_raw_reaction_remove')
-            
-            # Initialize data sync service
-            from services.data_sync_service import DataSyncService
-            from services.game_service import GameService
-            game_service = GameService(self.bot)
-            self.data_sync_service = DataSyncService(game_service)
-            await self.data_sync_service.start()
-            
-            logger.info("Bet service started successfully")
-        except Exception as e:
-            logger.error(f"Error starting bet service: {str(e)}")
-            raise BetServiceError(f"Failed to start bet service: {str(e)}")
-
-    async def stop(self) -> None:
-        """Stop the bet service."""
-        try:
-            self.running = False
-            if self._update_task:
-                self._update_task.cancel()
-            if self.data_sync_service:
-                await self.data_sync_service.stop()
-            logger.info("Bet service stopped successfully")
-        except Exception as e:
-            logger.error(f"Error stopping bet service: {str(e)}")
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         """Handle reaction adds for bet outcomes."""
@@ -574,52 +612,6 @@ class BetService:
         except Exception as e:
             logger.error(f"Error getting guild bets: {str(e)}")
             return []
-
-    async def _update_bets(self) -> None:
-        """Periodically update bet statuses."""
-        while self.running:
-            try:
-                # Get all active guilds
-                guilds = await self.db.fetch(
-                    "SELECT guild_id FROM guild_settings WHERE is_active = true"
-                )
-
-                for guild in guilds:
-                    guild_id = guild['guild_id']
-
-                    # Get pending bets
-                    pending_bets = await self.db.fetch(
-                        """
-                        SELECT * FROM bets
-                        WHERE guild_id = $1 AND status = 'pending'
-                        """,
-                        guild_id
-                    )
-
-                    for bet in pending_bets:
-                        # Check if game is over
-                        game = await self.db.fetch_one(
-                            """
-                            SELECT status FROM games
-                            WHERE game_id = $1
-                            """,
-                            bet['game_id']
-                        )
-
-                        if game and game['status'] == 'completed':
-                            # Update bet status
-                            await self.update_bet_status(
-                                bet['bet_id'],
-                                'completed',
-                                'won'  # This should be determined by game result
-                            )
-
-                await asyncio.sleep(60)  # Check every minute
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in bet update loop: {str(e)}")
-                await asyncio.sleep(60)
 
     async def _view_pending_bets(self, interaction: discord.Interaction):
         """View user's pending bets"""
