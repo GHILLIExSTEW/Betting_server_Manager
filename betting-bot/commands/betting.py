@@ -1,3 +1,5 @@
+"""Betting command for placing bets."""
+
 import discord
 from discord import app_commands, ButtonStyle
 import logging
@@ -5,7 +7,6 @@ from typing import Optional, List, Dict
 from datetime import datetime
 import aiosqlite
 from services.bet_service import BetService
-from services.game_service import GameService
 from discord.ui import View, Select, Modal, TextInput, Button
 
 logger = logging.getLogger(__name__)
@@ -55,20 +56,6 @@ class GameSelect(Select):
         await interaction.response.defer()
         self.view.stop()
 
-class OtherGameModal(Modal, title="Enter Game Details"):
-    team = TextInput(label="Team", placeholder="Enter team name")
-    opponent = TextInput(label="Opponent", placeholder="Enter opponent name")
-    game_time = TextInput(label="Game Time", placeholder="Enter game time (e.g., 7:30 PM EST)")
-
-    async def on_submit(self, interaction: discord.Interaction):
-        self.view.game_details = {
-            "team": self.team.value,
-            "opponent": self.opponent.value,
-            "game_time": self.game_time.value
-        }
-        await interaction.response.defer()
-        self.view.stop()
-
 class BetDetailsModal(Modal, title="Enter Bet Details"):
     line = TextInput(label="Line", placeholder="Enter line (e.g., -150)")
     odds = TextInput(label="Odds", placeholder="Enter odds (e.g., -150)")
@@ -110,34 +97,23 @@ class ChannelSelect(Select):
         await interaction.response.defer()
         self.view.stop()
 
-class Betting(discord.app_commands.Group):
-    """Group of commands for betting operations."""
-    def __init__(self, bot):
-        super().__init__(name="bet", description="Betting commands")
-        self.bot = bot
-        self.bet_service = BetService(bot)
-        self.game_service = GameService(bot)
-
-    @app_commands.command(name="place", description="Place a new bet")
-    async def place(self, interaction: discord.Interaction):
+async def setup(bot):
+    """Add the betting command to the bot."""
+    @bot.tree.command(
+        name="bet",
+        description="Place a new bet"
+    )
+    async def bet(interaction: discord.Interaction):
         """Place a new bet."""
         try:
-            # Check if user is authorized to bet
-            async with aiosqlite.connect('betting_bot/data/betting.db') as db:
-                async with db.execute(
-                    """
-                    SELECT user_id 
-                    FROM cappers 
-                    WHERE guild_id = ? AND user_id = ?
-                    """,
-                    (interaction.guild_id, interaction.user.id)
-                ) as cursor:
-                    if not await cursor.fetchone():
-                        await interaction.response.send_message(
-                            "❌ You are not authorized to place bets. Please contact an admin.",
-                            ephemeral=True
-                        )
-                        return
+            # Check if user is authorized
+            bet_service = BetService(interaction.client)
+            if not await bet_service.is_user_authorized(interaction.guild_id, interaction.user.id):
+                await interaction.response.send_message(
+                    "❌ You are not authorized to place bets. Please contact an admin.",
+                    ephemeral=True
+                )
+                return
 
             # Step 1: Bet Type Selection
             view = View()
@@ -165,43 +141,16 @@ class Betting(discord.app_commands.Group):
                 return
 
             # Step 3: Game Selection
-            if view.selected_league != "Other":
-                games = await self.game_service.get_league_games(interaction.guild_id, view.selected_league)
-                view = View()
-                view.add_item(GameSelect(games))
-                await interaction.followup.send(
-                    "Select Game:",
-                    view=view,
-                    ephemeral=True
-                )
-                await view.wait()
-                if not hasattr(view, 'selected_game'):
-                    return
-
-                if view.selected_game == "Other":
-                    view = View()
-                    modal = OtherGameModal()
-                    view.add_item(modal)
-                    await interaction.followup.send(
-                        "Enter Game Details:",
-                        view=view,
-                        ephemeral=True
-                    )
-                    await view.wait()
-                    if not hasattr(view, 'game_details'):
-                        return
-            else:
-                view = View()
-                modal = OtherGameModal()
-                view.add_item(modal)
-                await interaction.followup.send(
-                    "Enter Game Details:",
-                    view=view,
-                    ephemeral=True
-                )
-                await view.wait()
-                if not hasattr(view, 'game_details'):
-                    return
+            view = View()
+            view.add_item(GameSelect([]))  # Empty list since we don't have game service
+            await interaction.followup.send(
+                "Select Game:",
+                view=view,
+                ephemeral=True
+            )
+            await view.wait()
+            if not hasattr(view, 'selected_game'):
+                return
 
             # Step 4: Bet Details Entry
             view = View()
@@ -243,7 +192,7 @@ class Betting(discord.app_commands.Group):
                 return
 
             # Create bet
-            bet_id = await self.bet_service.create_bet(
+            bet_id = await bet_service.create_bet(
                 guild_id=interaction.guild_id,
                 user_id=interaction.user.id,
                 game_id=view.selected_game if hasattr(view, 'selected_game') else None,
@@ -264,17 +213,4 @@ class Betting(discord.app_commands.Group):
             await interaction.followup.send(
                 "❌ An error occurred while placing your bet.",
                 ephemeral=True
-            )
-
-    @place.error
-    async def place_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-        logger.error(f"Error in bet command: {str(error)}")
-        await interaction.response.send_message(
-            "❌ An unexpected error occurred.",
-            ephemeral=True
-        )
-
-async def setup(bot):
-    """Add the betting commands to the bot."""
-    betting_group = Betting(bot)
-    bot.tree.add_command(betting_group) 
+            ) 

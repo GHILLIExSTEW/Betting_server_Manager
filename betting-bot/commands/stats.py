@@ -1,3 +1,5 @@
+"""Stats command for viewing betting statistics."""
+
 import discord
 from discord import app_commands
 import logging
@@ -157,36 +159,16 @@ class StatsView(discord.ui.View):
             logger.error(f"Error populating cappers: {str(e)}")
             raise
 
-class Stats(discord.app_commands.Group):
-    """Group of commands for statistics operations."""
-    def __init__(self, bot):
-        super().__init__(name="stats", description="Statistics commands")
-        self.bot = bot
-        self.analytics_service = AnalyticsService(bot)
-
-    @app_commands.command(name="view", description="View betting statistics for cappers or the server")
-    async def view(self, interaction: discord.Interaction):
+async def setup(bot):
+    """Add the stats command to the bot."""
+    @bot.tree.command(
+        name="stats",
+        description="View betting statistics"
+    )
+    async def stats(interaction: discord.Interaction):
         """View betting statistics."""
         try:
-            # Check if the guild has access to the stats command
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                async with db.execute(
-                    """
-                    SELECT commands_registered 
-                    FROM server_settings 
-                    WHERE guild_id = ?
-                    """,
-                    (interaction.guild_id,)
-                ) as cursor:
-                    result = await cursor.fetchone()
-                    if not result or not result[0]:
-                        await interaction.response.send_message(
-                            "❌ This server does not have access to the stats command. Please contact an admin.",
-                            ephemeral=True
-                        )
-                        return
-
-            view = StatsView(self.bot, interaction.guild_id)
+            view = StatsView(interaction.client, interaction.guild_id)
             await view.populate_cappers(interaction)
             await interaction.response.send_message(
                 "Select a capper to view their statistics:",
@@ -198,9 +180,4 @@ class Stats(discord.app_commands.Group):
             await interaction.response.send_message(
                 "❌ An error occurred while processing the stats command.",
                 ephemeral=True
-            )
-
-async def setup(bot):
-    """Add the stats commands to the bot."""
-    stats_group = Stats(bot)
-    bot.tree.add_command(stats_group) 
+            ) 

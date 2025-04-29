@@ -32,39 +32,8 @@ class UserService:
 
     async def _setup_commands(self):
         """Register user-related commands"""
-        @self.command_tree.command(
-            name="balance",
-            description="View your betting balance"
-        )
-        async def balance(interaction: discord.Interaction):
-            try:
-                await self._view_balance(interaction)
-            except Exception as e:
-                logger.error(f"Error in balance command: {e}")
-                await interaction.response.send_message(
-                    f"An error occurred: {str(e)}",
-                    ephemeral=True
-                )
-
-        @self.command_tree.command(
-            name="leaderboard",
-            description="View the betting leaderboard"
-        )
-        @app_commands.describe(
-            timeframe="Timeframe for leaderboard (daily/weekly/monthly)"
-        )
-        async def leaderboard(
-            interaction: discord.Interaction,
-            timeframe: str = "weekly"
-        ):
-            try:
-                await self._view_leaderboard(interaction, timeframe)
-            except Exception as e:
-                logger.error(f"Error in leaderboard command: {e}")
-                await interaction.response.send_message(
-                    f"An error occurred: {str(e)}",
-                    ephemeral=True
-                )
+        # Commands have been moved to individual command files
+        pass
 
     async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Get user data by ID"""

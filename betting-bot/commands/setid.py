@@ -6,7 +6,6 @@ import os
 import requests
 from io import BytesIO
 from PIL import Image
-import uuid
 from typing import Optional
 from services.admin_service import AdminService
 from utils.errors import AdminServiceError
@@ -140,7 +139,7 @@ class ImageURLModal(discord.ui.Modal, title="Image URL"):
                 return
 
             # Save image
-            image_path = f"bot/assets/logos/{self.guild_id}/{self.user_id}.{image.format.lower()}"
+            image_path = f"betting-bot/assets/logos/{self.guild_id}/{self.user_id}.{image.format.lower()}"
             os.makedirs(os.path.dirname(image_path), exist_ok=True)
             image.save(image_path)
 
@@ -167,210 +166,40 @@ class ImageURLModal(discord.ui.Modal, title="Image URL"):
                 ephemeral=True
             )
 
-class RemoveUserSelect(discord.ui.Select):
-    def __init__(self, users: list):
-        options = [
-            discord.SelectOption(
-                label=user[2],  # display_name
-                value=str(user[1]),  # user_id
-                description=f"Remove {user[2]} from users"
-            ) for user in users
-        ]
-        super().__init__(
-            placeholder="Select a user to remove",
-            options=options,
-            min_values=1,
-            max_values=1
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        try:
-            user_id = int(self.values[0])
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                # Get display_name before deleting
-                async with db.execute(
-                    """
-                    SELECT display_name 
-                    FROM users 
-                    WHERE user_id = ? AND guild_id = ?
-                    """,
-                    (user_id, interaction.guild_id)
-                ) as cursor:
-                    result = await cursor.fetchone()
-                    if not result:
-                        await interaction.response.send_message(
-                            "❌ User not found.",
-                            ephemeral=True
-                        )
-                        return
-                    display_name = result[0]
-
-                # Delete the user
-                await db.execute(
-                    """
-                    DELETE FROM users 
-                    WHERE user_id = ? AND guild_id = ?
-                    """,
-                    (user_id, interaction.guild_id)
-                )
-                await db.commit()
-
-                await interaction.response.send_message(
-                    f"✅ Successfully removed user '{display_name}'",
-                    ephemeral=True
-                )
-        except Exception as e:
-            logger.error(f"Error removing user: {str(e)}")
-            await interaction.response.send_message(
-                "❌ An error occurred while removing the user.",
-                ephemeral=True
-            )
-
-class RemoveUserView(discord.ui.View):
-    def __init__(self, guild_id: int):
-        super().__init__(timeout=300)  # 5 minute timeout
-        self.guild_id = guild_id
-
-    async def populate_users(self, interaction: discord.Interaction):
-        try:
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                # Get all users from the guild
-                async with db.execute(
-                    """
-                    SELECT guild_id, user_id, display_name 
-                    FROM users 
-                    WHERE guild_id = ?
-                    ORDER BY display_name
-                    """,
-                    (self.guild_id,)
-                ) as cursor:
-                    users = await cursor.fetchall()
-
-                if not users:
-                    await interaction.response.send_message(
-                        "❌ No users found in this server.",
-                        ephemeral=True
-                    )
-                    return
-
-                # Add select menu
-                self.add_item(RemoveUserSelect(users))
-                await interaction.response.send_message(
-                    "Select a user to remove:",
-                    view=self,
-                    ephemeral=True
-                )
-        except Exception as e:
-            logger.error(f"Error populating users: {str(e)}")
-            await interaction.response.send_message(
-                "❌ An error occurred while fetching users.",
-                ephemeral=True
-            )
-
 async def setup(bot):
     """Add the setid command to the bot."""
     @bot.tree.command(
         name="setid",
-        description="Set user ID for the server"
+        description="Set up a user as a capper"
     )
     @app_commands.checks.has_permissions(administrator=True)
     async def setid(interaction: discord.Interaction, user: discord.Member):
-        """Set user ID for the server."""
+        """Set up a user as a capper."""
         try:
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                await db.execute(
-                    """
-                    INSERT OR REPLACE INTO users 
-                    (guild_id, user_id, username) 
-                    VALUES (?, ?, ?)
-                    """,
-                    (interaction.guild_id, user.id, user.name)
-                )
-                await db.commit()
-
-            await interaction.response.send_message(
-                f"✅ Successfully set {user.mention} as a user",
-                ephemeral=True
-            )
-        except Exception as e:
-            logger.error(f"Error setting user: {str(e)}")
-            await interaction.response.send_message(
-                "❌ Failed to set user. Check logs for details.",
-                ephemeral=True
-            )
-
-    # Handle image uploads
-    @bot.tree.listen('on_message')
-    async def on_message(message: discord.Message):
-        if message.author.bot:
-            return
-
-        # Check if this is a response to the image upload prompt
-        if not message.reference:
-            return
-
-        try:
-            # Get the referenced message
-            referenced_message = await message.channel.fetch_message(message.reference.message_id)
-            if not referenced_message.content == "Please upload an image file (PNG, JPG, or GIF).":
-                return
-
-            # Check if user is a capper
+            # Check if user is already a capper
             async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 async with db.execute(
                     """
-                    SELECT guild_id, user_id 
+                    SELECT user_id 
                     FROM cappers 
                     WHERE guild_id = ? AND user_id = ?
                     """,
-                    (message.guild.id, message.author.id)
+                    (interaction.guild_id, user.id)
                 ) as cursor:
-                    if not await cursor.fetchone():
+                    if await cursor.fetchone():
+                        await interaction.response.send_message(
+                            "❌ This user is already set up as a capper.",
+                            ephemeral=True
+                        )
                         return
 
-            # Process attachments
-            if not message.attachments:
-                await message.reply("❌ No image file found in your message.", ephemeral=True)
-                return
+            # Show profile setup modal
+            modal = CapperModal(interaction.guild_id, user.id)
+            await interaction.response.send_modal(modal)
 
-            attachment = message.attachments[0]
-            if not attachment.content_type.startswith('image/'):
-                await message.reply("❌ Please upload an image file (PNG, JPG, or GIF).", ephemeral=True)
-                return
-
-            # Download and validate image
-            response = requests.get(attachment.url)
-            if response.status_code != 200:
-                await message.reply("❌ Failed to download image.", ephemeral=True)
-                return
-
-            try:
-                image = Image.open(BytesIO(response.content))
-                if image.format not in ['PNG', 'JPEG', 'GIF']:
-                    await message.reply("❌ Invalid image format. Please use PNG, JPG, or GIF.", ephemeral=True)
-                    return
-            except Exception:
-                await message.reply("❌ Invalid image file.", ephemeral=True)
-                return
-
-            # Save image
-            image_path = f"bot/assets/logos/{message.guild.id}/{message.author.id}.{image.format.lower()}"
-            os.makedirs(os.path.dirname(image_path), exist_ok=True)
-            image.save(image_path)
-
-            # Update database
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                await db.execute(
-                    """
-                    UPDATE cappers 
-                    SET image_path = ? 
-                    WHERE guild_id = ? AND user_id = ?
-                    """,
-                    (image_path, message.guild.id, message.author.id)
-                )
-                await db.commit()
-
-            await message.reply("✅ Profile picture updated successfully!", ephemeral=True)
         except Exception as e:
-            logger.error(f"Error processing image upload: {str(e)}")
-            await message.reply("❌ An error occurred while processing the image.", ephemeral=True) 
+            logger.error(f"Error in setid command: {str(e)}")
+            await interaction.response.send_message(
+                "❌ An error occurred while setting up the user.",
+                ephemeral=True
+            )

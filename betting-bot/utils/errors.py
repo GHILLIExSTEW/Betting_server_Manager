@@ -1,21 +1,31 @@
+"""Custom error classes for the betting bot."""
+
+class BettingBotError(Exception):
+    """Base error class for betting bot errors."""
+    pass
+
+class AdminServiceError(BettingBotError):
+    """Raised when there is an error in the admin service."""
+    pass
+
+class BetServiceError(BettingBotError):
+    """Raised when there is an error in the bet service."""
+    pass
+
+class AnalyticsServiceError(BettingBotError):
+    """Raised when there is an error in the analytics service."""
+    pass
+
+class ValidationError(BettingBotError):
+    """Raised when there is a validation error."""
+    pass
+
 class ServiceError(Exception):
     """Base class for all service-related errors."""
     pass
 
-class BetServiceError(ServiceError):
-    """Raised when there's an error in the bet service."""
-    pass
-
 class GameServiceError(ServiceError):
     """Raised when there's an error in the game service."""
-    pass
-
-class AnalyticsServiceError(ServiceError):
-    """Raised when there's an error in the analytics service."""
-    pass
-
-class AdminServiceError(ServiceError):
-    """Raised when there's an error in the admin service."""
     pass
 
 class DataSyncError(ServiceError):
@@ -24,10 +34,6 @@ class DataSyncError(ServiceError):
 
 class DatabaseError(Exception):
     """Raised when there's an error in database operations."""
-    pass
-
-class ValidationError(Exception):
-    """Raised when input validation fails."""
     pass
 
 class AuthenticationError(Exception):

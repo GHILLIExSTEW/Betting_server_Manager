@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 TEST_GUILD_ID = 123456789  # Replace with your test guild ID
 AUTHORIZED_USER_ID = 987654321  # Replace with your user ID
 
-async def setup(tree: app_commands.CommandTree):
+async def setup(bot):
     """Setup function for the load_logos command."""
-    @tree.command(
+    @bot.tree.command(
         name="load_logos",
         description="Load team and league logos (Admin only)",
         guild=discord.Object(id=TEST_GUILD_ID)

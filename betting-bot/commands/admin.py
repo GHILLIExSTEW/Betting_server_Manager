@@ -1,3 +1,5 @@
+"""Admin command for server setup and management."""
+
 import discord
 from discord import app_commands
 import logging
@@ -9,11 +11,10 @@ from services.admin_service import AdminService
 from discord.ui import View, Select, Modal, TextInput
 from discord.ext import commands
 import sys
+from utils.errors import AdminServiceError
 
 # Add the parent directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from utils.errors import AdminServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +63,9 @@ class RoleSelect(discord.ui.Select):
         await self.view.process_next_selection(interaction)
 
 class ServerSettingsView(discord.ui.View):
-    def __init__(self, guild: discord.Guild, is_paid: bool = False):
+    def __init__(self, guild: discord.Guild):
         super().__init__(timeout=None)
         self.guild = guild
-        self.is_paid = is_paid
         self.settings = {}
         self.current_step = 0
         self.text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
@@ -73,23 +73,12 @@ class ServerSettingsView(discord.ui.View):
         
         # Define selection steps
         self.steps = [
-            # Free tier steps
-            ("Select Embed Channel 1", "embed_channel_1", self.text_channels, ChannelSelect),
-            ("Select Command Channel 1", "command_channel_1", self.text_channels, ChannelSelect),
+            ("Select Embed Channel", "embed_channel_1", self.text_channels, ChannelSelect),
+            ("Select Command Channel", "command_channel_1", self.text_channels, ChannelSelect),
             ("Select Admin Channel", "admin_channel_1", self.text_channels, ChannelSelect),
             ("Select Admin Role", "admin_role", self.roles, RoleSelect),
             ("Select Authorized Role", "authorized_role", self.roles, RoleSelect),
         ]
-        
-        # Add paid tier steps
-        if is_paid:
-            self.steps.extend([
-                ("Select Embed Channel 2", "embed_channel_2", self.text_channels, ChannelSelect),
-                ("Select Command Channel 2", "command_channel_2", self.text_channels, ChannelSelect),
-                ("Select Voice Channel", "voice_channel_id", self.text_channels, ChannelSelect),
-                ("Select Yearly Channel", "yearly_channel_id", self.text_channels, ChannelSelect),
-                ("Select Member Role", "member_role", self.roles, RoleSelect),
-            ])
 
     async def start_selection(self, interaction: discord.Interaction):
         await self.process_next_selection(interaction)
@@ -106,61 +95,7 @@ class ServerSettingsView(discord.ui.View):
             )
             self.current_step += 1
         else:
-            # All selections complete, show time input for paid users
-            if self.is_paid:
-                await self.show_time_input(interaction)
-            else:
-                await self.save_settings(interaction)
-
-    async def show_time_input(self, interaction: discord.Interaction):
-        self.clear_items()
-        self.time_input = discord.ui.TextInput(
-            label="Daily Report Time",
-            placeholder="Enter time in HH:MM format",
-            required=True
-        )
-        self.add_item(self.time_input)
-        await interaction.followup.send(
-            "**Set Daily Report Time**",
-            view=self,
-            ephemeral=True
-        )
-        # After time input, show URL inputs for paid users
-        await self.show_url_inputs(interaction)
-
-    async def show_url_inputs(self, interaction: discord.Interaction):
-        self.clear_items()
-        self.bot_name_mask = discord.ui.TextInput(
-            label="Bot Name Mask",
-            placeholder="Enter bot name mask",
-            required=True
-        )
-        self.bot_image_mask = discord.ui.TextInput(
-            label="Bot Image Mask",
-            placeholder="Enter bot image mask URL",
-            required=True
-        )
-        self.guild_default_image = discord.ui.TextInput(
-            label="Guild Default Image",
-            placeholder="Enter default image URL",
-            required=True
-        )
-        self.default_parlay_thumbnail = discord.ui.TextInput(
-            label="Default Parlay Thumbnail",
-            placeholder="Enter parlay thumbnail URL",
-            required=True
-        )
-        
-        self.add_item(self.bot_name_mask)
-        self.add_item(self.bot_image_mask)
-        self.add_item(self.guild_default_image)
-        self.add_item(self.default_parlay_thumbnail)
-        
-        await interaction.followup.send(
-            "**Set Bot and Image Settings**",
-            view=self,
-            ephemeral=True
-        )
+            await self.save_settings(interaction)
 
     async def save_settings(self, interaction: discord.Interaction):
         try:
@@ -169,141 +104,21 @@ class ServerSettingsView(discord.ui.View):
             os.makedirs(guild_logos_dir, exist_ok=True)
             logger.info(f"Created guild logos directory: {guild_logos_dir}")
 
-            # Validate time format for paid users
-            if self.is_paid and hasattr(self, 'time_input'):
-                try:
-                    datetime.strptime(self.time_input.value, '%H:%M')
-                except ValueError:
-                    await interaction.followup.send(
-                        "❌ Invalid time format. Use HH:MM.",
-                        ephemeral=True
-                    )
-                    return
+            # Save settings using admin service
+            admin_service = AdminService(interaction.client)
+            await admin_service.setup_server(interaction.guild_id, self.settings)
 
-            # Validate URLs for paid users
-            if self.is_paid:
-                urls = [
-                    self.bot_image_mask.value,
-                    self.guild_default_image.value,
-                    self.default_parlay_thumbnail.value
-                ]
-                for url in urls:
-                    if not url.startswith(('http://', 'https://')):
-                        await interaction.followup.send(
-                            "❌ Invalid URL format. URLs must start with http:// or https://",
-                            ephemeral=True
-                        )
-                        return
-
-            # Save settings to database
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                # Check if guild exists in settings
-                async with db.execute(
-                    "SELECT guild_id FROM server_settings WHERE guild_id = ?",
-                    (interaction.guild.id,)
-                ) as cursor:
-                    exists = await cursor.fetchone()
-                
-                if exists:
-                    # Update existing settings
-                    query = """
-                        UPDATE server_settings SET
-                        commands_registered = ?,
-                        embed_channel_1 = ?,
-                        command_channel_1 = ?,
-                        admin_channel_1 = ?,
-                        admin_role = ?,
-                        authorized_role = ?
-                    """
-                    params = [
-                        2 if self.is_paid else 1,
-                        self.settings.get('embed_channel_1'),
-                        self.settings.get('command_channel_1'),
-                        self.settings.get('admin_channel_1'),
-                        self.settings.get('admin_role'),
-                        self.settings.get('authorized_role')
-                    ]
-                    
-                    if self.is_paid:
-                        query += """,
-                            embed_channel_2 = ?,
-                            command_channel_2 = ?,
-                            member_role = ?,
-                            daily_report_time = ?,
-                            voice_channel_id = ?,
-                            yearly_channel_id = ?,
-                            bot_name_mask = ?,
-                            bot_image_mask = ?,
-                            guild_default_image = ?,
-                            default_parlay_thumbnail = ?
-                        """
-                        params.extend([
-                            self.settings.get('embed_channel_2'),
-                            self.settings.get('command_channel_2'),
-                            self.settings.get('member_role'),
-                            self.time_input.value,
-                            self.settings.get('voice_channel_id'),
-                            self.settings.get('yearly_channel_id'),
-                            self.bot_name_mask.value,
-                            self.bot_image_mask.value,
-                            self.guild_default_image.value,
-                            self.default_parlay_thumbnail.value
-                        ])
-                    
-                    query += " WHERE guild_id = ?"
-                    params.append(interaction.guild.id)
-                else:
-                    # Insert new settings
-                    query = """
-                        INSERT INTO server_settings (
-                            guild_id, commands_registered,
-                            embed_channel_1, command_channel_1,
-                            admin_channel_1, admin_role, authorized_role
-                    """
-                    params = [
-                        interaction.guild.id,
-                        2 if self.is_paid else 1,
-                        self.settings.get('embed_channel_1'),
-                        self.settings.get('command_channel_1'),
-                        self.settings.get('admin_channel_1'),
-                        self.settings.get('admin_role'),
-                        self.settings.get('authorized_role')
-                    ]
-                    
-                    if self.is_paid:
-                        query += """,
-                            embed_channel_2, command_channel_2,
-                            member_role, daily_report_time,
-                            voice_channel_id, yearly_channel_id,
-                            bot_name_mask, bot_image_mask,
-                            guild_default_image, default_parlay_thumbnail
-                        """
-                        params.extend([
-                            self.settings.get('embed_channel_2'),
-                            self.settings.get('command_channel_2'),
-                            self.settings.get('member_role'),
-                            self.time_input.value,
-                            self.settings.get('voice_channel_id'),
-                            self.settings.get('yearly_channel_id'),
-                            self.bot_name_mask.value,
-                            self.bot_image_mask.value,
-                            self.guild_default_image.value,
-                            self.default_parlay_thumbnail.value
-                        ])
-                    
-                    query += ") VALUES (" + ",".join(["?"] * len(params)) + ")"
-                
-                await db.execute(query, params)
-                await db.commit()
+            # Sync commands
+            await admin_service.sync_commands(interaction.guild_id)
 
             await interaction.followup.send(
-                "✅ Server settings updated successfully!",
+                "✅ Server setup completed successfully!",
                 ephemeral=True
             )
         except Exception as e:
-            logger.error(f"Error saving settings: {str(e)}")
+            logger.error(f"Error saving server settings: {e}")
             await interaction.followup.send(
-                "❌ Failed to save settings. Check logs for details.",
+                "❌ An error occurred while saving settings. Please try again.",
                 ephemeral=True
             )
 
@@ -396,21 +211,23 @@ async def setup(bot):
     """Add the admin command to the bot."""
     @bot.tree.command(
         name="admin",
-        description="Sync all commands with Discord"
+        description="Set up server settings and sync commands"
     )
     @app_commands.checks.has_permissions(administrator=True)
     async def admin(interaction: discord.Interaction):
-        """Sync all commands with Discord."""
+        """Set up server settings and sync commands."""
         try:
-            await bot.tree.sync()
+            view = ServerSettingsView(interaction.guild)
             await interaction.response.send_message(
-                "✅ Successfully synced all commands with Discord",
+                "Let's set up your server! Follow the steps below:",
+                view=view,
                 ephemeral=True
             )
+            await view.start_selection(interaction)
         except Exception as e:
-            logger.error(f"Error syncing commands: {str(e)}")
+            logger.error(f"Error in admin command: {e}")
             await interaction.response.send_message(
-                "❌ Failed to sync commands. Check logs for details.",
+                "❌ An error occurred. Please try again.",
                 ephemeral=True
             )
 

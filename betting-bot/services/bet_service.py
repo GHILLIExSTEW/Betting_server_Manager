@@ -7,6 +7,7 @@ from discord import Embed, Color, Button, ButtonStyle
 from discord.ui import View, Select, Modal, TextInput
 import sys
 import os
+import aiosqlite
 
 # Add the parent directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,7 +18,6 @@ from utils.errors import BetServiceError, ValidationError
 from config.settings import MIN_UNITS, MAX_UNITS, DEFAULT_UNITS
 from utils.image_generator import BetSlipGenerator
 import json
-import aiosqlite
 
 logger = logging.getLogger(__name__)
 
@@ -162,15 +162,104 @@ class ChannelSelect(Select):
 class BetService:
     def __init__(self, bot):
         self.bot = bot
-        self.db = DatabaseManager()
-        self.cache = CacheManager()
-        self.running = False
-        self._update_task: Optional[asyncio.Task] = None
-        self.bets: Dict[int, Dict] = {}  # guild_id -> bets
-        self.pending_reactions: Dict[int, Dict] = {}  # message_id -> bet_info
-        self.image_generator = BetSlipGenerator()
-        self.db_path = 'data/betting.db'
-        self.data_sync_service = None  # Will be set when starting the service
+        self.db_path = 'betting-bot/data/betting.db'
+
+    async def create_bet(
+        self,
+        guild_id: int,
+        user_id: int,
+        game_id: Optional[str],
+        bet_type: str,
+        selection: str,
+        units: int,
+        odds: float,
+        channel_id: int
+    ) -> int:
+        """Create a new bet."""
+        try:
+            # Validate bet
+            if units < 1 or units > 3:
+                raise ValidationError("Units must be between 1 and 3")
+            
+            # Create bet in database
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    INSERT INTO bets (
+                        guild_id, user_id, game_id, bet_type,
+                        selection, units, odds, channel_id,
+                        created_at, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'pending')
+                """, (
+                    guild_id, user_id, game_id, bet_type,
+                    selection, units, odds, channel_id
+                ))
+                await db.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error creating bet: {e}")
+            raise BetServiceError(f"Failed to create bet: {str(e)}")
+
+    async def get_user_bets(
+        self,
+        guild_id: int,
+        user_id: int,
+        status: Optional[str] = None,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Get bets for a user."""
+        try:
+            query = """
+                SELECT * FROM bets
+                WHERE guild_id = ? AND user_id = ?
+            """
+            params = [guild_id, user_id]
+
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(query, params) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting user bets: {e}")
+            raise BetServiceError(f"Failed to get user bets: {str(e)}")
+
+    async def update_bet_status(
+        self,
+        bet_id: int,
+        status: str,
+        result: Optional[str] = None
+    ) -> None:
+        """Update bet status."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    UPDATE bets
+                    SET status = ?, result = ?, updated_at = datetime('now')
+                    WHERE id = ?
+                """, (status, result, bet_id))
+                await db.commit()
+        except Exception as e:
+            logger.error(f"Error updating bet status: {e}")
+            raise BetServiceError(f"Failed to update bet status: {str(e)}")
+
+    async def is_user_authorized(self, guild_id: int, user_id: int) -> bool:
+        """Check if user is authorized to place bets."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute("""
+                    SELECT user_id FROM cappers
+                    WHERE guild_id = ? AND user_id = ?
+                """, (guild_id, user_id)) as cursor:
+                    return bool(await cursor.fetchone())
+        except Exception as e:
+            logger.error(f"Error checking user authorization: {e}")
+            raise BetServiceError(f"Failed to check user authorization: {str(e)}")
 
     async def start(self) -> None:
         """Start the bet service."""
@@ -200,8 +289,6 @@ class BetService:
                 self._update_task.cancel()
             if self.data_sync_service:
                 await self.data_sync_service.stop()
-            self.bets.clear()
-            self.pending_reactions.clear()
             logger.info("Bet service stopped successfully")
         except Exception as e:
             logger.error(f"Error stopping bet service: {str(e)}")
@@ -445,78 +532,9 @@ class BetService:
         except Exception as e:
             logger.error(f"Error sending bet status notification: {str(e)}")
 
-    async def create_bet(
-        self,
-        guild_id: int,
-        user_id: int,
-        game_id: Optional[int],
-        bet_type: str,
-        selection: str,
-        units: int,
-        odds: float,
-        channel_id: int
-    ) -> int:
-        """Create a new bet."""
-        try:
-            # Generate bet ID
-            bet_id = self._generate_bet_id()
-
-            # Create bet
-            await self.db.execute(
-                """
-                INSERT INTO bets (
-                    bet_id, guild_id, user_id, game_id, bet_type, selection,
-                    units, odds, status, created_at, bet_won, bet_loss
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                bet_id, guild_id, user_id, game_id, bet_type, selection,
-                units, odds, "pending", datetime.utcnow(), 0, 0
-            )
-
-            # Get bet details
-            bet = await self.db.fetch_one(
-                """
-                SELECT * FROM bets WHERE bet_id = ?
-                """,
-                bet_id
-            )
-
-            # Store bet info for reaction monitoring
-            self.pending_reactions[bet['message_id']] = {
-                'bet_id': bet_id,
-                'user_id': user_id,
-                'guild_id': guild_id,
-                'channel_id': channel_id,
-                'league': bet['league'],
-                'bet_type': bet_type,
-                'selection': selection,
-                'units': units,
-                'odds': odds
-            }
-
-            # Update cache
-            if guild_id not in self.bets:
-                self.bets[guild_id] = {}
-            self.bets[guild_id][bet_id] = bet
-
-            return bet_id
-        except Exception as e:
-            logger.error(f"Error creating bet: {str(e)}")
-            raise BetServiceError(f"Failed to create bet: {str(e)}")
-
-    def _generate_bet_id(self) -> str:
-        """Generate a bet ID in format DDMMYYYYHHMMSS."""
-        now = datetime.now()
-        return f"{now.day:02d}{now.month:02d}{now.year}{now.hour:02d}{now.minute:02d}{now.second:02d}"
-
     async def get_bet(self, guild_id: int, bet_id: int) -> Optional[Dict]:
         """Get details of a specific bet."""
         try:
-            # Check cache first
-            if guild_id in self.bets and bet_id in self.bets[guild_id]:
-                return self.bets[guild_id][bet_id]
-
             # Get from database
             bet = await self.db.fetch_one(
                 """
@@ -526,43 +544,10 @@ class BetService:
                 bet_id, guild_id
             )
 
-            # Update cache
-            if bet and guild_id not in self.bets:
-                self.bets[guild_id] = {}
-            if bet:
-                self.bets[guild_id][bet_id] = bet
-
             return bet
         except Exception as e:
             logger.error(f"Error getting bet: {str(e)}")
             return None
-
-    async def get_user_bets(
-        self,
-        guild_id: int,
-        user_id: int,
-        status: Optional[str] = None,
-        limit: int = 10
-    ) -> List[Dict]:
-        """Get bets for a specific user."""
-        try:
-            query = """
-                SELECT * FROM bets
-                WHERE guild_id = ? AND user_id = ?
-            """
-            params = [guild_id, user_id]
-
-            if status:
-                query += " AND status = ?"
-                params.append(status)
-
-            query += " ORDER BY created_at DESC LIMIT ?"
-            params.append(limit)
-
-            return await self.db.fetch(query, *params)
-        except Exception as e:
-            logger.error(f"Error getting user bets: {str(e)}")
-            return []
 
     async def get_guild_bets(
         self,
@@ -624,7 +609,6 @@ class BetService:
                         if game and game['status'] == 'completed':
                             # Update bet status
                             await self.update_bet_status(
-                                guild_id,
                                 bet['bet_id'],
                                 'completed',
                                 'won'  # This should be determined by game result
@@ -636,254 +620,6 @@ class BetService:
             except Exception as e:
                 logger.error(f"Error in bet update loop: {str(e)}")
                 await asyncio.sleep(60)
-
-    async def update_bet_status(
-        self,
-        guild_id: int,
-        bet_id: int,
-        status: str,
-        result: Optional[str] = None
-    ) -> Dict:
-        """Update the status of a bet."""
-        try:
-            # Update bet in database
-            await self.db.execute(
-                """
-                UPDATE bets
-                SET status = ?, result = ?, updated_at = ?
-                WHERE bet_id = ? AND guild_id = ?
-                """,
-                status, result, datetime.utcnow(), bet_id, guild_id
-            )
-
-            # Get updated bet
-            bet = await self.db.fetch_one(
-                """
-                SELECT * FROM bets WHERE bet_id = ?
-                """,
-                bet_id
-            )
-
-            # Update cache
-            if guild_id in self.bets and bet_id in self.bets[guild_id]:
-                self.bets[guild_id][bet_id] = bet
-
-            return bet
-        except Exception as e:
-            logger.error(f"Error updating bet status: {str(e)}")
-            raise BetServiceError(f"Failed to update bet status: {str(e)}")
-
-    async def start_bet_flow(self, interaction: discord.Interaction):
-        """Start the bet placement flow."""
-        try:
-            # Step 1: Bet Type Selection
-            view = BetTypeSelect()
-            await interaction.response.send_message(
-                "Select Bet Type:",
-                view=view,
-                ephemeral=True
-            )
-            await view.wait()
-            if not view.bet_type:
-                return
-
-            # Step 2: League Selection
-            leagues = ["NBA", "NFL", "MLB", "NHL"]
-            view = View()
-            view.add_item(LeagueSelect(leagues))
-            await interaction.followup.send(
-                "Select League:",
-                view=view,
-                ephemeral=True
-            )
-            await view.wait()
-            if not hasattr(view, 'selected_league'):
-                return
-
-            # Step 3: Game Selection
-            if view.selected_league != "Other":
-                games = await self._fetch_games(view.selected_league)
-                view = View()
-                view.add_item(GameSelect(games))
-                await interaction.followup.send(
-                    "Select Game:",
-                    view=view,
-                    ephemeral=True
-                )
-                await view.wait()
-                if not hasattr(view, 'selected_game'):
-                    return
-
-                if view.selected_game == "Other":
-                    view = View()
-                    modal = OtherGameModal()
-                    view.add_item(modal)
-                    await interaction.followup.send(
-                        "Enter Game Details:",
-                        view=view,
-                        ephemeral=True
-                    )
-                    await view.wait()
-                    if not hasattr(view, 'game_details'):
-                        return
-            else:
-                view = View()
-                modal = OtherGameModal()
-                view.add_item(modal)
-                await interaction.followup.send(
-                    "Enter Game Details:",
-                    view=view,
-                    ephemeral=True
-                )
-                await view.wait()
-                if not hasattr(view, 'game_details'):
-                    return
-
-            # Step 4: Bet Type Selection (Game/Player)
-            view = BetTypeSelectView()
-            await interaction.followup.send(
-                "Select Bet Type:",
-                view=view,
-                ephemeral=True
-            )
-            await view.wait()
-            if not view.bet_type:
-                return
-
-            # Step 5: Bet Details Entry
-            if view.bet_type == "Game":
-                view = View()
-                modal = GameBetModal()
-                view.add_item(modal)
-                await interaction.followup.send(
-                    "Enter Bet Details:",
-                    view=view,
-                    ephemeral=True
-                )
-                await view.wait()
-                if not hasattr(view, 'bet_details'):
-                    return
-            else:
-                view = View()
-                modal = PlayerPropModal()
-                view.add_item(modal)
-                await interaction.followup.send(
-                    "Enter Player Prop Details:",
-                    view=view,
-                    ephemeral=True
-                )
-                await view.wait()
-                if not hasattr(view, 'bet_details'):
-                    return
-
-            # Step 6: Units Selection
-            view = View()
-            view.add_item(UnitsSelect())
-            await interaction.followup.send(
-                "Select Units:",
-                view=view,
-                ephemeral=True
-            )
-            await view.wait()
-            if not hasattr(view, 'selected_units'):
-                return
-
-            # Step 7: Channel Selection
-            channels = [ch for ch in interaction.guild.text_channels 
-                       if ch.permissions_for(interaction.user).send_messages]
-            view = View()
-            view.add_item(ChannelSelect(channels))
-            await interaction.followup.send(
-                "Select Channel:",
-                view=view,
-                ephemeral=True
-            )
-            await view.wait()
-            if not hasattr(view, 'selected_channel'):
-                return
-
-            # Generate bet slip image
-            bet_id = self._generate_bet_id()
-            image = self.image_generator.generate_bet_slip(
-                home_team=view.game_details['team'] if hasattr(view, 'game_details') else games[0]['home_team'],
-                away_team=view.game_details['opponent'] if hasattr(view, 'game_details') else games[0]['away_team'],
-                league=view.selected_league,
-                game_time=datetime.now(),  # This should be parsed from game_details or games
-                line=view.bet_details['line'],
-                odds=view.bet_details['odds'],
-                units=view.selected_units,
-                bet_id=bet_id
-            )
-
-            # Save image temporarily
-            image_path = f"temp_bet_{bet_id}.png"
-            image.save(image_path)
-
-            # Send preview
-            view = View()
-            view.add_item(Button(label="Confirm", style=ButtonStyle.green))
-            view.add_item(Button(label="Cancel", style=ButtonStyle.red))
-            await interaction.followup.send(
-                file=discord.File(image_path),
-                view=view,
-                ephemeral=True
-            )
-
-            # Wait for confirmation
-            await view.wait()
-            if view.children[0].style == ButtonStyle.green:
-                # Place bet
-                await self.create_bet(
-                    guild_id=interaction.guild_id,
-                    user_id=interaction.user.id,
-                    game_id=view.selected_game if hasattr(view, 'selected_game') else None,
-                    bet_type=view.bet_type,
-                    selection=view.bet_details.get('player_name', ''),
-                    units=view.selected_units,
-                    odds=float(view.bet_details['odds']),
-                    channel_id=view.selected_channel
-                )
-
-                # Post in selected channel
-                channel = self.bot.get_channel(view.selected_channel)
-                if channel:
-                    await channel.send(file=discord.File(image_path))
-
-            # Clean up
-            os.remove(image_path)
-
-        except Exception as e:
-            logger.error(f"Error in bet flow: {str(e)}")
-            await interaction.followup.send(
-                "An error occurred while processing your bet. Please try again.",
-                ephemeral=True
-            )
-
-    async def _fetch_games(self, league: str) -> List[Dict]:
-        """Fetch games from the database for the given league."""
-        try:
-            # Get games from the database that are scheduled or live
-            games = await self.db.fetch(
-                """
-                SELECT * FROM games
-                WHERE league = $1
-                AND status IN ('scheduled', 'live')
-                AND start_time >= $2
-                ORDER BY start_time ASC
-                """,
-                league,
-                datetime.utcnow()
-            )
-            
-            if not games:
-                logger.warning(f"No games found for league {league}")
-                return []
-                
-            return games
-            
-        except Exception as e:
-            logger.error(f"Error fetching games for league {league}: {str(e)}")
-            raise BetServiceError(f"Failed to fetch games: {str(e)}")
 
     async def _view_pending_bets(self, interaction: discord.Interaction):
         """View user's pending bets"""
@@ -973,7 +709,7 @@ class BetService:
                 raise BetServiceError(f"Bet #{bet_serial} not found")
 
             # Update bet status
-            await self.update_bet_status(bet['guild_id'], bet['bet_id'], 'resolved', result)
+            await self.update_bet_status(bet['bet_id'], 'resolved', result)
 
             # Calculate winnings
             details = json.loads(bet['bet_details'])

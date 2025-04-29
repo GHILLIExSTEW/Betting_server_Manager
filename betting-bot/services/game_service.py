@@ -93,35 +93,8 @@ class GameService:
 
     async def _setup_commands(self):
         """Setup slash commands for the game service."""
-        try:
-            @self.bot.tree.command(
-                name="games",
-                description="View active games"
-            )
-            async def view_games(interaction: discord.Interaction, league: Optional[str] = None):
-                await self._view_games(interaction, league)
-
-            @self.bot.tree.command(
-                name="odds",
-                description="View odds for a game"
-            )
-            @app_commands.describe(
-                game_id="The game ID"
-            )
-            async def odds(interaction: discord.Interaction, game_id: str):
-                try:
-                    await self._view_odds(interaction, game_id)
-                except Exception as e:
-                    logger.error(f"Error in odds command: {e}")
-                    await interaction.response.send_message(
-                        f"An error occurred: {str(e)}",
-                        ephemeral=True
-                    )
-
-            logger.info("Game service commands registered successfully")
-        except Exception as e:
-            logger.error(f"Error setting up game service commands: {e}")
-            raise GameServiceError("Failed to setup game service commands")
+        # Commands have been moved to individual command files
+        pass
 
     async def _update_games(self):
         """Periodically update game statuses."""
