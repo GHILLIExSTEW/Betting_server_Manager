@@ -86,18 +86,19 @@ class BetService:
                 # Use self.db (the passed-in DatabaseManager)
                 # Updated to use MySQL syntax (%s placeholders)
                 expired_bets = await self.db.fetch_all("""
-                    SELECT bet_id, guild_id, user_id FROM bets
+                    SELECT bet_serial, guild_id, user_id, game_id, bet_type, selection, units, odds, status, created_at, updated_at, result_value, result_description
+                    FROM bets
                     WHERE status = %s
                     AND created_at < %s
                 """, 'pending', expiration_threshold)
 
                 for bet in expired_bets:
                     try:
-                        await self.update_bet_status(bet['bet_id'], 'expired', 'Expired due to age')
-                        logger.info(f"Expired pending bet {bet['bet_id']} for user {bet['user_id']} in guild {bet['guild_id']}")
+                        await self.update_bet_status(bet['bet_serial'], 'expired', 'Expired due to age')
+                        logger.info(f"Expired pending bet {bet['bet_serial']} for user {bet['user_id']} in guild {bet['guild_id']}")
                         # Optionally notify user/channel
                     except Exception as inner_e:
-                         logger.error(f"Error expiring bet {bet['bet_id']}: {inner_e}")
+                         logger.error(f"Error expiring bet {bet['bet_serial']}: {inner_e}")
 
             except asyncio.CancelledError:
                  self.logger.info("Bet update loop cancelled.")
@@ -146,12 +147,13 @@ class BetService:
 
             # Use the shared DatabaseManager instance (self.db)
             # Updated to use MySQL syntax (%s placeholders)
-            bet_id = await self.db.execute("""
+            bet_serial = await self.db.execute("""
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type,
                     selection, units, odds, channel_id,
                     created_at, status, updated_at, expiration_time
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s)
+                RETURNING bet_serial
             """, (
                 guild_id, user_id, db_game_id, bet_type,
                 selection, units, odds, channel_id,
@@ -160,22 +162,22 @@ class BetService:
                 expiration_time # Pass expiration if applicable, otherwise NULL
             ))
 
-            if bet_id:
-                 logger.info(f"Bet {bet_id} created successfully for user {user_id} in guild {guild_id}.")
+            if bet_serial:
+                 logger.info(f"Bet {bet_serial} created successfully for user {user_id} in guild {guild_id}.")
                  # If message_id is provided, store it for reaction tracking
                  if message_id:
                       self.pending_reactions[message_id] = {
-                           'bet_id': bet_id,
+                           'bet_serial': bet_serial,
                            'user_id': user_id,
                            'guild_id': guild_id,
                            'channel_id': channel_id
                            # Add other details if needed for notifications (selection, units, odds)
                       }
-                      logger.debug(f"Tracking reactions for message {message_id} (Bet ID: {bet_id})")
-                 return bet_id
+                      logger.debug(f"Tracking reactions for message {message_id} (Bet ID: {bet_serial})")
+                 return bet_serial
             else:
                  # This case should be rare if sequence generates ID
-                 raise BetServiceError("Failed to retrieve bet_id after insertion.")
+                 raise BetServiceError("Failed to retrieve bet_serial after insertion.")
 
         except ValidationError as ve:
              self.logger.warning(f"Bet validation failed: {ve}")
@@ -189,9 +191,9 @@ class BetService:
 
     async def update_bet_status(
         self,
-        bet_id: int,
+        bet_serial: int,
         status: str, # e.g., 'won', 'lost', 'push', 'canceled', 'expired'
-        result: Optional[str] = None, # Optional description or final score
+        result_description: Optional[str] = None, # Optional description or final score
         result_value: Optional[float] = None # Calculated profit/loss
     ) -> bool:
         """Update the status, result description, and result value of a bet."""
@@ -201,26 +203,26 @@ class BetService:
             status_code = await self.db.execute("""
                 UPDATE bets
                 SET status = %s, result_value = %s, updated_at = %s, result_description = %s
-                WHERE bet_id = %s
-            """, status, result_value, datetime.now(timezone.utc), result, bet_id)
+                WHERE bet_serial = %s
+            """, status, result_value, datetime.now(timezone.utc), result_description, bet_serial)
             # Check status_code (e.g., "UPDATE 1") to confirm update happened
             success = status_code is not None and 'UPDATE 1' in status_code
             if success:
-                 logger.info(f"Updated status for bet {bet_id} to {status}. Result Value: {result_value}")
+                 logger.info(f"Updated status for bet {bet_serial} to {status}. Result Value: {result_value}")
             else:
-                 logger.warning(f"Failed to update status for bet {bet_id} (Maybe bet_id not found?). Status code: {status_code}")
+                 logger.warning(f"Failed to update status for bet {bet_serial} (Maybe bet_serial not found?). Status code: {status_code}")
             return success
         except Exception as e:
-            self.logger.exception(f"Error updating bet status for bet_id {bet_id}: {e}")
+            self.logger.exception(f"Error updating bet status for bet_serial {bet_serial}: {e}")
             raise BetServiceError(f"Failed to update bet status: {str(e)}")
 
 
-    async def get_bet(self, bet_id: int) -> Optional[Dict]:
+    async def get_bet(self, bet_serial: int) -> Optional[Dict]:
          """Get a single bet by its ID."""
          try:
-              return await self.db.fetch_one("SELECT * FROM bets WHERE bet_id = %s", bet_id)
+              return await self.db.fetch_one("SELECT * FROM bets WHERE bet_serial = %s", bet_serial)
          except Exception as e:
-              self.logger.exception(f"Error retrieving bet {bet_id}: {e}")
+              self.logger.exception(f"Error retrieving bet {bet_serial}: {e}")
               return None
 
 
@@ -240,34 +242,34 @@ class BetService:
             raise BetServiceError(f"Failed to check user authorization: {str(e)}")
 
 
-    async def record_bet_result(self, bet_id: int, guild_id: int, user_id: int, units: int, odds: float, result_value: float):
+    async def record_bet_result(self, bet_serial: int, guild_id: int, user_id: int, units: int, odds: float, result_value: float):
          """Records the outcome units in the unit_records table."""
          try:
              now = datetime.now(timezone.utc)
              await self.db.execute(
                  """
-                 INSERT INTO unit_records (bet_id, guild_id, user_id, year, month, units, odds, result_value, created_at)
+                 INSERT INTO unit_records (bet_serial, guild_id, user_id, year, month, units, odds, result_value, created_at)
                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                  """,
-                 bet_id, guild_id, user_id, now.year, now.month, units, odds, result_value, now
+                 bet_serial, guild_id, user_id, now.year, now.month, units, odds, result_value, now
              )
-             logger.info(f"Recorded result for bet {bet_id}: {result_value} units.")
+             logger.info(f"Recorded result for bet {bet_serial}: {result_value} units.")
          except Exception as e:
-             self.logger.exception(f"Error recording result for bet {bet_id}: {e}")
+             self.logger.exception(f"Error recording result for bet {bet_serial}: {e}")
              # Consider how to handle failure here - retry? Log and move on?
 
-    async def remove_bet_result_record(self, bet_id: int):
+    async def remove_bet_result_record(self, bet_serial: int):
          """Removes the outcome record from unit_records, e.g., if a bet is reverted."""
          try:
               await self.db.execute(
                   """
-                  DELETE FROM unit_records WHERE bet_id = %s
+                  DELETE FROM unit_records WHERE bet_serial = %s
                   """,
-                  bet_id
+                  bet_serial
               )
-              logger.info(f"Removed result record for bet {bet_id}.")
+              logger.info(f"Removed result record for bet {bet_serial}.")
          except Exception as e:
-              self.logger.exception(f"Error removing result record for bet {bet_id}: {e}")
+              self.logger.exception(f"Error removing result record for bet {bet_serial}: {e}")
 
 
     async def _calculate_result_value(self, units: int, odds: float, outcome: str) -> float:
@@ -303,11 +305,11 @@ class BetService:
         #         return
 
         emoji = str(payload.emoji)
-        bet_id = bet_info['bet_id']
-        original_bet = await self.get_bet(bet_id)
+        bet_serial = bet_info['bet_serial']
+        original_bet = await self.get_bet(bet_serial)
 
         if not original_bet or original_bet['status'] != 'pending':
-             logger.warning(f"Reaction added to non-pending or non-existent bet {bet_id}. Ignored.")
+             logger.warning(f"Reaction added to non-pending or non-existent bet {bet_serial}. Ignored.")
              # Maybe clean up self.pending_reactions[payload.message_id] here?
              return
 
@@ -336,11 +338,11 @@ class BetService:
         if new_status:
             try:
                 # Update DB
-                updated = await self.update_bet_status(bet_id, new_status, result_desc, result_value)
+                updated = await self.update_bet_status(bet_serial, new_status, result_desc, result_value)
                 if updated:
                      # Record result if won or lost (not push)
                      if new_status in ['won', 'lost']:
-                          await self.record_bet_result(bet_id, bet_info['guild_id'], bet_info['user_id'], units, odds, result_value)
+                          await self.record_bet_result(bet_serial, bet_info['guild_id'], bet_info['user_id'], units, odds, result_value)
 
                      # Remove from pending reactions *only if update was successful*
                      if payload.message_id in self.pending_reactions:
@@ -355,7 +357,7 @@ class BetService:
                           asyncio.create_task(self.bot.voice_service.update_on_bet_resolve(bet_info['guild_id']))
 
             except Exception as e:
-                self.logger.exception(f"Error handling reaction add for bet {bet_id}: {e}")
+                self.logger.exception(f"Error handling reaction add for bet {bet_serial}: {e}")
                 # Consider sending an error message to the user/channel
 
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent) -> None:
@@ -370,7 +372,7 @@ class BetService:
         # 2. Check if the remover is the resolver or an admin.
         # 3. Fetch the bet. If it's 'won'/'lost'/'push':
         #    a. Update status back to 'pending'.
-        #    b. Remove the record from unit_records using self.remove_bet_result_record(bet_id).
+        #    b. Remove the record from unit_records using self.remove_bet_result_record(bet_serial).
         #    c. Add the message_id back to self.pending_reactions.
         #    d. Notify users.
         # logger.debug(f"Reaction remove event on message {payload.message_id}. Reverting logic is currently disabled.")
@@ -381,7 +383,7 @@ class BetService:
         """Send notification about bet status change (Helper)."""
         try:
             # Fetch full bet details if needed (bet_info might only have IDs)
-            bet = await self.get_bet(bet_info['bet_id'])
+            bet = await self.get_bet(bet_info['bet_serial'])
             if not bet: return
 
             user = self.bot.get_user(bet['user_id']) # Fetch user object
@@ -400,7 +402,7 @@ class BetService:
 
             embed = Embed(
                 title=f"Bet {status.title()}",
-                description=f"Bet ID: `{bet['bet_id']}`",
+                description=f"Bet ID: `{bet['bet_serial']}`",
                 color=color,
                 timestamp=datetime.now(timezone.utc)
             )
@@ -417,7 +419,7 @@ class BetService:
             if channel and isinstance(channel, discord.TextChannel):
                 await channel.send(embed=embed)
             else:
-                logger.warning(f"Could not find channel {bet['channel_id']} to send bet status notification for bet {bet['bet_id']}.")
+                logger.warning(f"Could not find channel {bet['channel_id']} to send bet status notification for bet {bet['bet_serial']}.")
 
         except Exception as e:
-            self.logger.exception(f"Error sending bet status notification for bet {bet_info.get('bet_id')}: {e}")
+            self.logger.exception(f"Error sending bet status notification for bet {bet_info.get('bet_serial')}: {e}")
