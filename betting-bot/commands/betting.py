@@ -4,8 +4,8 @@ import logging
 from typing import Optional, List, Dict
 from datetime import datetime
 import aiosqlite
-from services.bet_service import BetService
-from services.game_service import GameService
+from ..services.bet_service import BetService
+from ..services.game_service import GameService
 from discord.ui import View, Select, Modal, TextInput, Button, ButtonStyle
 
 logger = logging.getLogger(__name__)

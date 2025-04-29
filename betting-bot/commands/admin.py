@@ -1,10 +1,13 @@
 import discord
 from discord import app_commands
 import logging
-from typing import Optional
+from typing import Optional, List
 import os
 from datetime import datetime
 import aiosqlite
+from ..services.admin_service import AdminService
+from discord.ui import View, Select, Modal, TextInput
+from discord.ext import commands
 
 logger = logging.getLogger(__name__)
 
@@ -298,152 +301,103 @@ class ServerSettingsView(discord.ui.View):
                 ephemeral=True
             )
 
-class AdminView(discord.ui.View):
-    def __init__(self, is_paid: bool = False):
-        super().__init__(timeout=None)
-        self.is_paid = is_paid
+class VoiceChannelSelect(Select):
+    def __init__(self, channels: List[discord.VoiceChannel]):
+        options = [
+            discord.SelectOption(
+                label=channel.name,
+                value=str(channel.id),
+                description=f"ID: {channel.id}"
+            ) for channel in channels
+        ]
+        super().__init__(
+            placeholder="Select a voice channel...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.selected_channel_id = int(self.values[0])
+        await interaction.response.defer()
+        self.view.stop()
+
+class AdminView(View):
+    def __init__(self, admin_service: AdminService):
+        super().__init__()
+        self.admin_service = admin_service
+        self.selected_channel = None
 
     @discord.ui.select(
-        placeholder="Select an admin action",
+        placeholder="Select an action...",
         options=[
-            discord.SelectOption(
-                label="Configure Server Settings",
-                value="configure_settings",
-                description="Configure server settings and channels"
-            ),
-            discord.SelectOption(
-                label="View Current Settings",
-                value="view_settings",
-                description="View current server configuration"
-            )
+            discord.SelectOption(label="Set Monthly Channel", value="set_monthly"),
+            discord.SelectOption(label="Set Yearly Channel", value="set_yearly"),
+            discord.SelectOption(label="Remove Monthly Channel", value="remove_monthly"),
+            discord.SelectOption(label="Remove Yearly Channel", value="remove_yearly")
         ]
     )
     async def select_action(self, interaction: discord.Interaction, select: discord.ui.Select):
-        if select.values[0] == "configure_settings":
-            view = ServerSettingsView(interaction.guild, self.is_paid)
-            await interaction.response.send_message(
-                "Starting server configuration...",
-                ephemeral=True
-            )
-            await view.start_selection(interaction)
-        elif select.values[0] == "view_settings":
-            await self.handle_view_settings(interaction)
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You need administrator permissions to use this command.", ephemeral=True)
+            return
 
-    async def handle_view_settings(self, interaction: discord.Interaction):
-        """Handle viewing current server settings."""
-        try:
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                async with db.execute(
-                    "SELECT * FROM server_settings WHERE guild_id = ?",
-                    (interaction.guild.id,)
-                ) as cursor:
-                    settings = await cursor.fetchone()
-            
-            if not settings:
-                await interaction.response.send_message(
-                    "No settings configured for this server.",
-                    ephemeral=True
-                )
+        guild_id = interaction.guild_id
+        is_paid = await self.admin_service.is_guild_paid(guild_id)
+        if not is_paid:
+            await interaction.response.send_message("This feature is only available for paid guilds.", ephemeral=True)
+            return
+
+        action = select.values[0]
+        
+        if action in ["set_monthly", "set_yearly"]:
+            voice_channels = [channel for channel in interaction.guild.voice_channels]
+            if not voice_channels:
+                await interaction.response.send_message("No voice channels found in this server.", ephemeral=True)
                 return
             
-            embed = discord.Embed(
-                title="Server Settings",
-                color=discord.Color.blue(),
-                timestamp=datetime.utcnow()
-            )
+            channel_select = VoiceChannelSelect(voice_channels)
+            channel_select.callback = self.handle_channel_selection
+            self.selected_channel = action
             
-            # Add basic settings
-            embed.add_field(
-                name="Subscription Level",
-                value="Premium" if settings[1] == 2 else "Free",
-                inline=False
-            )
+            view = View()
+            view.add_item(channel_select)
+            await interaction.response.send_message("Select a voice channel:", view=view, ephemeral=True)
+        else:
+            if action == "remove_monthly":
+                success = await self.admin_service.remove_monthly_channel(guild_id)
+                message = "Monthly channel removed successfully." if success else "Failed to remove monthly channel."
+            else:
+                success = await self.admin_service.remove_yearly_channel(guild_id)
+                message = "Yearly channel removed successfully." if success else "Failed to remove yearly channel."
             
-            # Add channel settings
-            channels = {
-                "Embed Channel 1": settings[2],
-                "Command Channel 1": settings[4],
-                "Admin Channel": settings[6]
-            }
-            
-            if settings[1] == 2:  # Premium features
-                channels.update({
-                    "Embed Channel 2": settings[3],
-                    "Command Channel 2": settings[5],
-                    "Voice Channel": settings[12],
-                    "Yearly Channel": settings[13]
-                })
-            
-            for name, channel_id in channels.items():
-                if channel_id:
-                    channel = interaction.guild.get_channel(int(channel_id))
-                    embed.add_field(
-                        name=name,
-                        value=channel.mention if channel else "Not set",
-                        inline=True
-                    )
-            
-            # Add role settings
-            roles = {
-                "Admin Role": settings[7],
-                "Authorized Role": settings[8]
-            }
-            
-            if settings[1] == 2:  # Premium features
-                roles["Member Role"] = settings[9]
-            
-            for name, role_id in roles.items():
-                if role_id:
-                    role = interaction.guild.get_role(int(role_id))
-                    embed.add_field(
-                        name=name,
-                        value=role.mention if role else "Not set",
-                        inline=True
-                    )
-            
-            if settings[1] == 2:  # Premium features
-                embed.add_field(
-                    name="Daily Report Time",
-                    value=settings[10] or "Not set",
-                    inline=True
-                )
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-        except Exception as e:
-            logger.error(f"Error viewing settings: {str(e)}")
-            await interaction.response.send_message(
-                "❌ Failed to view settings. Check logs for details.",
-                ephemeral=True
-            )
+            await interaction.response.send_message(message, ephemeral=True)
 
-async def setup(tree: app_commands.CommandTree):
-    """Setup function for the admin command."""
-    @tree.command(
-        name="admin",
-        description="Admin commands for system management"
-    )
-    @app_commands.checks.has_permissions(administrator=True)
+    async def handle_channel_selection(self, interaction: discord.Interaction):
+        channel_id = int(interaction.data["values"][0])
+        guild_id = interaction.guild_id
+        
+        if self.selected_channel == "set_monthly":
+            success = await self.admin_service.set_monthly_channel(guild_id, channel_id)
+            message = "Monthly channel set successfully." if success else "Failed to set monthly channel."
+        else:
+            success = await self.admin_service.set_yearly_channel(guild_id, channel_id)
+            message = "Yearly channel set successfully." if success else "Failed to set yearly channel."
+        
+        await interaction.response.send_message(message, ephemeral=True)
+
+async def setup(bot: commands.Bot):
+    admin_service = AdminService()
+    
+    @bot.tree.command(name="admin", description="Admin commands for server management")
+    @app_commands.default_permissions(administrator=True)
     async def admin(interaction: discord.Interaction):
-        """Admin command for system management."""
-        try:
-            # Check if guild is in test guild for special actions
-            is_test_guild = interaction.guild.id == int(os.getenv('TEST_GUILD_ID'))
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You need administrator permissions to use this command.", ephemeral=True)
+            return
             
-            # Check subscription status (you'll need to implement this)
-            is_paid = await check_subscription_status(interaction.guild.id)
-            
-            view = AdminView(is_paid)
-            await interaction.response.send_message(
-                "Select an admin action:",
-                view=view,
-                ephemeral=True
-            )
-        except Exception as e:
-            logger.error(f"Error in admin command: {str(e)}")
-            await interaction.response.send_message(
-                "An error occurred while processing the admin command.",
-                ephemeral=True
-            )
+        view = AdminView(admin_service)
+        await interaction.response.send_message("Select an action:", view=view, ephemeral=True)
 
 async def check_subscription_status(guild_id: int) -> bool:
     """Check if a guild has a paid subscription."""
