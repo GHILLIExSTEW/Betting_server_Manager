@@ -1,0 +1,39 @@
+class BetServiceError(Exception):
+    """Base exception for bet service errors."""
+    pass
+
+class ValidationError(BetServiceError):
+    """Exception raised for validation errors."""
+    pass
+
+class DatabaseError(BetServiceError):
+    """Exception raised for database errors."""
+    pass
+
+class CacheError(BetServiceError):
+    """Exception raised for cache errors."""
+    pass
+
+class AuthorizationError(BetServiceError):
+    """Exception raised for authorization errors."""
+    pass
+
+class GameNotFoundError(BetServiceError):
+    """Exception raised when a game is not found."""
+    pass
+
+class InsufficientUnitsError(BetServiceError):
+    """Exception raised when a user has insufficient units."""
+    pass
+
+class InvalidBetTypeError(ValidationError):
+    """Exception raised for invalid bet types."""
+    pass
+
+class InvalidOddsError(ValidationError):
+    """Exception raised for invalid odds."""
+    pass
+
+class InvalidUnitsError(ValidationError):
+    """Exception raised for invalid units."""
+    pass 
