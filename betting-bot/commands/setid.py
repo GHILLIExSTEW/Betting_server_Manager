@@ -198,9 +198,9 @@ async def setid(interaction: discord.Interaction, user: discord.Member):
             ephemeral=True
         )
 
-async def setup(bot):
+async def setup(tree: app_commands.CommandTree):
     """Add the setid command to the bot."""
-    bot.tree.add_command(
+    tree.add_command(
         app_commands.Command(
             name="setid",
             description="Set up a user as a capper",

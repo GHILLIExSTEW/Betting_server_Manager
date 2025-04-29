@@ -209,9 +209,9 @@ async def bet(interaction: discord.Interaction):
             ephemeral=True
         )
 
-async def setup(bot):
+async def setup(tree: app_commands.CommandTree):
     """Add the betting command to the bot."""
-    bot.tree.add_command(
+    tree.add_command(
         app_commands.Command(
             name="bet",
             description="Place a new bet",

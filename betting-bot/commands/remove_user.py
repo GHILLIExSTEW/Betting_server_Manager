@@ -111,9 +111,9 @@ async def remove_user(interaction: discord.Interaction):
     view = RemoveUserView(interaction.guild_id)
     await view.populate_users(interaction)
 
-async def setup(bot):
+async def setup(tree: app_commands.CommandTree):
     """Add the remove_user command to the bot."""
-    bot.tree.add_command(
+    tree.add_command(
         app_commands.Command(
             name="remove_user",
             description="Remove a user from the server",

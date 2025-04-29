@@ -176,9 +176,9 @@ async def stats(interaction: discord.Interaction):
             ephemeral=True
         )
 
-async def setup(bot):
+async def setup(tree: app_commands.CommandTree):
     """Add the stats command to the bot."""
-    bot.tree.add_command(
+    tree.add_command(
         app_commands.Command(
             name="stats",
             description="View betting statistics",
