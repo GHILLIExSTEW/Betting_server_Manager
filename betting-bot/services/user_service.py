@@ -9,7 +9,6 @@ from utils.errors import UserServiceError
 from config.settings import USER_CACHE_TTL
 import aiosqlite
 import aiomysql
-from config.database import DB_CONFIG
 
 logger = logging.getLogger(__name__)
 
