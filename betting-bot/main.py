@@ -26,7 +26,7 @@ from services.admin_service import AdminService
 from services.analytics_service import AnalyticsService
 from commands import setup as setup_commands
 from services.user_service import UserService
-from config.database import DB_CONFIG
+from data.db_manager import DB_CONFIG
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
