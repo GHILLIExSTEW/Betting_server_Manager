@@ -1,3 +1,5 @@
+# betting-bot/utils/errors.py
+
 """Custom error classes for the betting bot."""
 
 class BettingBotError(Exception):
@@ -23,11 +25,12 @@ class ValidationError(BettingBotError):
 class ServiceError(Exception):
     """Base class for all service-related errors."""
     pass
-    
+
+# Added UserServiceError
 class UserServiceError(ServiceError):
     """Raised when there's an error in the user service."""
     pass
-    
+
 class GameServiceError(ServiceError):
     """Raised when there's an error in the game service."""
     pass
@@ -36,6 +39,7 @@ class DataSyncError(ServiceError):
     """Raised when there's an error in data synchronization."""
     pass
 
+# Consider renaming this if it's specific to db_manager or make it more generic
 class DatabaseError(Exception):
     """Raised when there's an error in database operations."""
     pass
@@ -76,11 +80,11 @@ class VoiceError(Exception):
     """Raised when there's an error in voice operations."""
     pass
 
-class GameNotFoundError(BetServiceError):
+class GameNotFoundError(GameServiceError): # Changed inheritance to GameServiceError
     """Exception raised when a game is not found."""
     pass
 
-class InsufficientUnitsError(BetServiceError):
+class InsufficientUnitsError(BetServiceError): # Changed inheritance to BetServiceError
     """Exception raised when a user has insufficient units."""
     pass
 
@@ -118,4 +122,4 @@ class DataProcessingError(AnalyticsServiceError):
 
 class VisualizationError(AnalyticsServiceError):
     """Exception raised for errors during data visualization."""
-    pass 
+    pass
