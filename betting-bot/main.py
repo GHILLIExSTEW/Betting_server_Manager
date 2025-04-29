@@ -6,35 +6,33 @@ import logging
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-import asyncio # Import asyncio for potential cleanup
+import asyncio
 
 # --- Path Setup ---
-# Add the current directory's parent to the Python path to find packages
-# (Assumes main.py is inside 'betting-bot' and 'betting-bot' is inside your project root)
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir) # Get the directory containing 'betting-bot'
-sys.path.insert(0, project_root)
+# We remove the sys.path manipulation assuming main.py is run directly
+# from within the betting-bot directory. Python should find sibling packages.
+# current_dir = os.path.dirname(os.path.abspath(__file__))
+# project_root = os.path.dirname(current_dir)
+# sys.path.insert(0, project_root)
 # --- End Path Setup ---
 
-# Load environment variables from .env file in the project root FIRST
-load_dotenv(dotenv_path=os.path.join(project_root, '.env'))
+# Load environment variables from .env file (assuming it's one level up from main.py)
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=dotenv_path)
+# If your .env is in the SAME directory as main.py, just use: load_dotenv()
 
-# --- Imports (After path setup and dotenv) ---
-# Import your specific DatabaseManager (assuming the asyncpg version)
-from betting_bot.data.db_manager import DatabaseManager # Adjusted import path
-# Import Services
-from betting_bot.services.game_service import GameService
-from betting_bot.services.bet_service import BetService
-from betting_bot.services.admin_service import AdminService
-from betting_bot.services.analytics_service import AnalyticsService
-from betting_bot.services.user_service import UserService
-from betting_bot.services.voice_service import VoiceService
-from betting_bot.services.data_sync_service import DataSyncService
+# --- Imports (Relative to betting-bot directory) ---
+from data.db_manager import DatabaseManager # Corrected import
+from services.game_service import GameService # Corrected import
+from services.bet_service import BetService # Corrected import
+from services.admin_service import AdminService # Corrected import
+from services.analytics_service import AnalyticsService # Corrected import
+from services.user_service import UserService # Corrected import
+from services.voice_service import VoiceService # Corrected import
+from services.data_sync_service import DataSyncService # Corrected import
 # Import Command Setup (choose one command loading strategy)
-# Option A: If using commands/__init__.py CommandManager
-# from betting_bot.commands import CommandManager
-# Option B: If using setup functions directly (less organized)
-# from betting_bot.commands.admin import setup as setup_admin_cmds # Example
+# from commands import CommandManager # Corrected import
+# from commands.admin import setup as setup_admin_cmds # Corrected import
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -47,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # --- Environment Variable Access ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
-TEST_GUILD_ID_STR = os.getenv('TEST_GUILD_ID') # Get this if you use it for syncing
+TEST_GUILD_ID_STR = os.getenv('TEST_GUILD_ID')
 TEST_GUILD_ID = int(TEST_GUILD_ID_STR) if TEST_GUILD_ID_STR and TEST_GUILD_ID_STR.isdigit() else None
 
 # --- Bot Token Check ---
@@ -56,15 +54,15 @@ if not BOT_TOKEN:
     sys.exit("Missing DISCORD_TOKEN")
 
 # --- Bot Definition ---
-class BettingBot(commands.AutoShardedBot): # Use AutoShardedBot for better scaling
+class BettingBot(commands.AutoShardedBot):
     def __init__(self):
         intents = discord.Intents.default()
-        intents.message_content = True # Required for potential message commands/interactions
-        intents.members = True # Often needed for user lookups/roles
-        intents.reactions = True # Needed for bet resolution via reactions
+        intents.message_content = True
+        intents.members = True
+        intents.reactions = True
 
         # Get prefix from settings or use default
-        # from betting_bot.config.settings import COMMAND_PREFIX # Example import
+        # from config.settings import COMMAND_PREFIX # Example import
         super().__init__(
             command_prefix='!', # Replace with COMMAND_PREFIX if loaded
             intents=intents,
@@ -102,10 +100,18 @@ class BettingBot(commands.AutoShardedBot): # Use AutoShardedBot for better scali
             # Option B: Manual setup (less ideal)
             # await setup_admin_cmds(self.tree) # Example
             # ... load other commands ...
-            # For simplicity, let's assume commands might be loaded via cogs or another method
-            # If you use `commands/__init__.py`'s CommandManager, uncomment the line above.
-            # Make sure your chosen command loading happens *here*.
-            logger.info("Command setup/loading placeholder - ensure your method is called here.")
+            # Ensure your chosen command loading method (e.g., loading cogs) happens here.
+            # Example using load_extension for cogs placed in 'commands' folder:
+            commands_dir = "commands" # Assuming commands are cogs
+            for filename in os.listdir(f'./{commands_dir}'): # Use relative path
+                if filename.endswith('.py') and not filename.startswith('__'):
+                    try:
+                        await self.load_extension(f'{commands_dir}.{filename[:-3]}')
+                        logger.info(f'Loaded command cog: {filename[:-3]}')
+                    except Exception as e:
+                        logger.error(f'Failed to load command cog {filename[:-3]}: {e}')
+
+            logger.info("Command loading process completed.")
 
 
             # Start services AFTER DB is connected
@@ -140,14 +146,10 @@ class BettingBot(commands.AutoShardedBot): # Use AutoShardedBot for better scali
             logger.info("Bot setup hook completed successfully.")
 
         except Exception as e:
-            logger.exception(f"CRITICAL ERROR during setup_hook: {e}") # Use logger.exception to include traceback
-            # Ensure pool is closed if setup fails partially
+            logger.exception(f"CRITICAL ERROR during setup_hook: {e}")
             if self.db_manager:
                 await self.db_manager.close()
-            # Optionally shutdown the bot process if setup fails critically
-            # await self.close()
-            # sys.exit("Bot setup failed.")
-            raise # Re-raise to indicate critical failure
+            raise
 
 
     async def on_ready(self):
@@ -160,34 +162,29 @@ class BettingBot(commands.AutoShardedBot): # Use AutoShardedBot for better scali
     async def on_guild_join(self, guild: discord.Guild):
         """Called when the bot joins a new guild."""
         logger.info(f"Joined new guild: {guild.name} ({guild.id})")
-        # Optionally sync commands to the new guild immediately
-        # Or handle setup via an admin command later
         try:
             await self.tree.sync(guild=guild)
             logger.info(f"Synced commands for new guild {guild.name}")
         except Exception as e:
             logger.error(f"Error syncing commands for new guild {guild.name}: {e}")
-        # Optionally send a welcome message or log guild join to DB
 
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         """Pass raw reaction events to BetService."""
-        # Ignore reactions from the bot itself
         if payload.user_id == self.user.id:
             return
-        # Let BetService handle the logic
         if hasattr(self.bet_service, 'on_raw_reaction_add'):
-            await self.bet_service.on_raw_reaction_add(payload)
+            # Use create_task to avoid blocking the event loop if reaction handling is slow
+            asyncio.create_task(self.bet_service.on_raw_reaction_add(payload))
 
 
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
         """Pass raw reaction removal events to BetService."""
-         # Ignore reactions from the bot itself
         if payload.user_id == self.user.id:
             return
-        # Let BetService handle the logic
         if hasattr(self.bet_service, 'on_raw_reaction_remove'):
-            await self.bet_service.on_raw_reaction_remove(payload)
+             # Use create_task to avoid blocking the event loop
+             asyncio.create_task(self.bet_service.on_raw_reaction_remove(payload))
 
 
     async def close(self):
@@ -225,15 +222,16 @@ def main():
     try:
         logger.info("Starting bot...")
         # Run the bot using the token from environment variables
-        bot.run(BOT_TOKEN, log_handler=None) # Disable default discord.py logging handler if using basicConfig
+        bot.run(BOT_TOKEN, log_handler=None)
     except discord.LoginFailure:
         logger.error("Login failed: Invalid Discord token provided in .env file.")
     except Exception as e:
         logger.exception(f"An error occurred while running the bot: {e}")
     finally:
-        # Ensure cleanup happens even on unexpected exit, though bot.close() is preferred
-        # This might run into issues if the loop isn't running anymore
-        # asyncio.run(bot.close()) # May not work reliably here
+        # Ensure cleanup happens even on unexpected exit
+        # Using bot.close() within the main loop's exception handling
+        # might be tricky if the loop is already broken.
+        # Rely on KeyboardInterrupt or system signals for graceful shutdown via bot.close().
         logger.info("Bot process finished.")
 
 
