@@ -4,6 +4,7 @@ import discord
 from discord import app_commands
 from typing import List, Type
 import logging
+import os
 from .betting import Betting
 from .stats import Stats
 from .admin import Admin
@@ -26,8 +27,17 @@ class CommandManager:
     async def register_commands(self):
         """Register all commands with the bot's command tree."""
         try:
+            # Get test guild ID from environment
+            test_guild_id = int(os.getenv('TEST_GUILD_ID', 0))
+            
             # Clear global commands
             self.bot.tree.clear_commands(guild=None)
+            logger.info("Cleared all global commands")
+            
+            # Clear test guild commands if guild ID is provided
+            if test_guild_id:
+                self.bot.tree.clear_commands(guild=discord.Object(id=test_guild_id))
+                logger.info(f"Cleared all commands for test guild {test_guild_id}")
             
             # Register each command group globally
             for group_class in self.command_groups:
@@ -37,6 +47,8 @@ class CommandManager:
             
             # Sync commands with Discord
             await self.bot.tree.sync()
+            if test_guild_id:
+                await self.bot.tree.sync(guild=discord.Object(id=test_guild_id))
             logger.info("Successfully synced all commands with Discord")
             
         except Exception as e:
