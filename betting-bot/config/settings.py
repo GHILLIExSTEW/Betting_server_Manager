@@ -29,6 +29,7 @@ CACHE_MAX_SIZE = 1000  # Maximum number of items in cache
 GAME_CACHE_TTL = 300  # 5 minutes in seconds
 LEAGUE_CACHE_TTL = 86400  # 24 hours in seconds
 TEAM_CACHE_TTL = 86400  # 24 hours in seconds
+USER_CACHE_TTL = 86400 # 24 hours in seconds
 
 # Betting Rules
 MIN_ODDS = -1000
