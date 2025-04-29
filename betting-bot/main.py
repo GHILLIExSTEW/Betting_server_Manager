@@ -5,8 +5,10 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-# Add the current directory to the Python path
+# Add the current directory and parent directory to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
 sys.path.append(current_dir)
 
 from services.game_service import GameService
