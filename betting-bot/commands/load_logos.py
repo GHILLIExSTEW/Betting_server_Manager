@@ -110,9 +110,7 @@ class LoadLogosCog(commands.Cog):
     # Use the 'guilds' parameter to restrict it to the test guild
     @app_commands.command(
         name="load_logos",
-        description="Load team or league logos (Restricted User).",
-        # Only register in the specified test guild
-        guilds=[discord.Object(id=TEST_GUILD_ID)] if TEST_GUILD_ID else []
+        description="Load team or league logos (Restricted User)."
     )
     @app_commands.describe(
         team_name="The name of the team or league.",
