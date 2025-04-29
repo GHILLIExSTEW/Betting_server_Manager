@@ -392,18 +392,17 @@ class AdminView(View):
         
         await interaction.response.send_message(message, ephemeral=True)
 
-class Admin(discord.app_commands.Group):
-    """Group of commands for admin operations."""
-    def __init__(self, bot):
-        super().__init__(name="admin", description="Admin commands")
-        self.bot = bot
-
-    @app_commands.command(name="sync", description="Sync all commands with Discord")
+async def setup(bot):
+    """Add the admin command to the bot."""
+    @bot.tree.command(
+        name="admin",
+        description="Sync all commands with Discord"
+    )
     @app_commands.checks.has_permissions(administrator=True)
-    async def sync(self, interaction: discord.Interaction):
+    async def admin(interaction: discord.Interaction):
         """Sync all commands with Discord."""
         try:
-            await self.bot.tree.sync()
+            await bot.tree.sync()
             await interaction.response.send_message(
                 "✅ Successfully synced all commands with Discord",
                 ephemeral=True
@@ -414,65 +413,6 @@ class Admin(discord.app_commands.Group):
                 "❌ Failed to sync commands. Check logs for details.",
                 ephemeral=True
             )
-
-    @app_commands.command(name="register", description="Register commands for this server")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def register(self, interaction: discord.Interaction):
-        """Register commands for this server."""
-        try:
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                await db.execute(
-                    """
-                    INSERT OR REPLACE INTO server_settings 
-                    (guild_id, commands_registered) 
-                    VALUES (?, 1)
-                    """,
-                    (interaction.guild_id,)
-                )
-                await db.commit()
-
-            await interaction.response.send_message(
-                "✅ Successfully registered commands for this server",
-                ephemeral=True
-            )
-        except Exception as e:
-            logger.error(f"Error registering commands: {str(e)}")
-            await interaction.response.send_message(
-                "❌ Failed to register commands. Check logs for details.",
-                ephemeral=True
-            )
-
-    @app_commands.command(name="unregister", description="Unregister commands for this server")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def unregister(self, interaction: discord.Interaction):
-        """Unregister commands for this server."""
-        try:
-            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
-                await db.execute(
-                    """
-                    UPDATE server_settings 
-                    SET commands_registered = 0 
-                    WHERE guild_id = ?
-                    """,
-                    (interaction.guild_id,)
-                )
-                await db.commit()
-
-            await interaction.response.send_message(
-                "✅ Successfully unregistered commands for this server",
-                ephemeral=True
-            )
-        except Exception as e:
-            logger.error(f"Error unregistering commands: {str(e)}")
-            await interaction.response.send_message(
-                "❌ Failed to unregister commands. Check logs for details.",
-                ephemeral=True
-            )
-
-async def setup(bot):
-    """Add the admin commands to the bot."""
-    admin_group = Admin(bot)
-    bot.tree.add_command(admin_group)
 
 async def check_subscription_status(guild_id: int) -> bool:
     """Check if a guild has a paid subscription."""

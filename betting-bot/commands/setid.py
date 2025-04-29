@@ -167,64 +167,137 @@ class ImageURLModal(discord.ui.Modal, title="Image URL"):
                 ephemeral=True
             )
 
-class SetID(discord.app_commands.Group):
-    """Group of commands for setting IDs."""
-    def __init__(self, bot):
-        super().__init__(name="setid", description="Set ID commands")
-        self.bot = bot
-        self.admin_service = AdminService(bot)
+class RemoveUserSelect(discord.ui.Select):
+    def __init__(self, users: list):
+        options = [
+            discord.SelectOption(
+                label=user[2],  # display_name
+                value=str(user[1]),  # user_id
+                description=f"Remove {user[2]} from users"
+            ) for user in users
+        ]
+        super().__init__(
+            placeholder="Select a user to remove",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
 
-    @app_commands.command(name="admin", description="Set admin ID")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def admin(self, interaction: discord.Interaction, user_id: str):
-        """Set admin ID for the server."""
+    async def callback(self, interaction: discord.Interaction):
         try:
-            await self.admin_service.set_admin_id(interaction.guild_id, user_id)
+            user_id = int(self.values[0])
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+                # Get display_name before deleting
+                async with db.execute(
+                    """
+                    SELECT display_name 
+                    FROM users 
+                    WHERE user_id = ? AND guild_id = ?
+                    """,
+                    (user_id, interaction.guild_id)
+                ) as cursor:
+                    result = await cursor.fetchone()
+                    if not result:
+                        await interaction.response.send_message(
+                            "❌ User not found.",
+                            ephemeral=True
+                        )
+                        return
+                    display_name = result[0]
+
+                # Delete the user
+                await db.execute(
+                    """
+                    DELETE FROM users 
+                    WHERE user_id = ? AND guild_id = ?
+                    """,
+                    (user_id, interaction.guild_id)
+                )
+                await db.commit()
+
+                await interaction.response.send_message(
+                    f"✅ Successfully removed user '{display_name}'",
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error removing user: {str(e)}")
             await interaction.response.send_message(
-                f"✅ Admin ID set to {user_id}",
-                ephemeral=True
-            )
-        except AdminServiceError as e:
-            await interaction.response.send_message(
-                f"❌ Error setting admin ID: {str(e)}",
+                "❌ An error occurred while removing the user.",
                 ephemeral=True
             )
 
-    @app_commands.command(name="user", description="Set user ID")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def user(self, interaction: discord.Interaction, user_id: str):
-        """Set user ID for the server."""
-        try:
-            await self.admin_service.set_user_id(interaction.guild_id, user_id)
-            await interaction.response.send_message(
-                f"✅ User ID set to {user_id}",
-                ephemeral=True
-            )
-        except AdminServiceError as e:
-            await interaction.response.send_message(
-                f"❌ Error setting user ID: {str(e)}",
-                ephemeral=True
-            )
+class RemoveUserView(discord.ui.View):
+    def __init__(self, guild_id: int):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.guild_id = guild_id
 
-    @app_commands.command(name="remove", description="Remove user ID")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def remove(self, interaction: discord.Interaction, user_id: str):
-        """Remove user ID from the server."""
+    async def populate_users(self, interaction: discord.Interaction):
         try:
-            await self.admin_service.remove_user_id(interaction.guild_id, user_id)
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+                # Get all users from the guild
+                async with db.execute(
+                    """
+                    SELECT guild_id, user_id, display_name 
+                    FROM users 
+                    WHERE guild_id = ?
+                    ORDER BY display_name
+                    """,
+                    (self.guild_id,)
+                ) as cursor:
+                    users = await cursor.fetchall()
+
+                if not users:
+                    await interaction.response.send_message(
+                        "❌ No users found in this server.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Add select menu
+                self.add_item(RemoveUserSelect(users))
+                await interaction.response.send_message(
+                    "Select a user to remove:",
+                    view=self,
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error populating users: {str(e)}")
             await interaction.response.send_message(
-                f"✅ User ID {user_id} removed",
-                ephemeral=True
-            )
-        except AdminServiceError as e:
-            await interaction.response.send_message(
-                f"❌ Error removing user ID: {str(e)}",
+                "❌ An error occurred while fetching users.",
                 ephemeral=True
             )
 
 async def setup(bot):
-    """Setup function for the SetID commands."""
-    await bot.add_cog(SetID(bot))
+    """Add the setid command to the bot."""
+    @bot.tree.command(
+        name="setid",
+        description="Set user ID for the server"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setid(interaction: discord.Interaction, user: discord.Member):
+        """Set user ID for the server."""
+        try:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
+                await db.execute(
+                    """
+                    INSERT OR REPLACE INTO users 
+                    (guild_id, user_id, username) 
+                    VALUES (?, ?, ?)
+                    """,
+                    (interaction.guild_id, user.id, user.name)
+                )
+                await db.commit()
+
+            await interaction.response.send_message(
+                f"✅ Successfully set {user.mention} as a user",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error setting user: {str(e)}")
+            await interaction.response.send_message(
+                "❌ Failed to set user. Check logs for details.",
+                ephemeral=True
+            )
 
     # Handle image uploads
     @bot.tree.listen('on_message')

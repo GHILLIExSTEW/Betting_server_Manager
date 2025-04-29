@@ -2,13 +2,8 @@
 
 import discord
 from discord import app_commands
-from typing import List, Type
 import logging
 import os
-from .betting import Betting
-from .stats import Stats
-from .admin import Admin
-from .setid import SetID
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +12,6 @@ class CommandManager:
     
     def __init__(self, bot):
         self.bot = bot
-        self.command_groups: List[Type[discord.app_commands.Group]] = [
-            Betting,
-            Stats,
-            Admin,
-            SetID
-        ]
     
     async def register_commands(self):
         """Register all commands with the bot's command tree."""
@@ -39,11 +28,20 @@ class CommandManager:
                 self.bot.tree.clear_commands(guild=discord.Object(id=test_guild_id))
                 logger.info(f"Cleared all commands for test guild {test_guild_id}")
             
-            # Register each command group globally
-            for group_class in self.command_groups:
-                group = group_class(self.bot)
-                self.bot.tree.add_command(group)
-                logger.info(f"Registered command group: {group.name}")
+            # Import and register each command
+            from .admin import setup as setup_admin
+            from .setid import setup as setup_setid
+            from .betting import setup as setup_betting
+            from .stats import setup as setup_stats
+            from .load_logos import setup as setup_load_logos
+            from .remove_user import setup as setup_remove_user
+            
+            await setup_admin(self.bot)
+            await setup_setid(self.bot)
+            await setup_betting(self.bot)
+            await setup_stats(self.bot)
+            await setup_load_logos(self.bot.tree)
+            await setup_remove_user(self.bot)
             
             # Sync commands with Discord
             await self.bot.tree.sync()
