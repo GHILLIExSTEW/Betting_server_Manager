@@ -18,7 +18,17 @@ MYSQL_POOL_MIN_SIZE = int(os.getenv('MYSQL_POOL_MIN_SIZE', '1'))
 MYSQL_POOL_MAX_SIZE = int(os.getenv('MYSQL_POOL_MAX_SIZE', '10'))
 
 # Basic check for essential config
-if not all([MYSQL_USER, MYSQL_HOST, MYSQL_DB, MYSQL_PASSWORD is not None]): # Check password exists even if empty
-     # You might want to raise an error or log a critical warning here
-     print("WARNING: Missing one or more required MySQL environment variables (MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB)")
-     # raise ValueError("Missing required MySQL environment variables")
+required_vars = {
+    'MYSQL_HOST': MYSQL_HOST,
+    'MYSQL_PORT': MYSQL_PORT,
+    'MYSQL_USER': MYSQL_USER,
+    'MYSQL_PASSWORD': MYSQL_PASSWORD,
+    'MYSQL_DB': MYSQL_DB
+}
+
+missing_vars = [var for var, value in required_vars.items() if value is None]
+if missing_vars:
+    print(f"WARNING: Missing required MySQL environment variables: {', '.join(missing_vars)}")
+    # Log the actual values (without password) for debugging
+    debug_info = {k: v if k != 'MYSQL_PASSWORD' else '***' for k, v in required_vars.items()}
+    print(f"Current configuration: {debug_info}")
