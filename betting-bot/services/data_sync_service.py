@@ -262,34 +262,34 @@ class DataSyncService:
                              }
                              processed_teams.append(normalized_team)
 
-                         # Upsert teams into DB
-                         for team in processed_teams:
-                              await self.db.execute(
-                                   """
-                                   INSERT INTO teams (id, name, code, country, founded, national, logo,
-                                                     venue_name, venue_address, venue_city, venue_capacity,
-                                                     venue_surface, venue_image, sport)
-                                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                                   ON CONFLICT (id) DO UPDATE SET
-                                       name=EXCLUDED.name, code=EXCLUDED.code, country=EXCLUDED.country,
-                                       founded=EXCLUDED.founded, national=EXCLUDED.national, logo=EXCLUDED.logo,
-                                       venue_name=EXCLUDED.venue_name, venue_address=EXCLUDED.venue_address,
-                                       venue_city=EXCLUDED.venue_city, venue_capacity=EXCLUDED.venue_capacity,
-                                       venue_surface=EXCLUDED.venue_surface, venue_image=EXCLUDED.venue_image,
-                                       sport=EXCLUDED.sport
-                                   """,
-                                   team['id'], team['name'], team['code'], team['country'], team['founded'],
-                                   team['national'], team['logo'], team['venue_name'], team['venue_address'],
-                                   team['venue_city'], team['venue_capacity'], team['venue_surface'],
-                                   team['venue_image'], team['sport']
-                              )
-                         all_processed_teams.extend(processed_teams)
-                         logger.debug(f"Upserted {len(processed_teams)} teams for league {league['id']}")
-                         await asyncio.sleep(0.5) # Small delay between leagues
-
-                   except Exception as e:
-                        logger.exception(f"Error syncing teams for league {league.get('id', 'N/A')} in sport {sport}: {e}")
-         logger.info(f"Finished syncing teams. Total teams processed: {len(all_processed_teams)}")
+                        # Upsert teams into DB
+                        for team in processed_teams:
+                            await self.db.execute(
+                               """
+                               INSERT INTO teams (id, name, code, country, founded, national, logo,
+                                                 venue_name, venue_address, venue_city, venue_capacity,
+                                                 venue_surface, venue_image, sport)
+                               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                               ON CONFLICT (id) DO UPDATE SET
+                                   name=EXCLUDED.name, code=EXCLUDED.code, country=EXCLUDED.country,
+                                    founded=EXCLUDED.founded, national=EXCLUDED.national, logo=EXCLUDED.logo,
+                                   venue_name=EXCLUDED.venue_name, venue_address=EXCLUDED.venue_address,
+                                   venue_city=EXCLUDED.venue_city, venue_capacity=EXCLUDED.venue_capacity,
+                                   venue_surface=EXCLUDED.venue_surface, venue_image=EXCLUDED.venue_image,
+                                   sport=EXCLUDED.sport
+                               """,
+                               team['id'], team['name'], team['code'], team['country'], team['founded'],
+                               team['national'], team['logo'], team['venue_name'], team['venue_address'],
+                               team['venue_city'], team['venue_capacity'], team['venue_surface'],
+                               team['venue_image'], team['sport']
+                            )
+                        all_processed_teams.extend(processed_teams)
+                     logger.debug(f"Upserted {len(processed_teams)} teams for league {league['id']}")
+                     await asyncio.sleep(0.5) # Small delay between leagues
+                  
+                except Exception as e:
+                    logger.exception(f"Error syncing teams for league {league.get('id', 'N/A')} in sport {sport}: {e}")
+        logger.info(f"Finished syncing teams. Total teams processed: {len(all_processed_teams)}")
 
 
     async def _sync_schedules(self, leagues: List[Dict], days_ahead: int):
