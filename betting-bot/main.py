@@ -31,12 +31,12 @@ class BettingBot(commands.Bot):
             help_command=None
         )
         self.initial_extensions = [
-            'bot.commands.admin',
-            'bot.commands.betting',
-            'bot.commands.games',
-            'bot.commands.voice',
-            'bot.commands.stats',
-            'bot.commands.setid'
+            'betting-bot.commands.admin',
+            'betting-bot.commands.betting',
+            'betting-bot.commands.games',
+            'betting-bot.commands.voice',
+            'betting-bot.commands.stats',
+            'betting-bot.commands.setid'
         ]
 
     async def setup_hook(self):
