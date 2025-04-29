@@ -23,7 +23,11 @@ class ValidationError(BettingBotError):
 class ServiceError(Exception):
     """Base class for all service-related errors."""
     pass
-
+    
+class UserServiceError(ServiceError):
+    """Raised when there's an error in the user service."""
+    pass
+    
 class GameServiceError(ServiceError):
     """Raised when there's an error in the game service."""
     pass
