@@ -56,4 +56,20 @@ class LeagueNotFoundError(GameServiceError):
 
 class ScheduleError(GameServiceError):
     """Exception raised for schedule-related errors."""
+    pass
+
+class AnalyticsServiceError(Exception):
+    """Base exception for analytics service errors."""
+    pass
+
+class StatsGenerationError(AnalyticsServiceError):
+    """Exception raised for errors during stats generation."""
+    pass
+
+class DataProcessingError(AnalyticsServiceError):
+    """Exception raised for errors during data processing."""
+    pass
+
+class VisualizationError(AnalyticsServiceError):
+    """Exception raised for errors during data visualization."""
     pass 
