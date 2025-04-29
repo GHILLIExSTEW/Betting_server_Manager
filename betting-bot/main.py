@@ -5,17 +5,18 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 import logging
-from betting_bot.services.admin_service import AdminService
-from betting_bot.services.bet_service import BetService
-from betting_bot.services.game_service import GameService
-from betting_bot.services.analytics_service import AnalyticsService
+from services.admin_service import AdminService
+from services.bet_service import BetService
+from services.game_service import GameService
+from services.analytics_service import AnalyticsService
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Add the current directory to the Python path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
 # Load environment variables
 load_dotenv()
@@ -46,23 +47,23 @@ class BettingBot(commands.Bot):
         self.analytics_service = AnalyticsService()
         
         self.initial_extensions = [
-            'betting_bot.commands.admin',
-            'betting_bot.commands.betting',
-            'betting_bot.commands.stats',
-            'betting_bot.commands.setid'
+            'commands.admin',
+            'commands.betting',
+            'commands.stats',
+            'commands.setid'
         ]
 
     async def setup_hook(self):
         """Load extensions and perform setup tasks"""
         for ext in self.initial_extensions:
             try:
-                if ext == 'betting_bot.commands.admin':
+                if ext == 'commands.admin':
                     await self.load_extension(ext)
-                elif ext == 'betting_bot.commands.betting':
+                elif ext == 'commands.betting':
                     await self.load_extension(ext)
-                elif ext == 'betting_bot.commands.stats':
+                elif ext == 'commands.stats':
                     await self.load_extension(ext)
-                elif ext == 'betting_bot.commands.setid':
+                elif ext == 'commands.setid':
                     await self.load_extension(ext)
                 logger.info(f"Loaded extension {ext}")
             except Exception as e:
