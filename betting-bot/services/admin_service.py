@@ -5,7 +5,8 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 class AdminService:
-    def __init__(self, db_path: str = 'bot/data/betting.db'):
+    def __init__(self, bot, db_path: str = 'bot/data/betting.db'):
+        self.bot = bot
         self.db_path = db_path
 
     async def is_guild_paid(self, guild_id: int) -> bool:

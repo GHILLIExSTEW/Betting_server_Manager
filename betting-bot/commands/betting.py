@@ -4,8 +4,8 @@ import logging
 from typing import Optional, List, Dict
 from datetime import datetime
 import aiosqlite
-from betting_bot.services.bet_service import BetService
-from betting_bot.services.game_service import GameService
+from services.bet_service import BetService
+from services.game_service import GameService
 from discord.ui import View, Select, Modal, TextInput, Button, ButtonStyle
 
 logger = logging.getLogger(__name__)
@@ -110,8 +110,10 @@ class ChannelSelect(Select):
         await interaction.response.defer()
         self.view.stop()
 
-async def setup(tree: app_commands.CommandTree, bet_service: BetService, game_service: GameService):
+async def setup(tree: app_commands.CommandTree, bot):
     """Setup function for betting commands."""
+    bet_service = BetService(bot)
+    game_service = GameService(bot)
     
     @tree.command(
         name="bet",

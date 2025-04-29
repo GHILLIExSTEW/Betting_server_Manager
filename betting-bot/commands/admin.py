@@ -329,9 +329,9 @@ class VoiceChannelSelect(Select):
         self.view.stop()
 
 class AdminView(View):
-    def __init__(self, admin_service: AdminService):
-        super().__init__()
-        self.admin_service = admin_service
+    def __init__(self, bot):
+        super().__init__(timeout=300)
+        self.admin_service = AdminService(bot)
         self.selected_channel = None
 
     @discord.ui.select(
@@ -402,7 +402,7 @@ async def setup(bot: commands.Bot):
             await interaction.response.send_message("You need administrator permissions to use this command.", ephemeral=True)
             return
             
-        view = AdminView(admin_service)
+        view = AdminView(bot)
         await interaction.response.send_message("Select an action:", view=view, ephemeral=True)
 
 async def check_subscription_status(guild_id: int) -> bool:

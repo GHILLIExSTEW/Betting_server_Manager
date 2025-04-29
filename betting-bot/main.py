@@ -34,10 +34,10 @@ class BettingBot(commands.Bot):
         )
         
         # Initialize services
-        self.game_service = GameService()
-        self.bet_service = BetService()
-        self.admin_service = AdminService()
-        self.analytics_service = AnalyticsService()
+        self.game_service = GameService(self)
+        self.bet_service = BetService(self)
+        self.admin_service = AdminService(self)
+        self.analytics_service = AnalyticsService(self)
         
         # Load extensions
         self.initial_extensions = [

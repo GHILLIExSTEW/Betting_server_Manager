@@ -3,8 +3,8 @@ from discord import app_commands
 import logging
 from typing import Optional
 from datetime import datetime, timedelta
-from betting_bot.services.analytics_service import AnalyticsService
-from betting_bot.utils.stats_image_generator import StatsImageGenerator
+from services.analytics_service import AnalyticsService
+from utils.stats_image_generator import StatsImageGenerator
 import aiosqlite
 import os
 
@@ -64,9 +64,9 @@ class ChannelSelect(discord.ui.Select):
             )
 
 class StatsView(discord.ui.View):
-    def __init__(self, analytics_service: AnalyticsService, guild_id: int):
+    def __init__(self, bot, guild_id: int):
         super().__init__(timeout=300)  # 5 minute timeout
-        self.analytics_service = analytics_service
+        self.analytics_service = AnalyticsService(bot)
         self.guild_id = guild_id
         self.stats_data = None
         self.is_server = False
@@ -116,7 +116,7 @@ class StatsView(discord.ui.View):
     async def populate_cappers(self, interaction: discord.Interaction):
         """Populate the select menu with cappers from the guild."""
         try:
-            async with aiosqlite.connect('betting_bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 # Get all cappers from the guild
                 async with db.execute(
                     """
@@ -157,7 +157,7 @@ class StatsView(discord.ui.View):
             logger.error(f"Error populating cappers: {str(e)}")
             raise
 
-async def setup(tree: app_commands.CommandTree, analytics_service: AnalyticsService):
+async def setup(tree: app_commands.CommandTree, bot):
     """Setup function for the stats command."""
     @tree.command(
         name="stats",
@@ -167,7 +167,7 @@ async def setup(tree: app_commands.CommandTree, analytics_service: AnalyticsServ
         """Stats command for viewing betting statistics."""
         try:
             # Check if the guild has access to the stats command
-            async with aiosqlite.connect('betting_bot/data/betting.db') as db:
+            async with aiosqlite.connect('betting-bot/data/betting.db') as db:
                 async with db.execute(
                     """
                     SELECT commands_registered 
@@ -184,7 +184,7 @@ async def setup(tree: app_commands.CommandTree, analytics_service: AnalyticsServ
                         )
                         return
 
-            view = StatsView(analytics_service, interaction.guild_id)
+            view = StatsView(bot, interaction.guild_id)
             await view.populate_cappers(interaction)
             await interaction.response.send_message(
                 "Select a capper to view their statistics:",

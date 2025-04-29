@@ -17,8 +17,9 @@ from config.settings import CACHE_TTL
 logger = logging.getLogger(__name__)
 
 class AnalyticsService:
-    def __init__(self, db_manager: DatabaseManager):
-        self.db = db_manager
+    def __init__(self, bot):
+        self.bot = bot
+        self.db = DatabaseManager()
 
     async def get_capper_stats(self, guild_id: int, user_id: int) -> Dict:
         """Get statistics for a specific capper."""
