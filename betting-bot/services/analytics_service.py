@@ -36,8 +36,6 @@ class AnalyticsService:
         """Get betting statistics for a user using the shared db_manager."""
         try:
             # Use self.db and PostgreSQL syntax ($ placeholders)
-            # Note: Calculating profit requires joining or subqueries if odds aren't simple multipliers
-            # This query assumes a simple profit calculation based on result_value
             # Ensure 'result_value' column exists and is populated correctly in 'unit_records' or 'bets'
             stats = await self.db.fetch_one("""
                 SELECT
@@ -45,52 +43,53 @@ class AnalyticsService:
                     SUM(CASE WHEN b.status = 'won' THEN 1 ELSE 0 END) as wins,
                     SUM(CASE WHEN b.status = 'lost' THEN 1 ELSE 0 END) as losses,
                     SUM(CASE WHEN b.status = 'push' THEN 1 ELSE 0 END) as pushes,
-                    COALESCE(SUM(ur.result_value), 0) as net_units -- Sum calculated profit/loss
+                    COALESCE(SUM(ur.result_value), 0.0) as net_units -- Sum calculated profit/loss from unit_records
                 FROM bets b
                 LEFT JOIN unit_records ur ON b.bet_id = ur.bet_id -- Join to get calculated result
                 WHERE b.guild_id = $1 AND b.user_id = $2
                 AND b.status IN ('won', 'lost', 'push') -- Only count resolved bets
             """, guild_id, user_id)
 
-            if not stats or stats['total_bets'] == 0:
+            if not stats or (stats.get('total_bets') or 0) == 0:
+                # Return default zeroed stats if no bets found or division by zero would occur
                 return {
-                    'total_bets': 0,
-                    'wins': 0,
-                    'losses': 0,
-                    'pushes': 0,
-                    'win_rate': 0.0,
-                    'net_units': 0.0,
-                    'roi': 0.0 # Return on Investment
+                    'total_bets': 0, 'wins': 0, 'losses': 0, 'pushes': 0,
+                    'win_rate': 0.0, 'net_units': 0.0, 'roi': 0.0
                 }
 
-            total_resolved = (stats['wins'] or 0) + (stats['losses'] or 0) # Don't include pushes in win rate denominator
-            win_rate = (stats['wins'] / total_resolved * 100) if total_resolved > 0 else 0.0
-            net_units = stats['net_units'] or 0.0
+            # Ensure values are treated as numbers, defaulting to 0 if None
+            wins = stats.get('wins') or 0
+            losses = stats.get('losses') or 0
+            pushes = stats.get('pushes') or 0
+            total_bets = stats.get('total_bets') or 0
+            net_units = stats.get('net_units') or 0.0
+
+            total_resolved_for_winrate = wins + losses # Don't include pushes in win rate denominator
+            win_rate = (wins / total_resolved_for_winrate * 100) if total_resolved_for_winrate > 0 else 0.0
 
             # Calculate ROI (Return on Investment) -> (Net Units / Total Units Risked) * 100
-            # Need total units risked
+            # Need total units risked from bets table
             total_risked_result = await self.db.fetch_one("""
                  SELECT COALESCE(SUM(units), 0) as total_risked
                  FROM bets
                  WHERE guild_id = $1 AND user_id = $2
                  AND status IN ('won', 'lost', 'push')
             """, guild_id, user_id)
-            total_risked = total_risked_result['total_risked'] if total_risked_result else 0
+            total_risked = total_risked_result.get('total_risked') or 0 if total_risked_result else 0
 
-            roi = (net_units / total_risked * 100) if total_risked > 0 else 0.0
+            roi = (net_units / total_risked * 100.0) if total_risked > 0 else 0.0
 
             return {
-                'total_bets': stats['total_bets'] or 0,
-                'wins': stats['wins'] or 0,
-                'losses': stats['losses'] or 0,
-                'pushes': stats['pushes'] or 0,
+                'total_bets': total_bets,
+                'wins': wins,
+                'losses': losses,
+                'pushes': pushes,
                 'win_rate': win_rate,
                 'net_units': net_units,
                 'roi': roi
             }
         except Exception as e:
             logger.exception(f"Error getting user stats for user {user_id} in guild {guild_id}: {e}")
-            # Return empty stats on error? Or raise? Raising might be better.
             raise AnalyticsServiceError(f"Failed to get user stats: {str(e)}")
 
     async def get_guild_stats(self, guild_id: int) -> Dict[str, Any]:
@@ -103,29 +102,29 @@ class AnalyticsService:
                     SUM(CASE WHEN b.status = 'won' THEN 1 ELSE 0 END) as wins,
                     SUM(CASE WHEN b.status = 'lost' THEN 1 ELSE 0 END) as losses,
                     SUM(CASE WHEN b.status = 'push' THEN 1 ELSE 0 END) as pushes,
-                    COALESCE(SUM(ur.result_value), 0) as net_units,
-                    COUNT(DISTINCT b.user_id) as total_cappers -- Count distinct users who placed bets
+                    COALESCE(SUM(ur.result_value), 0.0) as net_units,
+                    COUNT(DISTINCT b.user_id) as total_cappers -- Count distinct users who placed resolved bets
                 FROM bets b
                 LEFT JOIN unit_records ur ON b.bet_id = ur.bet_id
                 WHERE b.guild_id = $1
                 AND b.status IN ('won', 'lost', 'push')
             """, guild_id)
 
-            if not stats or stats['total_bets'] == 0:
+            if not stats or (stats.get('total_bets') or 0) == 0:
                  return {
-                    'total_bets': 0,
-                    'wins': 0,
-                    'losses': 0,
-                    'pushes': 0,
-                    'win_rate': 0.0,
-                    'net_units': 0.0,
-                    'total_cappers': 0,
-                    'roi': 0.0
+                    'total_bets': 0, 'wins': 0, 'losses': 0, 'pushes': 0,
+                    'win_rate': 0.0, 'net_units': 0.0, 'total_cappers': 0, 'roi': 0.0
                 }
 
-            total_resolved = (stats['wins'] or 0) + (stats['losses'] or 0)
-            win_rate = (stats['wins'] / total_resolved * 100) if total_resolved > 0 else 0.0
-            net_units = stats['net_units'] or 0.0
+            wins = stats.get('wins') or 0
+            losses = stats.get('losses') or 0
+            pushes = stats.get('pushes') or 0
+            total_bets = stats.get('total_bets') or 0
+            net_units = stats.get('net_units') or 0.0
+            total_cappers = stats.get('total_cappers') or 0
+
+            total_resolved_for_winrate = wins + losses
+            win_rate = (wins / total_resolved_for_winrate * 100.0) if total_resolved_for_winrate > 0 else 0.0
 
             # Calculate ROI
             total_risked_result = await self.db.fetch_one("""
@@ -133,18 +132,17 @@ class AnalyticsService:
                  FROM bets
                  WHERE guild_id = $1 AND status IN ('won', 'lost', 'push')
             """, guild_id)
-            total_risked = total_risked_result['total_risked'] if total_risked_result else 0
-            roi = (net_units / total_risked * 100) if total_risked > 0 else 0.0
-
+            total_risked = total_risked_result.get('total_risked') or 0 if total_risked_result else 0
+            roi = (net_units / total_risked * 100.0) if total_risked > 0 else 0.0
 
             return {
-                'total_bets': stats['total_bets'] or 0,
-                'wins': stats['wins'] or 0,
-                'losses': stats['losses'] or 0,
-                'pushes': stats['pushes'] or 0,
+                'total_bets': total_bets,
+                'wins': wins,
+                'losses': losses,
+                'pushes': pushes,
                 'win_rate': win_rate,
                 'net_units': net_units,
-                'total_cappers': stats['total_cappers'] or 0,
+                'total_cappers': total_cappers,
                 'roi': roi
             }
         except Exception as e:
@@ -175,24 +173,25 @@ class AnalyticsService:
             # 'alltime' means start_date remains None
 
             # Build the core query for metrics
+            # Ensure created_at column exists in bets table
             query = """
                 SELECT
                     b.user_id,
-                    COUNT(b.bet_id) as total_bets,
+                    COUNT(b.bet_id) FILTER (WHERE b.status IN ('won', 'lost', 'push')) as total_resolved_bets, -- Count only resolved
                     SUM(CASE WHEN b.status = 'won' THEN 1 ELSE 0 END) as wins,
                     SUM(CASE WHEN b.status = 'lost' THEN 1 ELSE 0 END) as losses,
-                    COALESCE(SUM(ur.result_value), 0) as net_units,
-                    COALESCE(SUM(b.units), 0) as total_risked
+                    COALESCE(SUM(ur.result_value), 0.0) as net_units,
+                    COALESCE(SUM(CASE WHEN b.status IN ('won', 'lost', 'push') THEN b.units ELSE 0 END), 0) as total_risked -- Sum units only for resolved bets
                 FROM bets b
                 LEFT JOIN unit_records ur ON b.bet_id = ur.bet_id
                 WHERE b.guild_id = $1
-                AND b.status IN ('won', 'lost', 'push')
             """
             params: List[Any] = [guild_id]
             param_index = 2
 
             if start_date:
-                query += f" AND b.created_at >= ${param_index}" # Filter by creation date of the bet
+                # Filter by bet creation time OR resolution time? Using created_at for now.
+                query += f" AND b.created_at >= ${param_index}"
                 params.append(start_date)
                 param_index += 1
 
@@ -200,50 +199,50 @@ class AnalyticsService:
 
             # Determine ordering based on metric
             order_by_clause = ""
+            # Use aliases defined in the outer query's SELECT list
             if metric == 'net_units':
                 order_by_clause = "ORDER BY net_units DESC"
             elif metric == 'roi':
-                 # Calculate ROI in the ORDER BY, handle division by zero
-                 order_by_clause = "ORDER BY CASE WHEN total_risked > 0 THEN (net_units / total_risked) ELSE -1 END DESC" # Put 0 risked at bottom
+                 order_by_clause = "ORDER BY CASE WHEN total_risked > 0 THEN (net_units / total_risked) ELSE -99999 END DESC" # Put 0 risked at bottom, handle division by zero
             elif metric == 'win_rate':
-                 # Calculate win_rate in ORDER BY, handle division by zero
-                 order_by_clause = "ORDER BY CASE WHEN (wins + losses) > 0 THEN (wins * 1.0 / (wins + losses)) ELSE -1 END DESC" # Put 0 bets at bottom
+                 order_by_clause = "ORDER BY CASE WHEN (wins + losses) > 0 THEN (wins * 1.0 / (wins + losses)) ELSE -1 END DESC, wins DESC" # Break ties by wins
             elif metric == 'wins':
                  order_by_clause = "ORDER BY wins DESC"
             else: # Default to net_units if metric is invalid
                  order_by_clause = "ORDER BY net_units DESC"
                  logger.warning(f"Invalid leaderboard metric '{metric}', defaulting to net_units.")
 
-            # Need to wrap the aggregation in a subquery or CTE to use calculated columns in ORDER BY easily
+            # Wrap the aggregation in a CTE to use calculated columns in ORDER BY
             final_query = f"""
                 WITH UserStats AS (
                     {query}
                 )
                 SELECT
                     us.user_id,
-                    us.total_bets,
+                    -- Optionally join with users table here to get username if needed
+                    -- u.username,
+                    us.total_resolved_bets,
                     us.wins,
                     us.losses,
                     us.net_units,
                     us.total_risked,
-                    CASE WHEN (us.wins + us.losses) > 0 THEN (us.wins * 100.0 / (us.wins + us.losses)) ELSE 0.0 END as win_rate,
-                    CASE WHEN us.total_risked > 0 THEN (us.net_units / us.total_risked * 100.0) ELSE 0.0 END as roi
+                    CASE
+                        WHEN (us.wins + us.losses) > 0 THEN (us.wins * 100.0 / (us.wins + us.losses))
+                        ELSE 0.0
+                    END as win_rate,
+                    CASE
+                        WHEN us.total_risked > 0 THEN (us.net_units / us.total_risked * 100.0)
+                        ELSE 0.0
+                    END as roi
                 FROM UserStats us
+                -- Optional JOIN: LEFT JOIN users u ON us.user_id = u.id
+                WHERE us.total_resolved_bets > 0 -- Only show users with resolved bets? Optional filter.
                 {order_by_clause} -- Apply ordering here
                 LIMIT ${param_index}; -- Apply limit
             """
             params.append(limit)
 
             leaderboard_data = await self.db.fetch_all(final_query, *params)
-
-            # Optional: Fetch usernames for user_ids (can be slow for large leaderboards)
-            # Consider doing this in the command layer using bot cache
-            # processed_leaderboard = []
-            # for entry in leaderboard_data:
-            #      user = self.bot.get_user(entry['user_id']) # Or interaction.guild.get_member()
-            #      entry['username'] = user.display_name if user else f"User {entry['user_id']}"
-            #      processed_leaderboard.append(entry)
-            # return processed_leaderboard
 
             return leaderboard_data
 
