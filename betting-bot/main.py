@@ -61,6 +61,15 @@ class BettingBot(commands.Bot):
         logger.info(f'Logged in as {self.user.name} ({self.user.id})')
         logger.info('------')
 
+    async def on_guild_join(self, guild):
+        """Called when the bot joins a new guild."""
+        try:
+            # Register commands for the new guild
+            await self.tree.sync(guild=guild)
+            logger.info(f"Synced commands for guild {guild.name} ({guild.id})")
+        except Exception as e:
+            logger.error(f"Error syncing commands for guild {guild.name}: {e}")
+
 def main():
     bot = BettingBot()
     bot.run(os.getenv('DISCORD_TOKEN'))

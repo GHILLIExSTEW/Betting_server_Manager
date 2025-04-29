@@ -28,10 +28,10 @@ class CommandManager:
     async def register_commands(self):
         """Register all commands with the bot's command tree."""
         try:
-            # Clear existing commands
-            self.bot.tree.clear_commands()
+            # Clear global commands
+            self.bot.tree.clear_commands(guild=None)
             
-            # Register each command group
+            # Register each command group globally
             for group_class in self.command_groups:
                 group = group_class(self.bot)
                 self.bot.tree.add_command(group)
