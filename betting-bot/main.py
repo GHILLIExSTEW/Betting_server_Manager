@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
+# Add the parent directory to the Python path
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+
 from services.game_service import GameService
 from services.bet_service import BetService
 from services.admin_service import AdminService
