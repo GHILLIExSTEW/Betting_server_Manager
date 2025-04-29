@@ -8,18 +8,10 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
 
-# --- Path Setup ---
-# We remove the sys.path manipulation assuming main.py is run directly
-# from within the betting-bot directory. Python should find sibling packages.
-# current_dir = os.path.dirname(os.path.abspath(__file__))
-# project_root = os.path.dirname(current_dir)
-# sys.path.insert(0, project_root)
-# --- End Path Setup ---
-
 # Load environment variables from .env file (assuming it's one level up from main.py)
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
-# If your .env is in the SAME directory as main.py, just use: load_dotenv()
+# .env is in the SAME directory as main.py, just use: load_dotenv()
 
 # --- Imports (Relative to betting-bot directory) ---
 from data.db_manager import DatabaseManager # Corrected import
@@ -30,9 +22,7 @@ from services.analytics_service import AnalyticsService # Corrected import
 from services.user_service import UserService # Corrected import
 from services.voice_service import VoiceService # Corrected import
 from services.data_sync_service import DataSyncService # Corrected import
-# Import Command Setup (choose one command loading strategy)
-# from commands import CommandManager # Corrected import
-# from commands.admin import setup as setup_admin_cmds # Corrected import
+from commands.admin import setup as setup_admin_cmds # Corrected import
 
 # --- Logging Setup ---
 logging.basicConfig(
