@@ -1,8 +1,18 @@
 import logging
+import asyncio
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
-import aiosqlite
-from ..data.db_manager import DatabaseManager
+import json
+import sys
+import os
+
+# Add the parent directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from data.db_manager import DatabaseManager
+from data.cache_manager import CacheManager
+from utils.errors import AnalyticsServiceError
+from config.settings import CACHE_TTL
 
 logger = logging.getLogger(__name__)
 

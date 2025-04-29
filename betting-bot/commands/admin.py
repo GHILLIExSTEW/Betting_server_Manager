@@ -5,9 +5,15 @@ from typing import Optional, List
 import os
 from datetime import datetime
 import aiosqlite
-from ..services.admin_service import AdminService
+from services.admin_service import AdminService
 from discord.ui import View, Select, Modal, TextInput
 from discord.ext import commands
+import sys
+
+# Add the parent directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.errors import AdminServiceError
 
 logger = logging.getLogger(__name__)
 
