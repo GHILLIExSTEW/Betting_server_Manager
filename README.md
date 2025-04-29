@@ -1,76 +1,45 @@
-# Betting Server Manager
+# Discord Betting Bot
 
-A commercial Discord bot for managing sports betting with real-time game data and odds.
+A Discord bot for managing sports betting and capper statistics.
 
 ## Features
 
-- Real-time game data updates
-- Live odds tracking
-- Bet management
-- User balance tracking
-- Admin controls
-- Caching system for performance
-- Database persistence
+- **Capper Management**
+  - `/setid` - Set up a user as a capper
+  - `/remove_user` - Remove a user from the system
 
-## Purchase and Installation
+- **Betting System**
+  - `/betting` - Place bets on games
+  - `/stats` - View betting statistics and leaderboards
 
-1. Contact sales@yourcompany.com to purchase a license
-2. After purchase, you will receive access to the repository
-3. Clone the repository:
-```bash
-git clone https://github.com/GHILLIExSTEW/Betting_server_Manager.git
-cd Betting_server_Manager
-```
+- **Admin Tools**
+  - `/admin` - Server setup and management
+  - `/load_logos` - Load team and league logos
 
-4. Create a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+## Setup
 
-5. Install dependencies:
-```bash
-pip install -e .
-```
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Create a `.env` file with the following variables:
+   ```
+   DISCORD_TOKEN=your_bot_token
+   TEST_GUILD_ID=your_test_guild_id
+   ```
+4. Run the bot:
+   ```bash
+   python betting-bot/main.py
+   ```
 
-6. Create a `.env` file with your configuration:
-```env
-DISCORD_TOKEN=your_discord_token
-DATABASE_URL=postgresql://user:password@localhost:5432/betting_bot
-REDIS_URL=redis://localhost:6379/0
-LICENSE_KEY=your_purchased_license_key
-```
+## Requirements
 
-7. Initialize the database:
-```bash
-python -m bot.db_manager
-```
-
-## Usage
-
-Start the bot:
-```bash
-betting-bot
-```
-
-### Commands
-
-- `/view_games` - View active games
-- `/view_odds <game_id>` - View odds for a specific game
-- `/bet <game_id> <amount> <team>` - Place a bet
-- `/balance` - Check your balance
-- `/leaderboard` - View top bettors
-
-## Project Structure
-
-```
-.
-├── api/                # API endpoints
-├── views/             # View templates
-├── web/              # Web interface
-└── README.md         # This file
-```
+- Python 3.8+
+- Discord.py
+- SQLite3
+- Other dependencies listed in `requirements.txt`
 
 ## License
 
-This is a commercial product. Unauthorized use, copying, modification, or distribution is strictly prohibited. A valid license is required for use.
+This project is licensed under the MIT License - see the LICENSE file for details.

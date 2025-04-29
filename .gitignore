@@ -22,8 +22,8 @@ wheels/
 
 # Virtual Environment
 venv/
-ENV/
 env/
+ENV/
 
 # IDE
 .idea/
@@ -31,36 +31,23 @@ env/
 *.swp
 *.swo
 
-# Environment variables and secrets
-.env
-.env.local
-*.env
-secrets.json
-config.json
-
 # Logs
 *.log
 logs/
-log/
 
 # Database
 *.db
-*.sqlite3
 *.sqlite
+*.sqlite3
 
-# Cache
-.cache/
-.pytest_cache/
-.coverage
-htmlcov/
-__pycache__/
+# Environment variables
+.env
+.env.local
 
 # OS
 .DS_Store
 Thumbs.db
 
 # Project specific
-*.license
-license.key
-config.ini
-credentials.json 
+betting-bot/data/
+betting-bot/assets/logos/ 
