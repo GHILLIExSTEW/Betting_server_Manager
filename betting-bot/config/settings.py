@@ -18,6 +18,7 @@ COMMAND_PREFIX = '!'
 DESCRIPTION = 'A Discord bot for managing sports betting'
 
 # API Configuration
+API_KEY = ''  # Set this in environment variables
 API_TIMEOUT = 30  # seconds
 API_RETRY_ATTEMPTS = 3
 API_RETRY_DELAY = 5  # seconds
@@ -25,6 +26,9 @@ API_RETRY_DELAY = 5  # seconds
 # Cache Configuration
 CACHE_TTL = 3600  # 1 hour in seconds
 CACHE_MAX_SIZE = 1000  # Maximum number of items in cache
+GAME_CACHE_TTL = 300  # 5 minutes in seconds
+LEAGUE_CACHE_TTL = 86400  # 24 hours in seconds
+TEAM_CACHE_TTL = 86400  # 24 hours in seconds
 
 # Betting Rules
 MIN_ODDS = -1000

@@ -170,6 +170,7 @@ class BetService:
         self.pending_reactions: Dict[int, Dict] = {}  # message_id -> bet_info
         self.image_generator = BetSlipGenerator()
         self.db_path = 'data/betting.db'
+        self.data_sync_service = None  # Will be set when starting the service
 
     async def start(self) -> None:
         """Start the bet service."""
@@ -178,6 +179,14 @@ class BetService:
             self._update_task = asyncio.create_task(self._update_bets())
             self.bot.add_listener(self.on_raw_reaction_add, 'on_raw_reaction_add')
             self.bot.add_listener(self.on_raw_reaction_remove, 'on_raw_reaction_remove')
+            
+            # Initialize data sync service
+            from services.data_sync_service import DataSyncService
+            from services.game_service import GameService
+            game_service = GameService(self.bot)
+            self.data_sync_service = DataSyncService(game_service)
+            await self.data_sync_service.start()
+            
             logger.info("Bet service started successfully")
         except Exception as e:
             logger.error(f"Error starting bet service: {str(e)}")
@@ -189,6 +198,8 @@ class BetService:
             self.running = False
             if self._update_task:
                 self._update_task.cancel()
+            if self.data_sync_service:
+                await self.data_sync_service.stop()
             self.bets.clear()
             self.pending_reactions.clear()
             logger.info("Bet service stopped successfully")
@@ -849,9 +860,30 @@ class BetService:
             )
 
     async def _fetch_games(self, league: str) -> List[Dict]:
-        """Fetch games from API for the given league."""
-        # This should be implemented to fetch games from your API
-        return []
+        """Fetch games from the database for the given league."""
+        try:
+            # Get games from the database that are scheduled or live
+            games = await self.db.fetch(
+                """
+                SELECT * FROM games
+                WHERE league = $1
+                AND status IN ('scheduled', 'live')
+                AND start_time >= $2
+                ORDER BY start_time ASC
+                """,
+                league,
+                datetime.utcnow()
+            )
+            
+            if not games:
+                logger.warning(f"No games found for league {league}")
+                return []
+                
+            return games
+            
+        except Exception as e:
+            logger.error(f"Error fetching games for league {league}: {str(e)}")
+            raise BetServiceError(f"Failed to fetch games: {str(e)}")
 
     async def _view_pending_bets(self, interaction: discord.Interaction):
         """View user's pending bets"""

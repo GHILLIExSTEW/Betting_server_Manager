@@ -16,20 +16,22 @@ from utils.errors import (
     ScheduleError
 )
 from config.settings import (
-    API_KEY,
-    API_BASE_URL,
-    GAME_CACHE_TTL,
-    LEAGUE_CACHE_TTL,
-    TEAM_CACHE_TTL,
     API_TIMEOUT,
     API_RETRY_ATTEMPTS,
     API_RETRY_DELAY,
-    CACHE_TTL
+    CACHE_TTL,
+    GAME_CACHE_TTL,
+    LEAGUE_CACHE_TTL,
+    TEAM_CACHE_TTL
 )
 from ..api.sports_api import SportsAPI
 import aiosqlite
 import sys
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add the parent directory to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -51,8 +53,29 @@ class GameService:
         self._poll_task: Optional[asyncio.Task] = None
         self.running = False
         self.db_path = 'bot/data/betting.db'
-        self.api_key = API_KEY
-        self.base_url = API_BASE_URL
+        self.api_key = os.getenv('API_KEY')
+        
+        # Load API hosts from environment variables
+        self.api_hosts = {
+            'football': os.getenv('FOOTBALL_API_HOST'),
+            'basketball': os.getenv('BASKETBALL_API_HOST'),
+            'hockey': os.getenv('HOCKEY_API_HOST'),
+            'baseball': os.getenv('BASEBALL_API_HOST'),
+            'american-football': os.getenv('AMERICAN_FOOTBALL_API_HOST'),
+            'rugby': os.getenv('RUGBY_API_HOST'),
+            'handball': os.getenv('HANDBALL_API_HOST'),
+            'volleyball': os.getenv('VOLLEYBALL_API_HOST'),
+            'cricket': os.getenv('CRICKET_API_HOST'),
+            'formula1': os.getenv('FORMULA1_API_HOST'),
+            'mma': os.getenv('MMA_API_HOST'),
+            'tennis': os.getenv('TENNIS_API_HOST'),
+            'golf': os.getenv('GOLF_API_HOST'),
+            'cycling': os.getenv('CYCLING_API_HOST'),
+            'soccer': os.getenv('SOCCER_API_HOST')
+        }
+
+        if not self.api_key:
+            logger.warning("API_KEY not found in environment variables")
 
     async def start(self):
         """Initialize the game service"""
@@ -534,17 +557,26 @@ class GameService:
             logger.error(f"Error getting game events: {str(e)}")
             return []
 
-    async def _make_request(self, endpoint: str, params: Dict = None) -> Dict:
+    async def _make_request(self, sport: str, endpoint: str, params: Dict = None) -> Dict:
         """Make an API request with retry logic."""
         if not self.session:
             raise GameServiceError("Game service not started")
 
+        if sport not in self.api_hosts or not self.api_hosts[sport]:
+            raise GameServiceError(f"Unsupported sport or missing API host: {sport}")
+
+        base_url = self.api_hosts[sport]
+        headers = {
+            "x-rapidapi-key": self.api_key,
+            "x-rapidapi-host": base_url.split('//')[1]
+        }
+
         for attempt in range(API_RETRY_ATTEMPTS):
             try:
                 async with self.session.get(
-                    f"{self.base_url}/{endpoint}",
+                    f"{base_url}/{endpoint}",
                     params=params,
-                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    headers=headers,
                     timeout=API_TIMEOUT
                 ) as response:
                     if response.status == 200:
@@ -562,11 +594,11 @@ class GameService:
                     raise APIError(f"API request failed: {str(e)}")
                 await asyncio.sleep(API_RETRY_DELAY)
 
-    async def get_games(self, league: str, date: Optional[datetime] = None) -> List[Dict]:
-        """Get games for a specific league and date."""
+    async def get_games(self, sport: str, league: str, date: Optional[datetime] = None) -> List[Dict]:
+        """Get games for a specific sport, league and date."""
         try:
             # Check cache first
-            cache_key = f"games_{league}_{date.strftime('%Y-%m-%d') if date else 'today'}"
+            cache_key = f"games_{sport}_{league}_{date.strftime('%Y-%m-%d') if date else 'today'}"
             cached_games = self.cache.get(cache_key)
             if cached_games:
                 return cached_games
@@ -576,51 +608,51 @@ class GameService:
             if date:
                 params["date"] = date.strftime("%Y-%m-%d")
             
-            response = await self._make_request("games", params)
+            response = await self._make_request(sport, "fixtures", params)
             
             # Validate response
-            if not isinstance(response, list):
+            if not isinstance(response, dict) or 'response' not in response:
                 raise GameDataError("Invalid response format from API")
 
             # Cache the results
-            self.cache.set(cache_key, response, ttl=CACHE_TTL)
+            self.cache.set(cache_key, response['response'], ttl=GAME_CACHE_TTL)
             
-            return response
+            return response['response']
 
         except Exception as e:
             logger.error(f"Error getting games: {str(e)}")
             raise
 
-    async def get_game_details(self, game_id: str) -> Dict:
+    async def get_game_details(self, sport: str, game_id: str) -> Dict:
         """Get detailed information about a specific game."""
         try:
             # Check cache first
-            cache_key = f"game_{game_id}"
+            cache_key = f"game_{sport}_{game_id}"
             cached_game = self.cache.get(cache_key)
             if cached_game:
                 return cached_game
 
             # Make API request
-            response = await self._make_request(f"games/{game_id}")
+            response = await self._make_request(sport, f"fixtures/{game_id}")
             
             # Validate response
-            if not isinstance(response, dict):
+            if not isinstance(response, dict) or 'response' not in response:
                 raise GameDataError("Invalid response format from API")
 
             # Cache the results
-            self.cache.set(cache_key, response, ttl=CACHE_TTL)
+            self.cache.set(cache_key, response['response'], ttl=GAME_CACHE_TTL)
             
-            return response
+            return response['response']
 
         except Exception as e:
             logger.error(f"Error getting game details: {str(e)}")
             raise
 
-    async def get_league_schedule(self, league: str, start_date: datetime, end_date: datetime) -> List[Dict]:
+    async def get_league_schedule(self, sport: str, league: str, start_date: datetime, end_date: datetime) -> List[Dict]:
         """Get the schedule for a league between two dates."""
         try:
             # Check cache first
-            cache_key = f"schedule_{league}_{start_date.strftime('%Y-%m-%d')}_{end_date.strftime('%Y-%m-%d')}"
+            cache_key = f"schedule_{sport}_{league}_{start_date.strftime('%Y-%m-%d')}_{end_date.strftime('%Y-%m-%d')}"
             cached_schedule = self.cache.get(cache_key)
             if cached_schedule:
                 return cached_schedule
@@ -628,20 +660,20 @@ class GameService:
             # Make API request
             params = {
                 "league": league,
-                "start_date": start_date.strftime("%Y-%m-%d"),
-                "end_date": end_date.strftime("%Y-%m-%d")
+                "from": start_date.strftime("%Y-%m-%d"),
+                "to": end_date.strftime("%Y-%m-%d")
             }
             
-            response = await self._make_request("schedule", params)
+            response = await self._make_request(sport, "fixtures", params)
             
             # Validate response
-            if not isinstance(response, list):
+            if not isinstance(response, dict) or 'response' not in response:
                 raise ScheduleError("Invalid response format from API")
 
             # Cache the results
-            self.cache.set(cache_key, response, ttl=CACHE_TTL)
+            self.cache.set(cache_key, response['response'], ttl=LEAGUE_CACHE_TTL)
             
-            return response
+            return response['response']
 
         except Exception as e:
             logger.error(f"Error getting league schedule: {str(e)}")
