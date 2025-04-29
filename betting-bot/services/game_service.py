@@ -6,6 +6,24 @@ from datetime import datetime, timedelta
 import json
 import aiohttp
 import asyncio
+import sys
+import os
+from dotenv import load_dotenv
+
+# Add the parent directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Now import the config settings
+from config.api_settings import (
+    API_ENABLED,
+    API_HOSTS,
+    API_KEY,
+    API_TIMEOUT,
+    API_RETRY_ATTEMPTS,
+    API_RETRY_DELAY
+)
+
+# Import other modules after path setup
 from data.db_manager import DatabaseManager
 from data.cache_manager import CacheManager
 from utils.errors import (
@@ -15,25 +33,11 @@ from utils.errors import (
     LeagueNotFoundError,
     ScheduleError
 )
-from config.api_settings import (
-    API_ENABLED,
-    API_HOSTS,
-    API_KEY,
-    API_TIMEOUT,
-    API_RETRY_ATTEMPTS,
-    API_RETRY_DELAY
-)
 from api.sports_api import SportsAPI
 import aiosqlite
-import sys
-import os
-from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-
-# Add the parent directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 logger = logging.getLogger(__name__)
 
