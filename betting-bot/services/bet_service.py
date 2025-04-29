@@ -146,13 +146,12 @@ class BetService:
 
             # Use the shared DatabaseManager instance (self.db)
             # Updated to use MySQL syntax (%s placeholders)
-            result = await self.db.fetch_one("""
+            bet_id = await self.db.execute("""
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type,
                     selection, units, odds, channel_id,
                     created_at, status, updated_at, expiration_time
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s)
-                RETURNING bet_id -- Get the generated bet_id back
             """, (
                 guild_id, user_id, db_game_id, bet_type,
                 selection, units, odds, channel_id,
@@ -161,8 +160,7 @@ class BetService:
                 expiration_time # Pass expiration if applicable, otherwise NULL
             ))
 
-            if result and 'bet_id' in result:
-                 bet_id = result['bet_id']
+            if bet_id:
                  logger.info(f"Bet {bet_id} created successfully for user {user_id} in guild {guild_id}.")
                  # If message_id is provided, store it for reaction tracking
                  if message_id:
@@ -176,7 +174,7 @@ class BetService:
                       logger.debug(f"Tracking reactions for message {message_id} (Bet ID: {bet_id})")
                  return bet_id
             else:
-                 # This case should be rare if RETURNING works and sequence generates ID
+                 # This case should be rare if sequence generates ID
                  raise BetServiceError("Failed to retrieve bet_id after insertion.")
 
         except ValidationError as ve:
