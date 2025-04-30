@@ -156,68 +156,63 @@ class DatabaseManager:
             # raise DatabaseError(f"Failed to fetch value: {e}") from e
             return None
 
-    async def initialize_db(self) -> None:
-        """Initialize the database with MySQL-compatible tables and indexes."""
-        if not self._pool:
-            logger.error("Cannot initialize DB: Database pool not available.")
-            return
-
-        logger.info("Attempting to initialize/verify database schema...")
+    async def initialize_db(self):
+        """Initializes the database schema, creating tables if they don't exist."""
         async with self._pool.acquire() as conn:
-            # Check if tables exist before trying to create
-            async def table_exists(conn, table_name):
-                async with conn.cursor() as cursor:
-                    # Use information_schema for a more standard check
-                    await cursor.execute("""
-                        SELECT COUNT(*)
-                        FROM information_schema.tables
-                        WHERE table_schema = DATABASE() AND table_name = %s
-                    """, (table_name,))
-                    result = await cursor.fetchone()
-                    return result[0] > 0 if result else False
+            async with conn.cursor() as cursor:
+                logger.info("Attempting to initialize/verify database schema...")
 
-            try:
-                # Use aiomysql transaction context manager
-                async with conn.cursor() as cursor: # Get a cursor for checks first
+                # Example: Create users table (assuming this exists)
+                await cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id BIGINT PRIMARY KEY,
+                        balance DECIMAL(15, 2) DEFAULT 1000.00,
+                        frozen_balance DECIMAL(15, 2) DEFAULT 0.00,
+                        join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                ''')
+                logger.info("Checked/created 'users' table.")
 
-                    # --- Bets Table ---
-                    if not await table_exists(conn, 'bets'):
-                        await cursor.execute('''
-                            CREATE TABLE bets (
-                                bet_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                                guild_id BIGINT NOT NULL,
-                                user_id BIGINT NOT NULL,
-                                game_id BIGINT NULL, -- Added game_id column
-                                bet_type VARCHAR(50) NOT NULL, -- Use VARCHAR instead of TEXT if max length known
-                                selection TEXT NOT NULL,
-                                units FLOAT NOT NULL, -- Use FLOAT for units
-                                odds FLOAT NOT NULL, -- Use FLOAT for odds
-                                status VARCHAR(20) NOT NULL DEFAULT 'pending', -- Use VARCHAR, add default
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, -- Auto update timestamp
-                                result_value FLOAT NULL, -- Use FLOAT
-                                result_description TEXT NULL,
-                                expiration_time TIMESTAMP NULL, -- Added expiration_time
-                                channel_id BIGINT NULL -- Added channel_id
-                                -- Removed bet_won/bet_loss, use status
-                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-                        ''')
-                        await cursor.execute('CREATE INDEX idx_bets_guild_user ON bets (guild_id, user_id)')
-                        await cursor.execute('CREATE INDEX idx_bets_status ON bets (status)')
-                        await cursor.execute('CREATE INDEX idx_bets_created_at ON bets (created_at)')
-                        await cursor.execute('CREATE INDEX idx_bets_game_id ON bets (game_id)') # Index for game_id
-                        logger.info("Table 'bets' created.")
-                    else:
-                        # Check if game_id column exists and add if missing (Example ALTER)
-                        await cursor.execute("""
-                            SELECT COUNT(*) FROM information_schema.columns
-                            WHERE table_schema=DATABASE() AND table_name='bets' AND column_name='game_id'
-                        """)
-                        if (await cursor.fetchone())[0] == 0:
-                            await cursor.execute("ALTER TABLE bets ADD COLUMN game_id BIGINT NULL AFTER user_id;")
-                            await cursor.execute("CREATE INDEX idx_bets_game_id ON bets (game_id)")
-                            logger.info("Added 'game_id' column to 'bets' table.")
-                        # Add similar checks/ALTER statements for other potentially missing columns like expiration_time, channel_id
+                # Example: Create games table (assuming this exists)
+                await cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS games (
+                        game_id VARCHAR(255) PRIMARY KEY,
+                        sport_key VARCHAR(100),
+                        sport_title VARCHAR(255),
+                        commence_time DATETIME,
+                        home_team VARCHAR(255),
+                        away_team VARCHAR(255),
+                        bookmaker VARCHAR(100),
+                        last_update DATETIME,
+                        completed BOOLEAN DEFAULT FALSE,
+                        home_score INT,
+                        away_score INT
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                ''')
+                logger.info("Checked/created 'games' table.")
+
+
+                # Example: Create bets table (assuming this exists)
+                await cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS bets (
+                        bet_id INT AUTO_INCREMENT PRIMARY KEY,
+                        user_id BIGINT NOT NULL,
+                        game_id VARCHAR(255), -- Column likely added/checked before the error
+                        bet_type VARCHAR(50) NOT NULL,
+                        team_name VARCHAR(255),
+                        odds DECIMAL(10, 3) NOT NULL,
+                        stake DECIMAL(15, 2) NOT NULL,
+                        potential_payout DECIMAL(15, 2) NOT NULL,
+                        status VARCHAR(20) DEFAULT 'pending', -- pending, won, lost, cancelled
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        parlay_id INT DEFAULT NULL,
+                        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                        FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE SET NULL,
+                        INDEX(parlay_id) -- Add index if parlays reference this
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                ''')
+                logger.info("Checked/created 'bets' table.")
 
                     # --- Guild Settings Table ---
                     if not await table_exists(conn, 'guild_settings'):
