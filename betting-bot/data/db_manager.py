@@ -25,8 +25,6 @@ class DatabaseManager:
             if not all([MYSQL_HOST, MYSQL_USER, MYSQL_DB, MYSQL_PASSWORD is not None]):
                 # Log critical error and prevent further operation without connection
                 logger.critical("Cannot connect: MySQL environment variables are not configured.")
-                # Optionally raise an error or handle appropriately depending on desired bot behavior
-                # raise ConnectionError("Cannot connect: MySQL environment variables are not configured.")
                 return None  # Indicate connection failure
 
             logger.info("Attempting to create MySQL connection pool...")
@@ -56,7 +54,6 @@ class DatabaseManager:
             except Exception as e:
                 logger.critical(f"FATAL: Failed to connect to MySQL: {e}", exc_info=True)
                 self._pool = None
-                # Re-raise a more specific or generic connection error
                 raise ConnectionError(f"Failed to connect to MySQL: {e}") from e
         return self._pool
 
@@ -93,8 +90,6 @@ class DatabaseManager:
                         return rowcount  # Return number of affected rows for UPDATE/DELETE
         except Exception as e:
             logger.error(f"Error executing query: {query} with args: {args}. Error: {e}", exc_info=True)
-            # Consider raising a custom DatabaseError here instead of returning None
-            # raise DatabaseError(f"Failed to execute query: {e}") from e
             return None  # Keep returning None for now based on original structure
 
     async def fetch_one(self, query: str, *args) -> Optional[Dict[str, Any]]:
@@ -113,7 +108,6 @@ class DatabaseManager:
                     return await cursor.fetchone()
         except Exception as e:
             logger.error(f"Error fetching one row: {query} with args: {args}. Error: {e}", exc_info=True)
-            # raise DatabaseError(f"Failed to fetch one row: {e}") from e
             return None
 
     async def fetch_all(self, query: str, *args) -> List[Dict[str, Any]]:
@@ -132,7 +126,6 @@ class DatabaseManager:
                     return await cursor.fetchall()
         except Exception as e:
             logger.error(f"Error fetching all rows: {query} with args: {args}. Error: {e}", exc_info=True)
-            # raise DatabaseError(f"Failed to fetch all rows: {e}") from e
             return []
 
     async def fetchval(self, query: str, *args) -> Optional[Any]:
@@ -152,7 +145,6 @@ class DatabaseManager:
                     return row[0] if row else None
         except Exception as e:
             logger.error(f"Error fetching value: {query} with args: {args}. Error: {e}", exc_info=True)
-            # raise DatabaseError(f"Failed to fetch value: {e}") from e
             return None
 
     async def initialize_db(self):
@@ -421,7 +413,7 @@ class DatabaseManager:
                     logger.info("Table 'game_events' created.")
 
                 logger.info("Database schema initialization/verification complete.")
-            except Exception as e:
-                # Rollback is implicit with aiomysql connection context manager on error
-                logger.error(f"Error initializing/verifying database schema: {e}", exc_info=True)
-                raise  # Re-raise the exception to signal failure
+        except Exception as e:
+            # Rollback is implicit with aiomysql connection context manager on error
+            logger.error(f"Error initializing/verifying database schema: {e}", exc_info=True)
+            raise  # Re-raise the exception to signal failure
