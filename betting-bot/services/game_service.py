@@ -422,7 +422,7 @@ class GameService:
             logger.exception(f"Error getting live games: {e}")
             return []
 
-    async |def update_game_status(
+    async def update_game_status(
         self,
         guild_id: Optional[int],
         game_id: int,
