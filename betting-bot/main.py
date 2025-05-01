@@ -2,7 +2,6 @@ import os
 import sys
 import logging
 import discord
-from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 import asyncio
@@ -43,18 +42,15 @@ if not BOT_TOKEN:
     sys.exit("Missing DISCORD_TOKEN")
 
 # --- Bot Definition ---
-class BettingBot(commands.Bot):
+class BettingBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
         intents.reactions = True
 
-        super().__init__(
-            command_prefix='!',
-            intents=intents,
-            help_command=None
-        )
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
 
         # Initialize Managers and Services
         self.db_manager = DatabaseManager()
