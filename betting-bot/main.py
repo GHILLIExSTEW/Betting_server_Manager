@@ -3,11 +3,12 @@ import sys
 import logging
 import discord
 from discord.ext import commands
+from discord import app_commands
 from dotenv import load_dotenv
 import asyncio
 
 # --- Path Setup ---
-dotenv_path = os.path.join(os.path.dirname(__file__), '.env')  # .env in same directory as main.py
+dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
 # --- Imports ---
@@ -114,12 +115,28 @@ class BettingBot(commands.AutoShardedBot):
                     guild_obj = discord.Object(id=TEST_GUILD_ID)
                     self.tree.clear_commands(guild=None)  # Clear global commands
                     self.tree.clear_commands(guild=guild_obj)  # Clear guild commands
-                    await self.tree.sync(guild=guild_obj)
-                    logger.info(f"Commands synced to test guild {TEST_GUILD_ID}")
+                    synced_commands = await self.tree.sync(guild=guild_obj)
+                    logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced_commands]}")
                 except Exception as e:
                     logger.error(f"Test guild command sync failed for ID {TEST_GUILD_ID}: {e}")
             else:
                 logger.warning("TEST_GUILD_ID not set, skipping guild command sync.")
+
+            # Add Clear Commands Command
+            @app_commands.command(name="clearcommands", description="Clear and resync commands")
+            @app_commands.guilds(discord.Object(id=TEST_GUILD_ID))
+            async def clear_commands(interaction: discord.Interaction):
+                try:
+                    self.tree.clear_commands(guild=None)
+                    self.tree.clear_commands(guild=discord.Object(id=TEST_GUILD_ID))
+                    synced_commands = await self.tree.sync(guild=discord.Object(id=TEST_GUILD_ID))
+                    await interaction.response.send_message(
+                        f"Cleared and resynced {len(synced_commands)} commands: {[cmd.name for cmd in synced_commands]}",
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    await interaction.response.send_message(f"Error clearing commands: {e}", ephemeral=True)
+            self.tree.add_command(clear_commands)
 
             logger.info("Bot setup hook completed successfully.")
 
@@ -141,9 +158,9 @@ class BettingBot(commands.AutoShardedBot):
         if TEST_GUILD_ID and guild.id == TEST_GUILD_ID:
             try:
                 guild_obj = discord.Object(id=TEST_GUILD_ID)
-                self.tree.clear_commands(guild=guild_obj)  # Clear guild commands
-                await self.tree.sync(guild=guild_obj)
-                logger.info(f"Synced commands for test guild {guild.name}")
+                self.tree.clear_commands(guild=guild_obj)
+                synced_commands = await self.tree.sync(guild=guild_obj)
+                logger.info(f"Synced {len(synced_commands)} commands for test guild {guild.name}: {[cmd.name for cmd in synced_commands]}")
             except Exception as e:
                 logger.error(f"Error syncing commands for test guild {guild.name}: {e}")
 
