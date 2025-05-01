@@ -242,9 +242,17 @@ class DatabaseManager:
                     await cursor.execute('''
                         CREATE TABLE IF NOT EXISTS guild_settings (
                             guild_id BIGINT PRIMARY KEY,
-                            admin_role_id BIGINT,
-                            capper_role_id BIGINT,
-                            betting_channel_id BIGINT,
+                            is_active BOOLEAN DEFAULT TRUE,
+                            subscription_level INTEGER DEFAULT 0,
+                            is_paid BOOLEAN DEFAULT FALSE,
+                            embed_channel_1 BIGINT NULL,
+                            command_channel_1 BIGINT NULL,
+                            admin_channel_1 BIGINT NULL,
+                            admin_role BIGINT NULL,
+                            authorized_role BIGINT NULL,
+                            voice_channel_id BIGINT NULL,
+                            yearly_channel_id BIGINT NULL,
+                            total_units_channel_id BIGINT NULL,
                             min_units DECIMAL(15, 2) DEFAULT 0.1,
                             max_units DECIMAL(15, 2) DEFAULT 10.0,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -257,7 +265,6 @@ class DatabaseManager:
                     await cursor.execute('''
                         CREATE INDEX IF NOT EXISTS idx_bets_user_id ON bets(user_id);
                         CREATE INDEX IF NOT EXISTS idx_bets_guild_id ON bets(guild_id);
-                        CREATE INDEX IF NOT EXISTS idx_bets_status ON bets(status);
                         CREATE INDEX IF NOT EXISTS idx_bets_created_at ON bets(created_at);
                         CREATE INDEX IF NOT EXISTS idx_unit_records_user_id ON unit_records(user_id);
                         CREATE INDEX IF NOT EXISTS idx_unit_records_guild_id ON unit_records(guild_id);
@@ -265,28 +272,7 @@ class DatabaseManager:
                     ''')
                     logger.info("Checked/created indexes.")
 
-                    # Guild Settings Table
-                    if not await self.table_exists(conn, 'guild_settings'):
-                        await cursor.execute('''
-                            CREATE TABLE guild_settings (
-                                guild_id BIGINT PRIMARY KEY,
-                                is_active BOOLEAN DEFAULT TRUE,
-                                subscription_level INTEGER DEFAULT 0,
-                                is_paid BOOLEAN DEFAULT FALSE,
-                                embed_channel_1 BIGINT NULL,
-                                command_channel_1 BIGINT NULL,
-                                admin_channel_1 BIGINT NULL,
-                                admin_role BIGINT NULL,
-                                authorized_role BIGINT NULL,
-                                voice_channel_id BIGINT NULL,
-                                yearly_channel_id BIGINT NULL,
-                                total_units_channel_id BIGINT NULL
-                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-                        ''')
-                        await cursor.execute('CREATE INDEX idx_guild_settings_active ON guild_settings (is_active)')
-                        logger.info("Table 'guild_settings' created.")
-
-                    # Cappers Table
+                    # Remove duplicate guild_settings creation
                     if not await self.table_exists(conn, 'cappers'):
                         await cursor.execute('''
                             CREATE TABLE cappers (
