@@ -58,6 +58,7 @@ class DatabaseManager:
                     minsize=MYSQL_POOL_MIN_SIZE, maxsize=MYSQL_POOL_MAX_SIZE,
                     autocommit=True, connect_timeout=10,
                     charset='utf8mb4'
+                    # No default cursorclass specified, should default to tuple cursor
                 )
                 async with self._pool.acquire() as conn:
                     async with conn.cursor() as cursor:
@@ -93,7 +94,7 @@ class DatabaseManager:
         logger.debug(f"Executing DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor() as cursor:
+                async with conn.cursor() as cursor: # Default tuple cursor
                     rowcount = await cursor.execute(query, args)
                     is_insert = query.strip().upper().startswith("INSERT")
                     return cursor.lastrowid if is_insert else rowcount
@@ -108,7 +109,7 @@ class DatabaseManager:
         logger.debug(f"Fetching One DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                async with conn.cursor(aiomysql.DictCursor) as cursor: # Explicit DictCursor
                     await cursor.execute(query, args)
                     return await cursor.fetchone()
         except Exception as e:
@@ -122,7 +123,7 @@ class DatabaseManager:
         logger.debug(f"Fetching All DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                async with conn.cursor(aiomysql.DictCursor) as cursor: # Explicit DictCursor
                     await cursor.execute(query, args)
                     return await cursor.fetchall()
         except Exception as e:
@@ -136,7 +137,7 @@ class DatabaseManager:
         logger.debug(f"Fetching Value DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.Cursor) as cursor:
+                async with conn.cursor(aiomysql.Cursor) as cursor: # Explicit Tuple Cursor
                     await cursor.execute(query, args)
                     row = await cursor.fetchone()
                     return row[0] if row else None
@@ -146,7 +147,7 @@ class DatabaseManager:
 
     async def table_exists(self, conn, table_name: str) -> bool:
         """Check if a table exists in the database."""
-        async with conn.cursor(aiomysql.Cursor) as cursor:
+        async with conn.cursor(aiomysql.Cursor) as cursor: # Explicit Tuple Cursor
             try:
                 await cursor.execute(
                     "SELECT COUNT(*) FROM information_schema.tables "
@@ -157,18 +158,22 @@ class DatabaseManager:
                 return result[0] > 0 if result else False
             except Exception as e:
                 logger.error(f"Error checking if table '{table_name}' exists: {e}", exc_info=True)
-                raise # Re-raise to indicate failure during init
+                raise
 
     # --- Helper to check/add columns ---
     async def _check_and_add_column(self, cursor, table_name, column_name, column_definition):
         """Checks if a column exists and adds it if not."""
-        # Use DictCursor for SHOW COLUMNS
+        # Use DictCursor for SHOW COLUMNS to access by name ('Field')
         async with cursor.connection.cursor(aiomysql.DictCursor) as dict_cursor:
             await dict_cursor.execute(f"SHOW COLUMNS FROM `{table_name}` LIKE %s", (column_name,))
             exists = await dict_cursor.fetchone()
+
         if not exists:
             logger.info(f"Adding column '{column_name}' to table '{table_name}'...")
-            await cursor.execute(f"ALTER TABLE `{table_name}` ADD COLUMN {column_definition}")
+            # FIX: Construct the ALTER TABLE statement correctly
+            # Need to include the column name *before* its definition
+            alter_statement = f"ALTER TABLE `{table_name}` ADD COLUMN `{column_name}` {column_definition}"
+            await cursor.execute(alter_statement)
             logger.info(f"Successfully added column '{column_name}'.")
         else:
             logger.debug(f"Column '{column_name}' already exists in '{table_name}'.")
@@ -184,6 +189,7 @@ class DatabaseManager:
                 async with conn.cursor(aiomysql.Cursor) as cursor: # Use default cursor for schema mods
                     logger.info("Attempting to initialize/verify database schema...")
 
+                    # --- Schema Definitions (Remain the same) ---
                     # --- USERS Table ---
                     if not await self.table_exists(conn, 'users'):
                         await cursor.execute('''
@@ -218,7 +224,6 @@ class DatabaseManager:
                                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
-                        # Add indexes after table creation
                         await cursor.execute('CREATE INDEX idx_games_league_status_time ON games (league_id, status, start_time)')
                         await cursor.execute('CREATE INDEX idx_games_start_time ON games (start_time)')
                         await cursor.execute('CREATE INDEX idx_games_status ON games (status)')
@@ -226,6 +231,7 @@ class DatabaseManager:
                     else:
                         logger.info("Table 'games' already exists.")
                         # Check and add potentially missing columns to existing games table
+                        # Note: The column definition string passed here includes type, constraints, comments, and AFTER clause
                         await self._check_and_add_column(cursor, 'games', 'sport', "VARCHAR(50) NOT NULL COMMENT 'Sport key' AFTER id")
                         await self._check_and_add_column(cursor, 'games', 'league_name', "VARCHAR(150) NULL AFTER league_id")
                         await self._check_and_add_column(cursor, 'games', 'home_team_name', "VARCHAR(150) NULL AFTER away_team_id")
@@ -237,7 +243,6 @@ class DatabaseManager:
                         await self._check_and_add_column(cursor, 'games', 'score', "JSON NULL COMMENT 'JSON scores' AFTER status")
                         await self._check_and_add_column(cursor, 'games', 'venue', "VARCHAR(150) NULL AFTER score")
                         await self._check_and_add_column(cursor, 'games', 'referee', "VARCHAR(100) NULL AFTER venue")
-                        # Note: Checking/adding indexes to existing tables is more complex, often skipped or done manually.
 
                     # --- BETS Table ---
                     if not await self.table_exists(conn, 'bets'):
@@ -266,19 +271,11 @@ class DatabaseManager:
                         logger.info("Table 'bets' created.")
                     else:
                         logger.info("Table 'bets' already exists.")
-                        # Check and potentially alter bets.game_id type if needed
-                        # This requires careful handling of FK constraints (drop, alter, add back)
-                        # Example check (using DictCursor):
                         async with conn.cursor(aiomysql.DictCursor) as dict_cursor:
                             await dict_cursor.execute("SHOW COLUMNS FROM bets LIKE 'game_id'")
                             col_info = await dict_cursor.fetchone()
                             if col_info and 'bigint' not in col_info.get('Type', '').lower():
-                                logger.warning("Column 'bets.game_id' is not BIGINT. Manual alteration might be needed (requires dropping/re-adding FK).")
-                                # Manual SQL would be like:
-                                # ALTER TABLE bets DROP FOREIGN KEY <fk_name>;
-                                # ALTER TABLE bets MODIFY COLUMN game_id BIGINT NULL COMMENT 'FK to games.id';
-                                # ALTER TABLE bets ADD CONSTRAINT <fk_name> FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE SET NULL;
-
+                                logger.warning("Column 'bets.game_id' is not BIGINT. Manual alteration might be needed.")
 
                     # --- UNIT_RECORDS Table ---
                     if not await self.table_exists(conn, 'unit_records'):
@@ -397,7 +394,6 @@ class DatabaseManager:
                         logger.info("Table 'standings' created.")
                     else:
                         logger.info("Table 'standings' already exists.")
-                        # Check/add season column and modify PK if needed
                         async with conn.cursor(aiomysql.DictCursor) as dict_cursor:
                             await dict_cursor.execute("SHOW COLUMNS FROM standings LIKE 'season'")
                             if not await dict_cursor.fetchone():
