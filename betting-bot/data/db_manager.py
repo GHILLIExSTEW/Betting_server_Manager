@@ -254,30 +254,12 @@ class DatabaseManager:
                         ''')
                         logger.info("Table 'cappers' created.")
 
-                    # Transactions Table
-                    if not await self.table_exists(conn, 'transactions'):
-                        await cursor.execute('''
-                            CREATE TABLE transactions (
-                                transaction_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                                user_id BIGINT NOT NULL,
-                                type VARCHAR(50) NOT NULL,
-                                amount FLOAT NOT NULL,
-                                bet_id BIGINT NULL,
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                description TEXT NULL,
-                                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-                                FOREIGN KEY (bet_id) REFERENCES bets(bet_id) ON DELETE SET NULL
-                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-                        ''')
-                        await cursor.execute('CREATE INDEX idx_transactions_user_time ON transactions (user_id, created_at)')
-                        logger.info("Table 'transactions' created.")
-
                     # Unit Records Table
                     if not await self.table_exists(conn, 'unit_records'):
                         await cursor.execute('''
                             CREATE TABLE unit_records (
                                 record_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                                bet_id BIGINT NULL,
+                                bet_id INT NULL,
                                 guild_id BIGINT NOT NULL,
                                 user_id BIGINT NOT NULL,
                                 year INTEGER NOT NULL,
@@ -294,10 +276,10 @@ class DatabaseManager:
                         await cursor.execute('CREATE INDEX idx_unit_records_bet_id ON unit_records (bet_id)')
                         logger.info("Table 'unit_records' created.")
 
-                    # Games Table (API-based)
-                    if not await self.table_exists(conn, 'games'):
+                    # Games Table (API-based, renamed to api_games)
+                    if not await self.table_exists(conn, 'api_games'):
                         await cursor.execute('''
-                            CREATE TABLE games (
+                            CREATE TABLE api_games (
                                 id BIGINT PRIMARY KEY,
                                 sport VARCHAR(50) NOT NULL,
                                 league_id BIGINT NULL,
@@ -318,10 +300,10 @@ class DatabaseManager:
                                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
-                        await cursor.execute('CREATE INDEX idx_games_league_status_time ON games (league_id, status, start_time)')
-                        await cursor.execute('CREATE INDEX idx_games_start_time ON games (start_time)')
-                        await cursor.execute('CREATE INDEX idx_games_status ON games (status)')
-                        logger.info("Table 'games' created.")
+                        await cursor.execute('CREATE INDEX idx_api_games_league_status_time ON api_games (league_id, status, start_time)')
+                        await cursor.execute('CREATE INDEX idx_api_games_start_time ON api_games (start_time)')
+                        await cursor.execute('CREATE INDEX idx_api_games_status ON api_games (status)')
+                        logger.info("Table 'api_games' created.")
 
                     # Leagues Table
                     if not await self.table_exists(conn, 'leagues'):
@@ -404,7 +386,7 @@ class DatabaseManager:
                                 event_type VARCHAR(50) NOT NULL,
                                 details TEXT NULL,
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+                                FOREIGN KEY (game_id) REFERENCES api_games(id) ON DELETE CASCADE
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         await cursor.execute('CREATE INDEX idx_game_events_game_time ON game_events (game_id, created_at)')
