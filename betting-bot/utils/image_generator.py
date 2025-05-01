@@ -9,14 +9,20 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 class BetSlipGenerator:
-    def __init__(self, font_path: Optional[str] = None, assets_dir: str = "betting-bot/assets/"):
+    def __init__(self, font_path: Optional[str] = None, assets_dir: str = "betting-bot/static/"):
         self.font_path = font_path or self._get_default_font()
         self.assets_dir = assets_dir
+        self.league_team_dir = os.path.join(self.assets_dir, "logos/teams/HOCKEY/NHL")
         self._ensure_font_exists()
-        self._ensure_assets_dir_exists()
+        self._ensure_team_dir_exists()
 
     def _get_default_font(self) -> str:
-        """Get the default font path based on the operating system."""
+        """Get the default font path."""
+        # First, try the custom font directory
+        custom_font_path = "betting-bot/static/fonts/Roboto-Regular.ttf"
+        if os.path.exists(custom_font_path):
+            return custom_font_path
+        # Fallback to system fonts
         if os.name == 'nt':  # Windows
             return 'C:\\Windows\\Fonts\\arial.ttf'
         else:  # Linux/Mac
@@ -31,20 +37,20 @@ class BetSlipGenerator:
                     self.font_path = font
                     break
             else:
-                raise FileNotFoundError("Could not find a suitable font file")
+                raise FileNotFoundError("Could not find a suitable font file. Please place 'Roboto-Regular.ttf' in betting-bot/static/fonts/")
 
-    def _ensure_assets_dir_exists(self) -> None:
-        """Ensure the assets directory exists."""
-        if not os.path.exists(self.assets_dir):
-            logger.warning(f"Assets directory not found at {self.assets_dir}")
-            os.makedirs(self.assets_dir, exist_ok=True)
+    def _ensure_team_dir_exists(self) -> None:
+        """Ensure the team logos directory exists."""
+        if not os.path.exists(self.league_team_dir):
+            logger.warning(f"Team logos directory not found at {self.league_team_dir}")
+            os.makedirs(self.league_team_dir, exist_ok=True)
 
     def _load_team_logo(self, team_name: str) -> Optional[Image.Image]:
         """Load the team logo image based on team name."""
         try:
-            # Convert team name to a filename (e.g., "Edmonton Oilers" -> "edmonton_oilers.png")
+            # Convert team name to a filename (e.g., "Oilers" -> "oilers.png")
             logo_filename = team_name.lower().replace(" ", "_") + ".png"
-            logo_path = os.path.join(self.assets_dir, logo_filename)
+            logo_path = os.path.join(self.league_team_dir, logo_filename)
             if os.path.exists(logo_path):
                 logo = Image.open(logo_path).convert("RGBA")
                 # Resize logo to a standard size (e.g., 100x100)
@@ -130,7 +136,8 @@ class BetSlipGenerator:
             line_text = f"{home_team}: {line}"
             draw.text((width // 2, details_y), line_text, fill='white', font=team_font, anchor='mm')
             odds_y = details_y + 40
-            odds_text = f"{odds:+d}"
+            # Fix: Format odds as a float with a sign, no decimal places
+            odds_text = f"{odds:+.0f}"  # Ensure no decimal places, show sign (e.g., "-110")
             draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
             units_y = odds_y + 40
             units_text = f"To Win {units:.2f} Unit"
