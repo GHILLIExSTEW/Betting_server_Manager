@@ -145,28 +145,27 @@ class ManualEntryButton(Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: Interaction):
-        """Callback for the button shown when no games are found."""
         logger.debug("Manual Entry button clicked (from no games found)")
         self.parent_view.bet_details['game_id'] = "Other"
+        self.disabled = True
+        for item in self.parent_view.children:
+            if isinstance(item, CancelButton):
+                item.disabled = True
         line_type = self.parent_view.bet_details.get('line_type')
-
-        # Create the modal instance
-        modal = BetDetailsModal(line_type=line_type, is_manual=True)
-        modal.view = self.parent_view # Pass view reference for the modal's on_submit
-
-        # Send the modal as the *first and only* response to this interaction.
         try:
+            # Send the modal directly
+            modal = BetDetailsModal(line_type=line_type, is_manual=True)
+            modal.view = self.parent_view
             await interaction.response.send_modal(modal)
-            logger.debug("Manual entry modal sent successfully.")
-            # NOTE: Do NOT add any followup.send or response.send_message here.
-            # The modal submission (on_submit) will handle the next step.
-        except Exception as e:
-            # Log if sending the modal itself fails
-            logger.exception(f"Failed to send Manual Entry modal: {e}")
-            # We cannot reliably send a message back to the user here,
-            # as the interaction response likely failed. Log is the best option.
-            # Optionally, stop the parent view if modal fails critically.
-            # self.parent_view.stop()
+            logger.debug("Manual entry modal sent successfully")
+            # Update the existing message without consuming response
+            await self.parent_view.edit_message(interaction, content="Manual entry form opened.", view=self.parent_view)
+            # Set step to 4 so on_submit advances to step 6
+            self.parent_view.current_step = 4
+        except discord.HTTPException as e:
+            logger.error(f"Failed to send manual entry modal: {e}")
+            await interaction.followup.send("❌ Failed to open manual entry form. Please restart the /bet command.", ephemeral=True)
+            self.parent_view.stop()
 
 class CancelButton(Button):
     def __init__(self, parent_view):
@@ -242,8 +241,11 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
             self.view.bet_details['legs'] = []
         self.view.bet_details['legs'].append(leg)
         logger.debug(f"Bet details entered: {leg}")
+        # Defer response to avoid consuming it
         if not interaction.response.is_done():
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
+        # Advance to step 6 (channel selection)
+        self.view.current_step = 5  # Set to 5 so go_next advances to 6
         await self.view.go_next(interaction)
 
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
@@ -292,20 +294,6 @@ class ConfirmButton(Button):
             if isinstance(item, Button): item.disabled = True
         await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.submit_bet(interaction)
-
-class CancelButton(Button):
-    def __init__(self, parent_view):
-        super().__init__(style=ButtonStyle.red, label="Cancel", custom_id=f"cancel_{parent_view.original_interaction.id}")
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: Interaction):
-        logger.debug("Cancel button clicked")
-        self.disabled = True
-        for item in self.parent_view.children:
-            if isinstance(item, ManualEntryButton) or isinstance(item, AddLegButton):
-                item.disabled = True
-        await interaction.response.edit_message(content="Bet workflow cancelled.", view=None)
-        self.parent_view.stop()
 
 class BetWorkflowView(View):
     def __init__(self, interaction: Interaction, bot: commands.Bot):
@@ -453,20 +441,10 @@ class BetWorkflowView(View):
                                 self.stop()
                             return
                     else:
-                        modal = BetDetailsModal(line_type=line_type, is_manual=is_manual)
-                        modal.view = self
-                        logger.debug(f"Sending BetDetailsModal for line_type={line_type}, is_manual={is_manual}")
-                        try:
-                            if interaction.response.is_done():
-                                logger.warning("Interaction response already used; cannot send modal")
-                                await interaction.followup.send("❌ Please restart the /bet command to enter details.", ephemeral=True)
-                                self.stop()
-                                return
-                            await interaction.response.send_modal(modal)
-                        except discord.HTTPException as e:
-                            logger.error(f"Failed to send BetDetailsModal: {e}")
-                            await interaction.followup.send("❌ Failed to send bet details modal. Please try again.", ephemeral=True)
-                            self.stop()
+                        # For manual entry, modal is already handled by ManualEntryButton
+                        logger.debug("Skipping modal in step 5 for manual entry; advancing to step 6")
+                        self.current_step = 5  # Set to 5 so next go_next goes to 6
+                        await self.go_next(interaction)
                         return
                 elif self.current_step == 6:
                     if not self.bet_details.get('legs'):
