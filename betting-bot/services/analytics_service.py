@@ -5,17 +5,15 @@
 import discord
 import logging
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta, timezone # Add timezone
+from datetime import datetime, timedelta, timezone
 
-# Use relative imports assuming services/ is sibling to utils/
 try:
     from ..utils.errors import AnalyticsServiceError
-    # from ..data.db_manager import DatabaseManager # For type hint if needed
 except ImportError:
     from utils.errors import AnalyticsServiceError
-    # from data.db_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
 
 class AnalyticsService:
     def __init__(self, bot, db_manager):
@@ -25,9 +23,6 @@ class AnalyticsService:
     async def get_user_stats(self, guild_id: int, user_id: int) -> Dict[str, Any]:
         """Get betting statistics for a user using the shared db_manager."""
         try:
-            # Use %s placeholders
-            # Join bets with unit_records on bet_serial (ensure this column name is correct)
-            # Ensure bet_id in the original query was meant to be bet_serial
             stats = await self.db.fetch_one("""
                 SELECT
                     COUNT(b.bet_serial) as total_bets,
@@ -52,13 +47,11 @@ class AnalyticsService:
             total_resolved_for_winrate = wins + losses
             win_rate = (wins / total_resolved_for_winrate * 100) if total_resolved_for_winrate > 0 else 0.0
 
-            # Calculate ROI - Fetch total risked (stake) from bets table
-            # Use %s placeholders
             total_risked_result = await self.db.fetch_one("""
-                 SELECT COALESCE(SUM(stake), 0) as total_risked -- Use 'stake' column from bets table
-                 FROM bets
-                 WHERE guild_id = %s AND user_id = %s
-                 AND status IN ('won', 'lost', 'push')
+                SELECT COALESCE(SUM(stake), 0) as total_risked
+                FROM bets
+                WHERE guild_id = %s AND user_id = %s
+                AND status IN ('won', 'lost', 'push')
             """, guild_id, user_id)
             total_risked = total_risked_result.get('total_risked') or 0 if total_risked_result else 0
 
@@ -66,7 +59,7 @@ class AnalyticsService:
 
             return {
                 'total_bets': total_bets, 'wins': wins, 'losses': losses,
-                'pushes': stats.get('pushes') or 0, # Get pushes from stats dict
+                'pushes': stats.get('pushes') or 0,
                 'win_rate': win_rate, 'net_units': net_units, 'roi': roi
             }
         except Exception as e:
@@ -76,8 +69,6 @@ class AnalyticsService:
     async def get_guild_stats(self, guild_id: int) -> Dict[str, Any]:
         """Get betting statistics for the entire guild using the shared db_manager."""
         try:
-            # Use %s placeholders
-            # Ensure bet_id was meant to be bet_serial for the join
             stats = await self.db.fetch_one("""
                 SELECT
                     COUNT(b.bet_serial) as total_bets,
@@ -93,7 +84,7 @@ class AnalyticsService:
             """, guild_id)
 
             if not stats or (stats.get('total_bets') or 0) == 0:
-                 return {'total_bets': 0, 'wins': 0, 'losses': 0, 'pushes': 0, 'win_rate': 0.0, 'net_units': 0.0, 'total_cappers': 0, 'roi': 0.0}
+                return {'total_bets': 0, 'wins': 0, 'losses': 0, 'pushes': 0, 'win_rate': 0.0, 'net_units': 0.0, 'total_cappers': 0, 'roi': 0.0}
 
             wins = stats.get('wins') or 0
             losses = stats.get('losses') or 0
@@ -103,11 +94,10 @@ class AnalyticsService:
             total_resolved_for_winrate = wins + losses
             win_rate = (wins / total_resolved_for_winrate * 100.0) if total_resolved_for_winrate > 0 else 0.0
 
-            # Calculate ROI - Use %s placeholder
             total_risked_result = await self.db.fetch_one("""
-                 SELECT COALESCE(SUM(stake), 0) as total_risked -- Use 'stake' column
-                 FROM bets
-                 WHERE guild_id = %s AND status IN ('won', 'lost', 'push')
+                SELECT COALESCE(SUM(stake), 0) as total_risked
+                FROM bets
+                WHERE guild_id = %s AND status IN ('won', 'lost', 'push')
             """, guild_id)
             total_risked = total_risked_result.get('total_risked') or 0 if total_risked_result else 0
             roi = (net_units / total_risked * 100.0) if total_risked > 0 else 0.0
@@ -124,22 +114,23 @@ class AnalyticsService:
     async def get_leaderboard(
         self,
         guild_id: int,
-        timeframe: str = 'weekly', # 'daily', 'weekly', 'monthly', 'yearly', 'alltime'
+        timeframe: str = 'weekly',
         limit: int = 10,
-        metric: str = 'net_units' # 'net_units', 'roi', 'win_rate', 'wins'
+        metric: str = 'net_units'
     ) -> List[Dict[str, Any]]:
         """Get the betting leaderboard for a guild based on a metric and timeframe."""
         try:
             now = datetime.now(timezone.utc)
             start_date = None
-            if timeframe == 'daily': start_date = now - timedelta(days=1)
-            elif timeframe == 'weekly': start_date = now - timedelta(weeks=1)
-            elif timeframe == 'monthly': start_date = now - timedelta(days=30) # Approx.
-            elif timeframe == 'yearly': start_date = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+            if timeframe == 'daily':
+                start_date = now - timedelta(days=1)
+            elif timeframe == 'weekly':
+                start_date = now - timedelta(weeks=1)
+            elif timeframe == 'monthly':
+                start_date = now - timedelta(days=30)
+            elif timeframe == 'yearly':
+                start_date = datetime(now.year, 1, 1, tzinfo=timezone.utc)
 
-            # Build the core query for metrics - use %s
-            # Assumes bet_id was meant to be bet_serial for the join
-            # Uses stake column from bets table
             query = """
                 SELECT
                     b.user_id,
@@ -155,34 +146,35 @@ class AnalyticsService:
             params: List[Any] = [guild_id]
 
             if start_date:
-                query += " AND b.created_at >= %s" # Use %s
+                query += " AND b.created_at >= %s"
                 params.append(start_date)
 
             query += " GROUP BY b.user_id"
 
-            # Determine ordering based on metric
             order_by_clause = ""
-            if metric == 'net_units': order_by_clause = "ORDER BY net_units DESC"
-            elif metric == 'roi': order_by_clause = "ORDER BY CASE WHEN total_risked > 0 THEN (net_units / total_risked) ELSE -99999 END DESC"
-            elif metric == 'win_rate': order_by_clause = "ORDER BY CASE WHEN (wins + losses) > 0 THEN (wins * 1.0 / (wins + losses)) ELSE -1 END DESC, wins DESC"
-            elif metric == 'wins': order_by_clause = "ORDER BY wins DESC"
-            else: order_by_clause = "ORDER BY net_units DESC"; logger.warning(f"Invalid metric '{metric}', defaulting to net_units.")
+            if metric == 'net_units':
+                order_by_clause = "ORDER BY net_units DESC"
+            elif metric == 'roi':
+                order_by_clause = "ORDER BY CASE WHEN total_risked > 0 THEN (net_units / total_risked) ELSE -99999 END DESC"
+            elif metric == 'win_rate':
+                order_by_clause = "ORDER BY CASE WHEN (wins + losses) > 0 THEN (wins * 1.0 / (wins + losses)) ELSE -1 END DESC, wins DESC"
+            elif metric == 'wins':
+                order_by_clause = "ORDER BY wins DESC"
+            else:
+                order_by_clause = "ORDER BY net_units DESC"
+                logger.warning(f"Invalid metric '{metric}', defaulting to net_units.")
 
-            # Wrap in CTE and apply ORDER BY and LIMIT - Use %s for limit
             final_query = f"""
                 WITH UserStats AS (
                     {query}
                 )
                 SELECT
                     us.user_id,
-                    -- Optionally join with users table here if you store display names there
-                    -- u.username,
                     us.total_resolved_bets, us.wins, us.losses, us.net_units, us.total_risked,
                     CASE WHEN (us.wins + us.losses) > 0 THEN (us.wins * 100.0 / (us.wins + us.losses)) ELSE 0.0 END as win_rate,
                     CASE WHEN us.total_risked > 0 THEN (us.net_units / us.total_risked * 100.0) ELSE 0.0 END as roi
                 FROM UserStats us
-                -- Optional JOIN: LEFT JOIN users u ON us.user_id = u.user_id -- Adjust join column if needed
-                WHERE us.total_resolved_bets > 0 -- Optional: Only show users with resolved bets
+                WHERE us.total_resolved_bets > 0
                 {order_by_clause}
                 LIMIT %s
             """
