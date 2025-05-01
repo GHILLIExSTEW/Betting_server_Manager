@@ -73,7 +73,9 @@ class BetService:
                     for bet in expired_bets:
                         try:
                             await self.update_bet_status(bet['bet_serial'], 'expired', 'Expired due to age')
-                            self.logger.info(f"Expired pending bet {bet['bet_serial']} for user {bet['user_id']} in guild {bet['guild_id']}")
+                            self.logger.info(
+                                f"Expired pending bet {bet['bet_serial']} for user {bet['user_id']} in guild {bet['guild_id']}"
+                            )
                             message_id_to_remove = None
                             for msg_id, details in self.pending_reactions.items():
                                 if details['bet_serial'] == bet['bet_serial']:
@@ -81,7 +83,9 @@ class BetService:
                                     break
                             if message_id_to_remove:
                                 del self.pending_reactions[message_id_to_remove]
-                                logger.debug(f"Removed expired bet {bet['bet_serial']} (message {message_id_to_remove}) from reaction tracking.")
+                                logger.debug(
+                                    f"Removed expired bet {bet['bet_serial']} (message {message_id_to_remove}) from reaction tracking."
+                                )
 
                         except Exception as inner_e:
                             self.logger.error(f"Error expiring bet {bet['bet_serial']}: {inner_e}")
@@ -122,7 +126,9 @@ class BetService:
             MIN_ODDS, MAX_ODDS = -10000, 10000
 
             if not (MIN_UNITS <= units <= MAX_UNITS):
-                raise ValidationError(f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server.")
+                raise ValidationError(
+                    f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
+                )
             if not (MIN_ODDS <= odds <= MAX_ODDS):
                 raise ValidationError(f"Odds ({odds}) must be between {MIN_ODDS} and {MAX_ODDS}")
             if -100 < odds < 100:
@@ -135,27 +141,39 @@ class BetService:
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
 
-            last_id = await self.db.execute(
-                """
+            # Store team_name in result_description since the column doesn't exist
+            result_description = f"Team: {team_name}"
+            query = """
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type,
-                    team_name, stake, odds, channel_id, message_id,
+                    stake, odds, channel_id, message_id,
                     created_at, status, updated_at, expiration_time,
                     result_value, result_description
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), 'pending', UTC_TIMESTAMP(), %s, NULL, NULL)
-                """,
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), 'pending', UTC_TIMESTAMP(), %s, NULL, %s)
+            """
+            args = (
                 guild_id, user_id, db_game_id, bet_type,
-                team_name, units, odds, channel_id, message_id,
-                expiration_time
+                units, odds, channel_id, message_id,
+                expiration_time, result_description
             )
 
-            bet_serial = last_id
+            last_id = await self.db.execute(query, args)
+
+            # Retrieve the bet_serial (assuming AUTO_INCREMENT)
+            bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
+            result = await self.db.fetch_one(bet_serial_query)
+            bet_serial = result['bet_serial'] if result and 'bet_serial' in result else None
 
             if bet_serial:
-                self.logger.info(f"Bet {bet_serial} created successfully for user {user_id} in guild {guild_id}.")
+                self.logger.info(
+                    f"Bet {bet_serial} created successfully for user {user_id} in guild {guild_id}."
+                )
                 return bet_serial
             else:
-                raise BetServiceError("Failed to retrieve bet_serial after insertion. Check DB schema (AUTO_INCREMENT on bet_serial).")
+                raise BetServiceError(
+                    "Failed to retrieve bet_serial after insertion. "
+                    "Check DB schema (AUTO_INCREMENT on bet_serial)."
+                )
 
         except ValidationError as ve:
             self.logger.warning(f"Bet creation validation failed for user {user_id}: {ve}")
@@ -166,6 +184,88 @@ class BetService:
         except Exception as e:
             self.logger.exception(f"Error creating bet for user {user_id}: {e}")
             raise BetServiceError("An internal error occurred while creating the bet.")
+
+    async def create_parlay_bet(
+        self,
+        guild_id: int,
+        user_id: int,
+        legs: List[Dict],
+        channel_id: Optional[int] = None
+    ) -> int:
+        """Create a new parlay bet and return the bet serial."""
+        try:
+            if len(legs) < 2:
+                raise ValidationError("Parlay bets must have at least two legs.")
+
+            # For simplicity, we'll store the first leg's details in the main bet
+            # and include all legs in the result_description as JSON
+            leg = legs[0]
+            units = float(leg['units'])
+            odds = float(leg['odds'])
+            game_id = leg['game_id']
+            bet_type = 'parlay'
+
+            guild_settings = await self.bot.admin_service.get_server_settings(guild_id)
+            MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
+            MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
+            MIN_ODDS, MAX_ODDS = -10000, 10000
+
+            if not (MIN_UNITS <= units <= MAX_UNITS):
+                raise ValidationError(
+                    f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
+                )
+            if not (MIN_ODDS <= odds <= MAX_ODDS):
+                raise ValidationError(f"Odds ({odds}) must be between {MIN_ODDS} and {MAX_ODDS}")
+            if -100 < odds < 100:
+                raise ValidationError("Odds cannot be between -99 and 99.")
+
+            db_game_id = str(game_id) if game_id else None
+            # Serialize legs as JSON in result_description
+            result_description = json.dumps([{
+                'game_id': leg['game_id'],
+                'bet_type': leg['bet_type'],
+                'team_name': leg.get('team_name', 'Unknown'),
+                'units': leg['units'],
+                'odds': leg['odds']
+            } for leg in legs])
+
+            query = """
+                INSERT INTO bets (
+                    guild_id, user_id, game_id, bet_type,
+                    stake, odds, channel_id, message_id,
+                    created_at, status, updated_at, expiration_time,
+                    result_value, result_description
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), 'pending', UTC_TIMESTAMP(), %s, NULL, %s)
+            """
+            args = (
+                guild_id, user_id, db_game_id, bet_type,
+                units, odds, channel_id, None,
+                None, result_description
+            )
+            await self.db.execute(query, args)
+
+            bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
+            result = await self.db.fetch_one(bet_serial_query)
+            bet_serial = result['bet_serial'] if result and 'bet_serial' in result else None
+
+            if not bet_serial:
+                raise BetServiceError(
+                    "Failed to retrieve bet_serial after insertion. "
+                    "Check DB schema (AUTO_INCREMENT on bet_serial)."
+                )
+
+            self.logger.info(f"Created parlay bet with serial {bet_serial} for user {user_id}")
+            return bet_serial
+
+        except ValidationError as ve:
+            self.logger.warning(f"Parlay bet creation validation failed for user {user_id}: {ve}")
+            raise
+        except ConnectionError as ce:
+            self.logger.error(f"Database connection error during parlay bet creation for user {user_id}: {ce}")
+            raise BetServiceError("Database connection error. Please try again later.") from ce
+        except Exception as e:
+            self.logger.exception(f"Error creating parlay bet for user {user_id}: {e}")
+            raise BetServiceError("An internal error occurred while creating the parlay bet.")
 
     async def update_bet_status(
         self,
@@ -198,9 +298,14 @@ class BetService:
                             break
                     if message_id_to_remove:
                         del self.pending_reactions[message_id_to_remove]
-                        logger.debug(f"Removed resolved bet {bet_serial} (message {message_id_to_remove}) from reaction tracking.")
+                        logger.debug(
+                            f"Removed resolved bet {bet_serial} (message {message_id_to_remove}) from reaction tracking."
+                        )
             else:
-                self.logger.warning(f"Failed to update status for bet {bet_serial} (Maybe not found or status unchanged?). Rows affected: {rowcount}")
+                self.logger.warning(
+                    f"Failed to update status for bet {bet_serial} "
+                    f"(Maybe not found or status unchanged?). Rows affected: {rowcount}"
+                )
             return success
         except ConnectionError as ce:
             self.logger.error(f"Database connection error during bet status update for bet {bet_serial}: {ce}")
@@ -236,7 +341,15 @@ class BetService:
             self.logger.exception(f"Error checking user authorization for user {user_id} in guild {guild_id}: {e}")
             raise BetServiceError("Failed to check user authorization.")
 
-    async def record_bet_result(self, bet_serial: int, guild_id: int, user_id: int, units: float, odds: float, result_value: float):
+    async def record_bet_result(
+        self,
+        bet_serial: int,
+        guild_id: int,
+        user_id: int,
+        units: float,
+        odds: float,
+        result_value: float
+    ):
         """Records the outcome units in the unit_records table."""
         try:
             now = datetime.now(timezone.utc)
@@ -244,7 +357,9 @@ class BetService:
             current_month = now.month
             await self.db.execute(
                 """
-                INSERT INTO unit_records (bet_serial, guild_id, user_id, year, month, units, odds, result_value, created_at)
+                INSERT INTO unit_records (
+                    bet_serial, guild_id, user_id, year, month, units, odds, result_value, created_at
+                )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())
                 """,
                 bet_serial, guild_id, user_id, current_year, current_month, units, odds, result_value
@@ -304,7 +419,10 @@ class BetService:
         guild_id = bet_info['guild_id']
         original_user_id = bet_info['user_id']
 
-        self.logger.info(f"Reaction '{payload.emoji}' added on tracked msg {payload.message_id} (Bet: {bet_serial}) by user {payload.user_id}")
+        self.logger.info(
+            f"Reaction '{payload.emoji}' added on tracked msg {payload.message_id} "
+            f"(Bet: {bet_serial}) by user {payload.user_id}"
+        )
 
         reactor_member = payload.member
         if not reactor_member:
@@ -324,7 +442,9 @@ class BetService:
         has_admin_permissions = reactor_member.guild_permissions.administrator
 
         if not (is_original_user or has_admin_permissions):
-            self.logger.info(f"Ignoring reaction on bet {bet_serial} msg {payload.message_id} by unauthorized user {reactor_member.id}.")
+            self.logger.info(
+                f"Ignoring reaction on bet {bet_serial} msg {payload.message_id} by unauthorized user {reactor_member.id}."
+            )
             return
 
         try:
@@ -334,12 +454,16 @@ class BetService:
             return
 
         if not original_bet:
-            self.logger.warning(f"Bet {bet_serial} not found in DB for reaction handling. Removing from tracking.")
+            self.logger.warning(
+                f"Bet {bet_serial} not found in DB for reaction handling. Removing from tracking."
+            )
             if payload.message_id in self.pending_reactions:
                 del self.pending_reactions[payload.message_id]
             return
         if original_bet['status'] != 'pending':
-            self.logger.info(f"Reaction added to already resolved bet {bet_serial} (Status: {original_bet['status']}). Ignored.")
+            self.logger.info(
+                f"Reaction added to already resolved bet {bet_serial} (Status: {original_bet['status']}). Ignored."
+            )
             if payload.message_id in self.pending_reactions:
                 del self.pending_reactions[payload.message_id]
             return
@@ -361,24 +485,34 @@ class BetService:
             new_status = 'canceled'
 
         if new_status:
-            result_value = self._calculate_result_value(units, odds, new_status if new_status != 'canceled' else 'push')
+            result_value = self._calculate_result_value(
+                units, odds, new_status if new_status != 'canceled' else 'push'
+            )
             result_desc = f'{new_status.title()} ({result_desc})'
 
-            self.logger.info(f"Processing resolution for Bet {bet_serial}: Status -> {new_status}, Value -> {result_value:.2f}")
+            self.logger.info(
+                f"Processing resolution for Bet {bet_serial}: Status -> {new_status}, Value -> {result_value:.2f}"
+            )
             try:
                 updated = await self.update_bet_status(bet_serial, new_status, result_desc, result_value)
 
                 if updated:
                     if new_status in ['won', 'lost', 'push']:
-                        await self.record_bet_result(bet_serial, guild_id, original_user_id, units, odds, result_value)
+                        await self.record_bet_result(
+                            bet_serial, guild_id, original_user_id, units, odds, result_value
+                        )
 
                     if new_status in ['won', 'lost'] and hasattr(self.bot, 'user_service'):
                         transaction_type = 'bet_win' if new_status == 'won' else 'bet_loss'
-                        await self.bot.user_service.update_user_balance(original_user_id, result_value, transaction_type)
+                        await self.bot.user_service.update_user_balance(
+                            original_user_id, result_value, transaction_type
+                        )
 
                     if payload.message_id in self.pending_reactions:
                         del self.pending_reactions[payload.message_id]
-                        self.logger.debug(f"Removed message {payload.message_id} from pending reactions after resolution.")
+                        self.logger.debug(
+                            f"Removed message {payload.message_id} from pending reactions after resolution."
+                        )
 
                     await self._send_bet_status_notification(bet_info, new_status, result_value)
 
@@ -392,23 +526,32 @@ class BetService:
                             await message.edit(view=None)
                             self.logger.debug(f"Removed resolution view from message {payload.message_id}")
                         else:
-                            self.logger.warning(f"Could not find channel {payload.channel_id} to remove view from message {payload.message_id}")
+                            self.logger.warning(
+                                f"Could not find channel {payload.channel_id} to remove view from message {payload.message_id}"
+                            )
                     except discord.NotFound:
                         self.logger.warning(f"Message {payload.message_id} not found, could not remove view.")
                     except discord.Forbidden:
-                        self.logger.warning(f"Missing permissions to edit message {payload.message_id} or remove reactions.")
+                        self.logger.warning(
+                            f"Missing permissions to edit message {payload.message_id} or remove reactions."
+                        )
                     except Exception as e:
                         self.logger.warning(f"Could not remove view/reactions from message {payload.message_id}: {e}")
 
                 else:
-                    self.logger.warning(f"Database update failed when trying to resolve bet {bet_serial} via reaction.")
+                    self.logger.warning(
+                        f"Database update failed when trying to resolve bet {bet_serial} via reaction."
+                    )
 
             except InsufficientUnitsError as iu_error:
                 self.logger.error(f"Insufficient units error processing bet {bet_serial} result: {iu_error}")
                 try:
                     channel = self.bot.get_channel(payload.channel_id)
                     if channel:
-                        await channel.send(f"⚠️ Error resolving bet `{bet_serial}`: {iu_error}. Bet status not updated.", delete_after=60)
+                        await channel.send(
+                            f"⚠️ Error resolving bet `{bet_serial}`: {iu_error}. Bet status not updated.",
+                            delete_after=60
+                        )
                 except Exception:
                     pass
             except Exception as e:
@@ -458,7 +601,12 @@ class BetService:
                 timestamp=datetime.now(timezone.utc)
             )
             embed.set_author(name=f"{capper_name}'s Bet Result", icon_url=avatar_url)
-            embed.add_field(name="Selection", value=f"`{bet['team_name']}`", inline=False)
+            # Since team_name isn't in the schema, extract it from result_description
+            team_name = "Unknown"
+            result_desc = bet.get('result_description', '')
+            if result_desc and result_desc.startswith("Team: "):
+                team_name = result_desc.replace("Team: ", "")
+            embed.add_field(name="Selection", value=f"`{team_name}`", inline=False)
             embed.add_field(name="Units", value=f"{float(bet['stake']):.2f}u", inline=True)
             embed.add_field(name="Odds", value=f"{float(bet['odds']):+}", inline=True)
 
@@ -467,7 +615,7 @@ class BetService:
             else:
                 embed.add_field(name="Result", value=status.title(), inline=True)
 
-            if bet.get('result_description'):
+            if bet.get('result_description') and not bet['result_description'].startswith("Team: "):
                 embed.set_footer(text=f"{bet['result_description']}")
             else:
                 embed.set_footer(text="Resolved at")
@@ -477,9 +625,47 @@ class BetService:
                 if channel.permissions_for(channel.guild.me).send_messages:
                     await channel.send(embed=embed)
                 else:
-                    self.logger.warning(f"Missing SEND_MESSAGES permission in channel {bet['channel_id']} for guild {bet['guild_id']}")
+                    self.logger.warning(
+                        f"Missing SEND_MESSAGES permission in channel {bet['channel_id']} "
+                        f"for guild {bet['guild_id']}"
+                    )
             else:
-                self.logger.warning(f"Could not find channel {bet['channel_id']} to send notification for bet {bet['bet_serial']}.")
+                self.logger.warning(
+                    f"Could not find channel {bet['channel_id']} to send notification for bet {bet['bet_serial']}."
+                )
 
         except Exception as e:
             self.logger.exception(f"Error sending bet status notification for bet {bet_info.get('bet_serial')}: {e}")
+
+    # Add update methods called in betting.py
+    async def update_bet_channel(self, bet_serial: int, channel_id: int):
+        """Update the channel_id for a bet."""
+        try:
+            rowcount = await self.db.execute(
+                "UPDATE bets SET channel_id = %s WHERE bet_serial = %s",
+                channel_id, bet_serial
+            )
+            if rowcount is not None and rowcount > 0:
+                self.logger.debug(f"Updated channel_id for bet {bet_serial} to {channel_id}")
+            else:
+                self.logger.warning(f"Failed to update channel_id for bet {bet_serial}. Rows affected: {rowcount}")
+        except Exception as e:
+            self.logger.error(f"Error updating channel_id for bet {bet_serial}: {e}")
+            raise BetServiceError("Failed to update bet channel.")
+
+    async def update_parlay_bet_channel(self, bet_serial: int, channel_id: int):
+        """Update the channel_id for a parlay bet."""
+        try:
+            rowcount = await self.db.execute(
+                "UPDATE bets SET channel_id = %s WHERE bet_serial = %s",
+                channel_id, bet_serial
+            )
+            if rowcount is not None and rowcount > 0:
+                self.logger.debug(f"Updated channel_id for parlay bet {bet_serial} to {channel_id}")
+            else:
+                self.logger.warning(
+                    f"Failed to update channel_id for parlay bet {bet_serial}. Rows affected: {rowcount}"
+                )
+        except Exception as e:
+            self.logger.error(f"Error updating channel_id for parlay bet {bet_serial}: {e}")
+            raise BetServiceError("Failed to update parlay bet channel.")
