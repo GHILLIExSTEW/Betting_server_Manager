@@ -113,31 +113,14 @@ class BettingBot(commands.Bot):
             if TEST_GUILD_ID:
                 try:
                     guild_obj = discord.Object(id=TEST_GUILD_ID)
-                    self.tree.clear_commands(guild=None)  # Clear global commands
-                    self.tree.clear_commands(guild=guild_obj)  # Clear guild commands
-                    # Sync commands for the test guild
+                    # Clear and sync commands for the test guild
+                    self.tree.clear_commands(guild=guild_obj)
                     synced_commands = await self.tree.sync(guild=guild_obj)
                     logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced_commands]}")
                 except Exception as e:
                     logger.error(f"Test guild command sync failed for ID {TEST_GUILD_ID}: {e}")
             else:
                 logger.warning("TEST_GUILD_ID not set, skipping guild command sync.")
-
-            # Add Clear Commands Command
-            @app_commands.command(name="clearcommands", description="Clear and resync commands")
-            @app_commands.guilds(discord.Object(id=TEST_GUILD_ID))
-            async def clear_commands(interaction: discord.Interaction):
-                try:
-                    self.tree.clear_commands(guild=None)
-                    self.tree.clear_commands(guild=discord.Object(id=TEST_GUILD_ID))
-                    synced_commands = await self.tree.sync(guild=discord.Object(id=TEST_GUILD_ID))
-                    await interaction.response.send_message(
-                        f"Cleared and resynced {len(synced_commands)} commands: {[cmd.name for cmd in synced_commands]}",
-                        ephemeral=True
-                    )
-                except Exception as e:
-                    await interaction.response.send_message(f"Error clearing commands: {e}", ephemeral=True)
-            self.tree.add_command(clear_commands)
 
             logger.info("Bot setup hook completed successfully.")
 

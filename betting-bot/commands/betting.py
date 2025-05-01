@@ -686,8 +686,7 @@ class BettingCog(commands.Cog):
         self.game_service: GameService = bot.game_service
 
     @app_commands.command(name="bet", description="Place a new bet through a guided workflow.")
-    # Add checks decorator if you have specific roles/permissions
-    # @app_commands.checks.has_role("CapperRoleNameOrID")
+    @app_commands.guilds(discord.Object(id=1328126227013439601))  # Test guild ID
     async def bet_command(self, interaction: Interaction):
         """Starts the interactive betting workflow."""
         logger.info(f"Bet command initiated by {interaction.user} in guild {interaction.guild_id}")
