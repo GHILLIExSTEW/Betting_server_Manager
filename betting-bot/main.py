@@ -115,6 +115,8 @@ class BettingBot(commands.Bot):
                     guild_obj = discord.Object(id=TEST_GUILD_ID)
                     # Clear and sync commands for the test guild
                     self.tree.clear_commands(guild=guild_obj)
+                    # Wait a moment for commands to be registered
+                    await asyncio.sleep(1)
                     synced_commands = await self.tree.sync(guild=guild_obj)
                     logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced_commands]}")
                 except Exception as e:
