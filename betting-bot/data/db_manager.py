@@ -262,14 +262,12 @@ class DatabaseManager:
                     logger.info("Checked/created 'guild_settings' table.")
 
                     # Create indexes
-                    await cursor.execute('''
-                        CREATE INDEX IF NOT EXISTS idx_bets_user_id ON bets(user_id);
-                        CREATE INDEX IF NOT EXISTS idx_bets_guild_id ON bets(guild_id);
-                        CREATE INDEX IF NOT EXISTS idx_bets_created_at ON bets(created_at);
-                        CREATE INDEX IF NOT EXISTS idx_unit_records_user_id ON unit_records(user_id);
-                        CREATE INDEX IF NOT EXISTS idx_unit_records_guild_id ON unit_records(guild_id);
-                        CREATE INDEX IF NOT EXISTS idx_unit_records_year_month ON unit_records(year, month);
-                    ''')
+                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_bets_user_id ON bets(user_id)')
+                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_bets_guild_id ON bets(guild_id)')
+                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_bets_created_at ON bets(created_at)')
+                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_unit_records_user_id ON unit_records(user_id)')
+                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_unit_records_guild_id ON unit_records(guild_id)')
+                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_unit_records_year_month ON unit_records(year, month)')
                     logger.info("Checked/created indexes.")
 
                     # Remove duplicate guild_settings creation
