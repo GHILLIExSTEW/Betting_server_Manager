@@ -1,3 +1,5 @@
+# betting-bot/utils/image_generator.py
+
 import logging
 from PIL import Image, ImageDraw, ImageFont
 import os
@@ -7,9 +9,11 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 class BetSlipGenerator:
-    def __init__(self, font_path: Optional[str] = None):
+    def __init__(self, font_path: Optional[str] = None, assets_dir: str = "betting-bot/assets/"):
         self.font_path = font_path or self._get_default_font()
+        self.assets_dir = assets_dir
         self._ensure_font_exists()
+        self._ensure_assets_dir_exists()
 
     def _get_default_font(self) -> str:
         """Get the default font path based on the operating system."""
@@ -22,66 +26,136 @@ class BetSlipGenerator:
         """Ensure the font file exists."""
         if not os.path.exists(self.font_path):
             logger.warning(f"Font file not found at {self.font_path}")
-            # Try to find an alternative font
             for font in ['Arial.ttf', 'DejaVuSans.ttf', 'LiberationSans-Regular.ttf']:
                 if os.path.exists(font):
                     self.font_path = font
                     break
             else:
-                raise FileNotFoundError(f"Could not find a suitable font file")
+                raise FileNotFoundError("Could not find a suitable font file")
+
+    def _ensure_assets_dir_exists(self) -> None:
+        """Ensure the assets directory exists."""
+        if not os.path.exists(self.assets_dir):
+            logger.warning(f"Assets directory not found at {self.assets_dir}")
+            os.makedirs(self.assets_dir, exist_ok=True)
+
+    def _load_team_logo(self, team_name: str) -> Optional[Image.Image]:
+        """Load the team logo image based on team name."""
+        try:
+            # Convert team name to a filename (e.g., "Edmonton Oilers" -> "edmonton_oilers.png")
+            logo_filename = team_name.lower().replace(" ", "_") + ".png"
+            logo_path = os.path.join(self.assets_dir, logo_filename)
+            if os.path.exists(logo_path):
+                logo = Image.open(logo_path).convert("RGBA")
+                # Resize logo to a standard size (e.g., 100x100)
+                logo = logo.resize((100, 100), Image.Resampling.LANCZOS)
+                return logo
+            else:
+                logger.warning(f"Logo not found for team {team_name} at {logo_path}")
+                return None
+        except Exception as e:
+            logger.error(f"Error loading logo for team {team_name}: {str(e)}")
+            return None
+
+    def _load_lock_icon(self) -> Optional[Image.Image]:
+        """Load the lock icon image."""
+        try:
+            lock_path = os.path.join(self.assets_dir, "lock_icon.png")
+            if os.path.exists(lock_path):
+                lock = Image.open(lock_path).convert("RGBA")
+                # Resize lock icon to a smaller size (e.g., 20x20)
+                lock = lock.resize((20, 20), Image.Resampling.LANCZOS)
+                return lock
+            else:
+                logger.warning(f"Lock icon not found at {lock_path}")
+                return None
+        except Exception as e:
+            logger.error(f"Error loading lock icon: {str(e)}")
+            return None
 
     def generate_bet_slip(
         self,
         home_team: str,
         away_team: str,
         league: str,
-        game_time: datetime,
         line: str,
         odds: float,
-        units: int,
-        bet_id: str
+        units: float,
+        bet_id: str,
+        timestamp: datetime
     ) -> Image.Image:
-        """Generate a bet slip image."""
+        """Generate a bet slip image matching the provided style."""
         try:
-            # Create a new image with a white background
-            width, height = 800, 600
-            image = Image.new('RGB', (width, height), 'white')
+            # Image dimensions
+            width, height = 600, 400
+            image = Image.new('RGB', (width, height), (40, 40, 40))  # Dark gray background
             draw = ImageDraw.Draw(image)
 
             # Load fonts
-            title_font = ImageFont.truetype(self.font_path, 36)
             header_font = ImageFont.truetype(self.font_path, 24)
-            text_font = ImageFont.truetype(self.font_path, 18)
+            team_font = ImageFont.truetype(self.font_path, 18)
+            odds_font = ImageFont.truetype(self.font_path, 30)
+            small_font = ImageFont.truetype(self.font_path, 14)
 
-            # Draw title
-            draw.text((width//2, 50), "BET SLIP", fill='black', font=title_font, anchor='mm')
+            # Rounded rectangle background
+            padding = 10
+            corner_radius = 20
+            draw.rounded_rectangle(
+                [(padding, padding), (width - padding, height - padding)],
+                radius=corner_radius,
+                fill=(40, 40, 40),
+                outline=None
+            )
 
-            # Draw bet ID
-            draw.text((width-50, 50), f"#{bet_id}", fill='black', font=header_font, anchor='rm')
+            # Header: "NHL - Straight Bet"
+            header_text = f"{league.upper()} - Straight Bet"
+            draw.text((width // 2, 30), header_text, fill='white', font=header_font, anchor='mm')
 
-            # Draw game information
-            y_offset = 120
-            draw.text((50, y_offset), f"League: {league}", fill='black', font=text_font)
-            y_offset += 30
-            draw.text((50, y_offset), f"Game: {away_team} @ {home_team}", fill='black', font=text_font)
-            y_offset += 30
-            draw.text((50, y_offset), f"Time: {game_time.strftime('%Y-%m-%d %H:%M %Z')}", fill='black', font=text_font)
-            y_offset += 30
+            # Load and draw team logos
+            home_logo = self._load_team_logo(home_team)
+            away_logo = self._load_team_logo(away_team)
+            logo_y = 70
+            if home_logo:
+                image.paste(home_logo, (width // 4 - 50, logo_y), home_logo)
+            if away_logo:
+                image.paste(away_logo, (3 * width // 4 - 50, logo_y), away_logo)
 
-            # Draw bet details
-            draw.text((50, y_offset), f"Line: {line}", fill='black', font=text_font)
-            y_offset += 30
-            draw.text((50, y_offset), f"Odds: {odds:+d}", fill='black', font=text_font)
-            y_offset += 30
-            draw.text((50, y_offset), f"Units: {units}", fill='black', font=text_font)
-            y_offset += 30
+            # Team names below logos
+            team_y = logo_y + 120
+            draw.text((width // 4, team_y), home_team, fill='white', font=team_font, anchor='mm')
+            draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
 
-            # Draw timestamp
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            draw.text((width//2, height-50), f"Generated: {timestamp}", fill='black', font=text_font, anchor='mm')
+            # Bet details
+            details_y = team_y + 50
+            line_text = f"{home_team}: {line}"
+            draw.text((width // 2, details_y), line_text, fill='white', font=team_font, anchor='mm')
+            odds_y = details_y + 40
+            odds_text = f"{odds:+d}"
+            draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
+            units_y = odds_y + 40
+            units_text = f"To Win {units:.2f} Unit"
+            units_bbox = draw.textbbox((0, 0), units_text, font=small_font)
+            units_width = units_bbox[2] - units_bbox[0]
+            lock_icon = self._load_lock_icon()
+            lock_spacing = 10
+            if lock_icon:
+                # Draw lock icon on the left
+                lock_x_left = (width - units_width - 2 * lock_icon.width - 2 * lock_spacing) // 2
+                image.paste(lock_icon, (lock_x_left, units_y - lock_icon.height // 2), lock_icon)
+                # Draw lock icon on the right
+                lock_x_right = lock_x_left + units_width + lock_icon.width + 2 * lock_spacing
+                image.paste(lock_icon, (lock_x_right, units_y - lock_icon.height // 2), lock_icon)
+                # Adjust text position to be between locks
+                draw.text((lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y), units_text, fill=(255, 215, 0), font=small_font, anchor='mm')
+            else:
+                # Fallback to text if lock icon is unavailable
+                draw.text((width // 2, units_y), f"🔒 {units_text} 🔒", fill=(255, 215, 0), font=small_font, anchor='mm')
 
-            # Draw border
-            draw.rectangle([(10, 10), (width-10, height-10)], outline='black', width=2)
+            # Footer: Bet ID and Timestamp
+            footer_y = height - 30
+            draw.text((padding + 10, footer_y), f"Bet #{bet_id}", fill=(150, 150, 150), font=small_font, anchor='lm')
+            timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M')
+            draw.text((width - padding - 10, footer_y), timestamp_text, fill=(150, 150, 150), font=small_font, anchor='rm')
 
             return image
 
@@ -96,4 +170,4 @@ class BetSlipGenerator:
             image.save(output_path)
         except Exception as e:
             logger.error(f"Error saving bet slip: {str(e)}")
-            raise 
+            raise
