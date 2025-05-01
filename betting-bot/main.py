@@ -115,6 +115,7 @@ class BettingBot(commands.Bot):
                     guild_obj = discord.Object(id=TEST_GUILD_ID)
                     self.tree.clear_commands(guild=None)  # Clear global commands
                     self.tree.clear_commands(guild=guild_obj)  # Clear guild commands
+                    # Sync commands for the test guild
                     synced_commands = await self.tree.sync(guild=guild_obj)
                     logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced_commands]}")
                 except Exception as e:

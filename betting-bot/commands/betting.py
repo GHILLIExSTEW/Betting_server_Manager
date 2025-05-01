@@ -747,8 +747,6 @@ class BettingCog(commands.Cog):
 # The setup function for the extension
 async def setup(bot: commands.Bot):
     """Register the betting command with the bot."""
-    # Add the cog to the bot
+    # Add the cog to the bot - this will automatically register the command
     await bot.add_cog(BettingCog(bot))
-    # Register the command with the command tree
-    bot.tree.add_command(BettingCog.bet_command)
     logger.info("BettingCog loaded and command registered")
