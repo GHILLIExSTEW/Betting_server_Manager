@@ -151,13 +151,14 @@ class ManualEntryButton(Button):
         for item in self.parent_view.children:
             if isinstance(item, CancelButton):
                 item.disabled = True
-        # Update the existing message instead of using followup
+        # Use followup to send feedback, preserving response for modal
         try:
-            await interaction.response.edit_message(content="Proceeding to manual entry...", view=self.parent_view)
+            await interaction.followup.send("Proceeding to manual entry...", ephemeral=True)
+            await interaction.response.defer()  # Preserve response for modal
             await self.parent_view.go_next(interaction)
         except discord.HTTPException as e:
-            logger.error(f"Failed to edit message in ManualEntryButton: {e}")
-            await interaction.followup.send("❌ Failed to proceed to manual entry. Please restart the /bet command.", ephemeral=True)
+            logger.error(f"Failed to send followup in ManualEntryButton: {e}")
+            await interaction.response.send_message("❌ Failed to proceed to manual entry. Please restart the /bet command.", ephemeral=True)
             self.parent_view.stop()
 
 class CancelButton(Button):
