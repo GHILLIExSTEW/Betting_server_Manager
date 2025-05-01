@@ -30,14 +30,14 @@ class BetSlipGenerator:
 
     def _get_default_emoji_font(self) -> str:
         """Get the default font path for emojis."""
-        custom_emoji_font_path = "betting-bot/static/fonts/NotoEmoji-Regular.ttf"
+        custom_emoji_font_path = "betting-bot/static/fonts/NotoColorEmoji-Regular.ttf"
         if os.path.exists(custom_emoji_font_path):
             return custom_emoji_font_path
         # Fallback to a system emoji font
         if os.name == 'nt':  # Windows
             return 'C:\\Windows\\Fonts\\seguiemj.ttf'
         else:  # Linux/Mac (try common paths)
-            return '/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf'
+            return '/usr/share/fonts/truetype/noto/NotoColorEmoji-Regular.ttf'
 
     def _ensure_font_exists(self) -> None:
         """Ensure the regular font file exists."""
@@ -54,12 +54,12 @@ class BetSlipGenerator:
         """Ensure the emoji font file exists."""
         if not os.path.exists(self.emoji_font_path):
             logger.warning(f"Emoji font file not found at {self.emoji_font_path}")
-            for font in ['seguiemj.ttf', 'NotoEmoji-Regular.ttf']:
+            for font in ['seguiemj.ttf', 'NotoColorEmoji-Regular.ttf']:
                 if os.path.exists(font):
                     self.emoji_font_path = font
                     break
             else:
-                raise FileNotFoundError("Could not find a suitable emoji font file. Please place 'NotoEmoji-Regular.ttf' in betting-bot/static/fonts/")
+                raise FileNotFoundError("Could not find a suitable emoji font file. Please place 'NotoColorEmoji-Regular.ttf' in betting-bot/static/fonts/")
 
     def _ensure_team_dir_exists(self) -> None:
         """Ensure the team logos directory exists."""
