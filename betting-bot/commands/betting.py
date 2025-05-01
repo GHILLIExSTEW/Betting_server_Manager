@@ -468,7 +468,7 @@ class BetWorkflowView(View):
 
         try:
             # Call BetService to create the bet
-            bet_id = await self.bet_service.create_bet(
+            bet_serial = await self.bet_service.create_bet(
                 guild_id=interaction.guild_id,
                 user_id=interaction.user.id,
                 game_id=details.get('game_id'), # Already processed in validation step
@@ -485,16 +485,16 @@ class BetWorkflowView(View):
             post_channel = self.bot.get_channel(post_channel_id) if post_channel_id else None
 
             if post_channel and isinstance(post_channel, TextChannel):
-                final_embed = self.create_final_bet_embed(bet_id)
+                final_embed = self.create_final_bet_embed(bet_serial)
                 # Add reaction buttons for resolution
                 # Custom IDs are now static
-                view = BetResolutionView(bet_id) # Pass bet_id if needed by view logic later
+                view = BetResolutionView(bet_serial) # Pass bet_serial if needed by view logic later
                 sent_message = await post_channel.send(embed=final_embed, view=view)
 
-                # Store message_id -> bet_id mapping for reaction tracking in BetService
+                # Store message_id -> bet_serial mapping for reaction tracking in BetService
                 if sent_message:
                     self.bet_service.pending_reactions[sent_message.id] = {
-                         'bet_id': bet_id,
+                         'bet_serial': bet_serial,
                          'user_id': interaction.user.id,
                          'guild_id': interaction.guild_id,
                          'channel_id': post_channel_id,
@@ -504,16 +504,16 @@ class BetWorkflowView(View):
                          'league': details.get('league'),
                          'bet_type': details.get('bet_type'),
                      }
-                    logger.debug(f"Tracking reactions for posted bet message {sent_message.id} (Bet ID: {bet_id})")
+                    logger.debug(f"Tracking reactions for posted bet message {sent_message.id} (Bet Serial: {bet_serial})")
 
                 # Confirm success to user (edit original ephemeral message)
-                success_message = f"✅ Bet placed successfully! (ID: `{bet_id}`). Posted to {post_channel.mention}."
+                success_message = f"✅ Bet placed successfully! (ID: `{bet_serial}`). Posted to {post_channel.mention}."
                 await self.edit_message(interaction, content=success_message, view=None, embed=None)
 
             else:
-                 logger.error(f"Could not find channel {post_channel_id} or not a TextChannel to post bet {bet_id}.")
+                 logger.error(f"Could not find channel {post_channel_id} or not a TextChannel to post bet {bet_serial}.")
                  # Bet was created but not posted
-                 failure_message = f"⚠️ Bet placed (ID: `{bet_id}`), but **failed to post** to channel ID {post_channel_id}. Please check permissions or channel existence."
+                 failure_message = f"⚠️ Bet placed (ID: `{bet_serial}`), but **failed to post** to channel ID {post_channel_id}. Please check permissions or channel existence."
                  await self.edit_message(interaction, content=failure_message, view=None, embed=None)
 
         except (ValidationError, BetServiceError) as e:
@@ -527,7 +527,7 @@ class BetWorkflowView(View):
             self.stop() # Stop the view after completion or error
 
 
-    def create_final_bet_embed(self, bet_id: int) -> discord.Embed:
+    def create_final_bet_embed(self, bet_serial: int) -> discord.Embed:
         """Creates the embed to be posted in the selected channel."""
         details = self.bet_details
         user = self.original_interaction.user # Use original interaction user
@@ -597,7 +597,7 @@ class BetWorkflowView(View):
 
         embed.add_field(name="To Win", value=f"{potential_profit:.2f}u", inline=True) # Format profit
 
-        embed.set_footer(text=f"Bet ID: {bet_id} | Status: Pending")
+        embed.set_footer(text=f"Bet Serial: {bet_serial} | Status: Pending")
         embed.timestamp = datetime.now(timezone.utc)
         return embed
 
@@ -635,9 +635,9 @@ class CancelButton(Button):
 
 # View with buttons to add reactions to the bet message
 class BetResolutionView(View):
-     def __init__(self, bet_id: int): # bet_id might not be needed here if not used
+     def __init__(self, bet_serial: int): # bet_serial might not be needed here if not used
           super().__init__(timeout=None) # Make view persistent
-          # No need to store bet_id if buttons just add reactions
+          # No need to store bet_serial if buttons just add reactions
 
      # Make custom_ids static and unique for persistent views
      @discord.ui.button(label="Win", style=discord.ButtonStyle.green, emoji="✅", custom_id="bet_resolve_win")
@@ -733,7 +733,7 @@ class BettingCog(commands.Cog):
          logger.info("BettingCog ready, persistent views should re-register if needed.")
          # If BetResolutionView needs bet_id, it must be encoded in custom_id or fetched differently.
          # For simplicity, we'll assume BetResolutionView only *adds* reactions and doesn't need bet_id internally.
-         self.bot.add_view(BetResolutionView(bet_id=0)) # Add dummy view instance to register buttons
+         self.bot.add_view(BetResolutionView(bet_serial=0)) # Add dummy view instance to register buttons
 
     # Optional: Cog specific error handler
     async def cog_app_command_error(self, interaction: Interaction, error: app_commands.AppCommandError):

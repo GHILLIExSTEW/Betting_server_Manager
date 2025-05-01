@@ -58,7 +58,7 @@ class BetService:
             try:
                 expiration_threshold = datetime.now(timezone.utc) - timedelta(days=7)
                 expired_bets = await self.db.fetch_all("""
-                    SELECT bet_id, guild_id, user_id
+                    SELECT bet_serial, guild_id, user_id
                     FROM bets
                     WHERE status = %s
                     AND expiration_time IS NOT NULL AND expiration_time < %s
@@ -68,10 +68,10 @@ class BetService:
                     self.logger.info(f"Found {len(expired_bets)} pending bets past expiration threshold.")
                     for bet in expired_bets:
                         try:
-                            await self.update_bet_status(bet['bet_id'], 'expired', 'Expired due to age')
-                            self.logger.info(f"Expired pending bet {bet['bet_id']} for user {bet['user_id']} in guild {bet['guild_id']}")
+                            await self.update_bet_status(bet['bet_serial'], 'expired', 'Expired due to age')
+                            self.logger.info(f"Expired pending bet {bet['bet_serial']} for user {bet['user_id']} in guild {bet['guild_id']}")
                         except Exception as inner_e:
-                            self.logger.error(f"Error expiring bet {bet['bet_id']}: {inner_e}")
+                            self.logger.error(f"Error expiring bet {bet['bet_serial']}: {inner_e}")
                 else:
                     self.logger.debug("No expired pending bets found.")
 
@@ -99,7 +99,7 @@ class BetService:
         expiration_time: Optional[datetime] = None
     ) -> int:
         """Create a new bet in the database."""
-        bet_id = None
+        bet_serial = None
         try:
             MIN_UNITS, MAX_UNITS = 0.1, 10.0
             MIN_ODDS, MAX_ODDS = -10000, 10000
@@ -134,12 +134,12 @@ class BetService:
                 now_utc, now_utc, expiration_time
             )
 
-            bet_id = last_id
-            if bet_id:
-                logger.info(f"Bet {bet_id} created successfully for user {user_id} in guild {guild_id}.")
-                return bet_id
+            bet_serial = last_id
+            if bet_serial:
+                logger.info(f"Bet {bet_serial} created successfully for user {user_id} in guild {guild_id}.")
+                return bet_serial
             else:
-                raise BetServiceError("Failed to retrieve bet_id after insertion. Check DB schema and execute method.")
+                raise BetServiceError("Failed to retrieve bet_serial after insertion. Check DB schema and execute method.")
 
         except ValidationError as ve:
             self.logger.warning(f"Bet creation validation failed for user {user_id}: {ve}")
@@ -153,7 +153,7 @@ class BetService:
 
     async def update_bet_status(
         self,
-        bet_id: int,
+        bet_serial: int,
         status: str,
         result_description: Optional[str] = None,
         result_value: Optional[float] = None
@@ -162,37 +162,37 @@ class BetService:
         try:
             allowed_statuses = ['won', 'lost', 'push', 'canceled', 'expired', 'pending']
             if status not in allowed_statuses:
-                logger.error(f"Invalid status '{status}' provided for bet {bet_id}")
+                logger.error(f"Invalid status '{status}' provided for bet {bet_serial}")
                 return False
 
             rowcount = await self.db.execute("""
                 UPDATE bets
                 SET status = %s, result_value = %s, result_description = %s
-                WHERE bet_id = %s
-            """, status, result_value, result_description, bet_id)
+                WHERE bet_serial = %s
+            """, status, result_value, result_description, bet_serial)
 
             success = rowcount is not None and rowcount > 0
             if success:
-                logger.info(f"Updated status for bet {bet_id} to {status}. Result Value: {result_value}")
+                logger.info(f"Updated status for bet {bet_serial} to {status}. Result Value: {result_value}")
             else:
-                logger.warning(f"Failed to update status for bet {bet_id} (Maybe bet_id not found or status unchanged?). Rows affected: {rowcount}")
+                logger.warning(f"Failed to update status for bet {bet_serial} (Maybe bet_serial not found or status unchanged?). Rows affected: {rowcount}")
             return success
         except ConnectionError as ce:
-            self.logger.error(f"Database connection error during bet status update for bet {bet_id}: {ce}")
+            self.logger.error(f"Database connection error during bet status update for bet {bet_serial}: {ce}")
             raise BetServiceError("Database connection error. Please try again later.") from ce
         except Exception as e:
-            self.logger.exception(f"Error updating bet status for bet_id {bet_id}: {e}")
+            self.logger.exception(f"Error updating bet status for bet_serial {bet_serial}: {e}")
             raise BetServiceError("Failed to update bet status.")
 
-    async def get_bet(self, bet_id: int) -> Optional[Dict]:
+    async def get_bet(self, bet_serial: int) -> Optional[Dict]:
         """Get a single bet by its ID."""
         try:
-            return await self.db.fetch_one("SELECT * FROM bets WHERE bet_id = %s", bet_id)
+            return await self.db.fetch_one("SELECT * FROM bets WHERE bet_serial = %s", bet_serial)
         except ConnectionError as ce:
-            self.logger.error(f"Database connection error getting bet {bet_id}: {ce}")
+            self.logger.error(f"Database connection error getting bet {bet_serial}: {ce}")
             raise BetServiceError("Database connection error.") from ce
         except Exception as e:
-            self.logger.exception(f"Error retrieving bet {bet_id}: {e}")
+            self.logger.exception(f"Error retrieving bet {bet_serial}: {e}")
             return None
 
     async def is_user_authorized(self, guild_id: int, user_id: int) -> bool:
@@ -211,39 +211,39 @@ class BetService:
             self.logger.exception(f"Error checking user authorization for user {user_id} in guild {guild_id}: {e}")
             raise BetServiceError("Failed to check user authorization.")
 
-    async def record_bet_result(self, bet_id: int, guild_id: int, user_id: int, units: float, odds: float, result_value: float):
+    async def record_bet_result(self, bet_serial: int, guild_id: int, user_id: int, units: float, odds: float, result_value: float):
         """Records the outcome units in the unit_records table."""
         try:
             now = datetime.now(timezone.utc)
             await self.db.execute(
                 """
-                INSERT INTO unit_records (bet_id, guild_id, user_id, year, month, units, odds, result_value, created_at)
+                INSERT INTO unit_records (bet_serial, guild_id, user_id, year, month, units, odds, result_value, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                bet_id, guild_id, user_id, now.year, now.month, units, odds, result_value, now
+                bet_serial, guild_id, user_id, now.year, now.month, units, odds, result_value, now
             )
-            logger.info(f"Recorded result for bet {bet_id}: {result_value:+.2f} units.")
+            logger.info(f"Recorded result for bet {bet_serial}: {result_value:+.2f} units.")
         except ConnectionError as ce:
-            self.logger.error(f"Database connection error recording result for bet {bet_id}: {ce}")
+            self.logger.error(f"Database connection error recording result for bet {bet_serial}: {ce}")
             raise BetServiceError("Database connection error while recording result.") from ce
         except Exception as e:
-            self.logger.exception(f"Error recording result for bet {bet_id}: {e}")
+            self.logger.exception(f"Error recording result for bet {bet_serial}: {e}")
 
-    async def remove_bet_result_record(self, bet_id: int):
+    async def remove_bet_result_record(self, bet_serial: int):
         """Removes the outcome record from unit_records, e.g., if a bet is reverted."""
         try:
             await self.db.execute(
                 """
-                DELETE FROM unit_records WHERE bet_id = %s
+                DELETE FROM unit_records WHERE bet_serial = %s
                 """,
-                bet_id
+                bet_serial
             )
-            logger.info(f"Removed result record for bet {bet_id}.")
+            logger.info(f"Removed result record for bet {bet_serial}.")
         except ConnectionError as ce:
-            self.logger.error(f"Database connection error removing result record for bet {bet_id}: {ce}")
+            self.logger.error(f"Database connection error removing result record for bet {bet_serial}: {ce}")
             raise BetServiceError("Database connection error while removing result record.") from ce
         except Exception as e:
-            self.logger.exception(f"Error removing result record for bet {bet_id}: {e}")
+            self.logger.exception(f"Error removing result record for bet {bet_serial}: {e}")
 
     def _calculate_result_value(self, units: float, odds: float, outcome: str) -> float:
         """Calculate profit/loss based on American odds. Returns the net gain/loss."""
@@ -273,11 +273,11 @@ class BetService:
         if not bet_info:
             return
 
-        bet_id = bet_info['bet_id']
+        bet_serial = bet_info['bet_serial']
         guild_id = bet_info['guild_id']
         original_user_id = bet_info['user_id']
 
-        logger.info(f"Reaction added on tracked message {payload.message_id} (Bet: {bet_id}) by user {payload.user_id}")
+        logger.info(f"Reaction added on tracked message {payload.message_id} (Bet: {bet_serial}) by user {payload.user_id}")
 
         guild = self.bot.get_guild(payload.guild_id)
         if not guild:
@@ -297,22 +297,22 @@ class BetService:
         has_admin_permissions = reactor_member.guild_permissions.administrator
 
         if not (is_original_user or has_admin_permissions):
-            logger.info(f"Ignoring reaction on bet {bet_id} msg {payload.message_id} by unauthorized user {reactor_member.id}.")
+            logger.info(f"Ignoring reaction on bet {bet_serial} msg {payload.message_id} by unauthorized user {reactor_member.id}.")
             return
 
         try:
-            original_bet = await self.get_bet(bet_id)
+            original_bet = await self.get_bet(bet_serial)
         except Exception as e:
-            logger.error(f"Failed to fetch bet {bet_id} during reaction handling: {e}")
+            logger.error(f"Failed to fetch bet {bet_serial} during reaction handling: {e}")
             return
 
         if not original_bet:
-            logger.warning(f"Bet {bet_id} not found in database for reaction handling. Removing from tracking.")
+            logger.warning(f"Bet {bet_serial} not found in database for reaction handling. Removing from tracking.")
             if payload.message_id in self.pending_reactions:
                 del self.pending_reactions[payload.message_id]
             return
         if original_bet['status'] != 'pending':
-            logger.info(f"Reaction added to already resolved bet {bet_id} (Status: {original_bet['status']}). Ignored.")
+            logger.info(f"Reaction added to already resolved bet {bet_serial} (Status: {original_bet['status']}). Ignored.")
             if payload.message_id in self.pending_reactions:
                 del self.pending_reactions[payload.message_id]
             return
@@ -342,13 +342,13 @@ class BetService:
             result_desc = f'Canceled (Reacted by {reactor_member.display_name})'
 
         if new_status:
-            logger.info(f"Processing resolution for Bet {bet_id}: Status -> {new_status}, Value -> {result_value:.2f}")
+            logger.info(f"Processing resolution for Bet {bet_serial}: Status -> {new_status}, Value -> {result_value:.2f}")
             try:
-                updated = await self.update_bet_status(bet_id, new_status, result_desc, result_value)
+                updated = await self.update_bet_status(bet_serial, new_status, result_desc, result_value)
 
                 if updated:
                     if new_status in ['won', 'lost']:
-                        await self.record_bet_result(bet_id, guild_id, original_user_id, units, odds, result_value)
+                        await self.record_bet_result(bet_serial, guild_id, original_user_id, units, odds, result_value)
 
                     if new_status in ['won', 'lost'] and hasattr(self.bot, 'user_service'):
                         transaction_type = 'bet_win' if new_status == 'won' else 'bet_loss'
@@ -372,18 +372,18 @@ class BetService:
                         logger.warning(f"Could not remove view from message {payload.message_id}: {e}")
 
                 else:
-                    logger.warning(f"Database update failed when trying to resolve bet {bet_id} via reaction.")
+                    logger.warning(f"Database update failed when trying to resolve bet {bet_serial} via reaction.")
 
             except InsufficientUnitsError as iu_error:
-                logger.error(f"Insufficient units error processing bet {bet_id} result: {iu_error}")
+                logger.error(f"Insufficient units error processing bet {bet_serial} result: {iu_error}")
                 try:
                     channel = self.bot.get_channel(payload.channel_id)
                     if channel:
-                        await channel.send(f"⚠️ Error processing bet {bet_id}: {iu_error}. Please check user balance.")
+                        await channel.send(f"⚠️ Error processing bet {bet_serial}: {iu_error}. Please check user balance.")
                 except Exception:
                     pass
             except Exception as e:
-                self.logger.exception(f"Error handling reaction add resolution for bet {bet_id}: {e}")
+                self.logger.exception(f"Error handling reaction add resolution for bet {bet_serial}: {e}")
 
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent) -> None:
         """Handle reaction removes IF we want to revert bet status."""
@@ -392,9 +392,9 @@ class BetService:
     async def _send_bet_status_notification(self, bet_info: Dict, status: str, result_value: float) -> None:
         """Send notification about bet status change (Helper)."""
         try:
-            bet = await self.get_bet(bet_info['bet_id'])
+            bet = await self.get_bet(bet_info['bet_serial'])
             if not bet:
-                logger.warning(f"Could not find bet {bet_info['bet_id']} to send notification.")
+                logger.warning(f"Could not find bet {bet_info['bet_serial']} to send notification.")
                 return
 
             color = discord.Color.greyple()
@@ -421,7 +421,7 @@ class BetService:
 
             embed = Embed(
                 title=f"{status_emoji} Bet {status.title()}",
-                description=f"Bet ID: `{bet['bet_id']}` placed by {user_mention}",
+                description=f"Bet ID: `{bet['bet_serial']}` placed by {user_mention}",
                 color=color,
                 timestamp=datetime.now(timezone.utc)
             )
@@ -442,7 +442,7 @@ class BetService:
             if channel and isinstance(channel, discord.TextChannel):
                 await channel.send(embed=embed)
             else:
-                logger.warning(f"Could not find channel {bet['channel_id']} to send bet status notification for bet {bet['bet_id']}.")
+                logger.warning(f"Could not find channel {bet['channel_id']} to send bet status notification for bet {bet['bet_serial']}.")
 
         except Exception as e:
-            self.logger.exception(f"Error sending bet status notification for bet {bet_info.get('bet_id')}: {e}")
+            self.logger.exception(f"Error sending bet status notification for bet {bet_info.get('bet_serial')}: {e}")

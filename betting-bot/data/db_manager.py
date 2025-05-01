@@ -197,23 +197,73 @@ class DatabaseManager:
                     # Create bets table
                     await cursor.execute('''
                         CREATE TABLE IF NOT EXISTS bets (
-                            bet_id INT AUTO_INCREMENT PRIMARY KEY,
+                            bet_serial INT AUTO_INCREMENT PRIMARY KEY,
+                            guild_id BIGINT NOT NULL,
                             user_id BIGINT NOT NULL,
                             game_id VARCHAR(255),
                             bet_type VARCHAR(50) NOT NULL,
-                            team_name VARCHAR(255),
-                            odds DECIMAL(10, 3) NOT NULL,
+                            team_name VARCHAR(255) NOT NULL,
                             stake DECIMAL(15, 2) NOT NULL,
-                            potential_payout DECIMAL(15, 2) NOT NULL,
+                            odds DECIMAL(10, 2) NOT NULL,
+                            channel_id BIGINT NOT NULL,
+                            message_id BIGINT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             status VARCHAR(20) DEFAULT 'pending',
-                            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            parlay_id INT DEFAULT NULL,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            expiration_time TIMESTAMP NULL,
+                            result_value DECIMAL(15, 2),
+                            result_description TEXT,
                             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-                            FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE SET NULL,
-                            INDEX(parlay_id)
+                            FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE SET NULL
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                     ''')
                     logger.info("Checked/created 'bets' table.")
+
+                    # Create unit_records table
+                    await cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS unit_records (
+                            record_id INT AUTO_INCREMENT PRIMARY KEY,
+                            bet_serial INT NOT NULL,
+                            guild_id BIGINT NOT NULL,
+                            user_id BIGINT NOT NULL,
+                            year INT NOT NULL,
+                            month INT NOT NULL,
+                            units DECIMAL(15, 2) NOT NULL,
+                            odds DECIMAL(10, 2) NOT NULL,
+                            result_value DECIMAL(15, 2) NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE,
+                            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                    ''')
+                    logger.info("Checked/created 'unit_records' table.")
+
+                    # Create guild_settings table
+                    await cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS guild_settings (
+                            guild_id BIGINT PRIMARY KEY,
+                            admin_role_id BIGINT,
+                            capper_role_id BIGINT,
+                            betting_channel_id BIGINT,
+                            min_units DECIMAL(15, 2) DEFAULT 0.1,
+                            max_units DECIMAL(15, 2) DEFAULT 10.0,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                    ''')
+                    logger.info("Checked/created 'guild_settings' table.")
+
+                    # Create indexes
+                    await cursor.execute('''
+                        CREATE INDEX IF NOT EXISTS idx_bets_user_id ON bets(user_id);
+                        CREATE INDEX IF NOT EXISTS idx_bets_guild_id ON bets(guild_id);
+                        CREATE INDEX IF NOT EXISTS idx_bets_status ON bets(status);
+                        CREATE INDEX IF NOT EXISTS idx_bets_created_at ON bets(created_at);
+                        CREATE INDEX IF NOT EXISTS idx_unit_records_user_id ON unit_records(user_id);
+                        CREATE INDEX IF NOT EXISTS idx_unit_records_guild_id ON unit_records(guild_id);
+                        CREATE INDEX IF NOT EXISTS idx_unit_records_year_month ON unit_records(year, month);
+                    ''')
+                    logger.info("Checked/created indexes.")
 
                     # Guild Settings Table
                     if not await self.table_exists(conn, 'guild_settings'):
@@ -253,28 +303,6 @@ class DatabaseManager:
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         logger.info("Table 'cappers' created.")
-
-                    # Unit Records Table
-                    if not await self.table_exists(conn, 'unit_records'):
-                        await cursor.execute('''
-                            CREATE TABLE unit_records (
-                                record_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                                bet_id INT NULL,
-                                guild_id BIGINT NOT NULL,
-                                user_id BIGINT NOT NULL,
-                                year INTEGER NOT NULL,
-                                month INTEGER NOT NULL,
-                                units FLOAT NOT NULL,
-                                odds FLOAT NOT NULL,
-                                result_value FLOAT NOT NULL,
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                FOREIGN KEY (bet_id) REFERENCES bets(bet_id) ON DELETE SET NULL
-                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-                        ''')
-                        await cursor.execute('CREATE INDEX idx_unit_records_guild_user_time ON unit_records (guild_id, user_id, year, month)')
-                        await cursor.execute('CREATE INDEX idx_unit_records_guild_time ON unit_records (guild_id, created_at)')
-                        await cursor.execute('CREATE INDEX idx_unit_records_bet_id ON unit_records (bet_id)')
-                        logger.info("Table 'unit_records' created.")
 
                     # Games Table (API-based, renamed to api_games)
                     if not await self.table_exists(conn, 'api_games'):
