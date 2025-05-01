@@ -149,15 +149,16 @@ class BetService:
                     stake, odds, channel_id, message_id,
                     created_at, status, updated_at, expiration_time,
                     result_value, result_description
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), 'pending', UTC_TIMESTAMP(), %s, NULL, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             args = (
                 guild_id, user_id, db_game_id, bet_type,
                 units, odds, channel_id, message_id,
-                expiration_time, result_description
+                now_utc_for_db, 'pending', now_utc_for_db, expiration_time,
+                None, result_description
             )
 
-            last_id = await self.db.execute(query, args)
+            await self.db.execute(query, args)
 
             # Retrieve the bet_serial (assuming AUTO_INCREMENT)
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
@@ -220,6 +221,7 @@ class BetService:
                 raise ValidationError("Odds cannot be between -99 and 99.")
 
             db_game_id = str(game_id) if game_id else None
+            now_utc_for_db = datetime.now(timezone.utc)
             # Serialize legs as JSON in result_description
             result_description = json.dumps([{
                 'game_id': leg['game_id'],
@@ -235,11 +237,12 @@ class BetService:
                     stake, odds, channel_id, message_id,
                     created_at, status, updated_at, expiration_time,
                     result_value, result_description
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), 'pending', UTC_TIMESTAMP(), %s, NULL, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             args = (
                 guild_id, user_id, db_game_id, bet_type,
                 units, odds, channel_id, None,
+                now_utc_for_db, 'pending', now_utc_for_db, None,
                 None, result_description
             )
             await self.db.execute(query, args)
@@ -637,7 +640,6 @@ class BetService:
         except Exception as e:
             self.logger.exception(f"Error sending bet status notification for bet {bet_info.get('bet_serial')}: {e}")
 
-    # Add update methods called in betting.py
     async def update_bet_channel(self, bet_serial: int, channel_id: int):
         """Update the channel_id for a bet."""
         try:
