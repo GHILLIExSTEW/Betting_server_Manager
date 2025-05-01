@@ -139,6 +139,35 @@ class AwayPlayerSelect(Select):
         if self.parent_view.bet_details.get('player'):
             await self.parent_view.go_next(interaction)
 
+class ManualEntryButton(Button):
+    def __init__(self, parent_view):
+        super().__init__(style=ButtonStyle.green, label="Manual Entry", custom_id=f"manual_entry_{parent_view.original_interaction.id}")
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: Interaction):
+        logger.debug("Manual Entry button clicked")
+        self.parent_view.bet_details['game_id'] = "Other"
+        self.disabled = True
+        for item in self.parent_view.children:
+            if isinstance(item, CancelButton):
+                item.disabled = True
+        await interaction.response.edit_message(content="Proceeding to manual entry...", view=self.parent_view)
+        await self.parent_view.go_next(interaction)
+
+class CancelButton(Button):
+    def __init__(self, parent_view):
+        super().__init__(style=ButtonStyle.red, label="Cancel", custom_id=f"cancel_{parent_view.original_interaction.id}")
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: Interaction):
+        logger.debug("Cancel button clicked")
+        self.disabled = True
+        for item in self.parent_view.children:
+            if isinstance(item, ManualEntryButton):
+                item.disabled = True
+        await interaction.response.edit_message(content="Bet workflow cancelled.", view=None)
+        self.parent_view.stop()
+
 class BetDetailsModal(Modal, title="Enter Bet Details"):
     def __init__(self, line_type: str, is_manual: bool = False):
         super().__init__(title="Enter Bet Details")
@@ -229,16 +258,6 @@ class ChannelSelect(Select):
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
 
-class AddLegButton(Button):
-    def __init__(self, parent_view):
-        super().__init__(style=ButtonStyle.blurple, label="Add Leg", custom_id=f"add_leg_{parent_view.original_interaction.id}")
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: Interaction):
-        self.parent_view.current_step = 2  # Reset to league selection for new leg
-        await interaction.response.defer()
-        await self.parent_view.go_next(interaction)
-
 class ConfirmButton(Button):
     def __init__(self, parent_view):
         super().__init__(style=ButtonStyle.green, label="Confirm & Post", custom_id=f"confirm_bet_{parent_view.original_interaction.id}")
@@ -250,17 +269,6 @@ class ConfirmButton(Button):
         await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.submit_bet(interaction)
 
-class CancelButton(Button):
-    def __init__(self, parent_view):
-        super().__init__(style=ButtonStyle.red, label="Cancel", custom_id=f"cancel_bet_{parent_view.original_interaction.id}")
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: Interaction):
-        for item in self.parent_view.children:
-            if isinstance(item, Button): item.disabled = True
-        await interaction.response.edit_message(content="Bet cancelled.", embed=None, view=self.parent_view)
-        self.parent_view.stop()
-
 class BetWorkflowView(View):
     def __init__(self, interaction: Interaction, bot: commands.Bot):
         super().__init__(timeout=600)
@@ -271,6 +279,7 @@ class BetWorkflowView(View):
         self.games = []  # Store games for access in GameSelect
         self.message: Optional[discord.WebhookMessage | discord.InteractionMessage] = None
         self.is_processing = False  # Prevent double advancement
+        self.latest_interaction = interaction  # Track the latest interaction
 
     async def start_flow(self):
         logger.debug("Starting bet workflow")
@@ -287,6 +296,7 @@ class BetWorkflowView(View):
         if interaction.user.id != self.original_interaction.user.id:
             await interaction.response.send_message("You cannot interact with this bet placement.", ephemeral=True)
             return False
+        self.latest_interaction = interaction  # Update latest interaction
         return True
 
     async def edit_message(self, interaction: Optional[Interaction] = None, content: Optional[str] = None, view: Optional[View] = None, embed: Optional[discord.Embed] = None):
@@ -329,13 +339,16 @@ class BetWorkflowView(View):
                 if self.current_step == 1:
                     self.add_item(BetTypeSelect(self))
                     step_content += ": Select Bet Type"
+                    await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
                 elif self.current_step == 2:
                     allowed_leagues = ["NBA", "NFL", "MLB", "NHL", "NCAAB", "NCAAF", "Soccer", "Tennis", "UFC/MMA"]
                     self.add_item(LeagueSelect(self, allowed_leagues))
                     step_content += ": Select League"
+                    await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
                 elif self.current_step == 3:
                     self.add_item(LineTypeSelect(self))
                     step_content += ": Select Line Type"
+                    await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
                 elif self.current_step == 4:
                     league = self.bet_details.get('league')
                     league_games = []
@@ -355,9 +368,15 @@ class BetWorkflowView(View):
                     if league_games:
                         self.add_item(GameSelect(self, league_games))
                         step_content += f": Select Game for {league} (or Other)"
+                        logger.debug(f"Showing game selection for {league}")
+                        await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
                     else:
-                        logger.warning(f"No upcoming games found for league {league}. Proceeding to manual entry.")
-                        self.bet_details['game_id'] = "Other"
+                        logger.warning(f"No upcoming games found for league {league}. Prompting for manual entry.")
+                        self.add_item(ManualEntryButton(self))
+                        self.add_item(CancelButton(self))
+                        step_content = f"No games scheduled for {league}. Would you like to manually enter game data?"
+                        logger.debug(f"Sending manual entry prompt for {league}")
+                        await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
                 elif self.current_step == 5:
                     line_type = self.bet_details.get('line_type')
                     game_id = self.bet_details.get('game_id')
@@ -376,6 +395,8 @@ class BetWorkflowView(View):
                             self.add_item(HomePlayerSelect(self, home_players, home_team))
                             self.add_item(AwayPlayerSelect(self, away_players, away_team))
                             step_content += f": Select a Player from {home_team} or {away_team}"
+                            logger.debug(f"Showing player dropdowns for {home_team} and {away_team}")
+                            await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
                         else:
                             logger.warning(f"No players available for game {game_id}. Proceeding to manual player entry.")
                             modal = BetDetailsModal(line_type=line_type, is_manual=False)
@@ -441,6 +462,8 @@ class BetWorkflowView(View):
                     self.add_item(ChannelSelect(self, channels))
                     embed_to_send = self.create_preview_embed()
                     step_content += ": Select Channel to Post Bet"
+                    logger.debug(f"Showing channel selection for step 6")
+                    await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
                 elif self.current_step == 7:
                     try:
                         legs = self.bet_details.get('legs', [])
@@ -480,6 +503,8 @@ class BetWorkflowView(View):
                         if self.bet_details.get('bet_type') == "parlay":
                             self.add_item(AddLegButton(self))
                         step_content = f"**Step {self.current_step}**: Please Confirm Your Bet"
+                        logger.debug(f"Showing confirmation for step 7")
+                        await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
                     except ValueError as ve:
                         logger.error(f"Bet input validation failed: {ve}")
                         await self.edit_message(interaction, content=f"❌ Error: {ve} Please start over.", view=None)
@@ -487,18 +512,16 @@ class BetWorkflowView(View):
                         return
                 else:
                     logger.error(f"BetWorkflowView reached unexpected step: {self.current_step}")
+                    await self.edit_message(interaction, content="❌ Invalid step reached. Please start over.", view=None)
                     self.stop()
                     return
-
-                logger.debug(f"Updating message for step {self.current_step}")
-                await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
 
             except Exception as e:
                 logger.exception(f"Error in bet workflow step {self.current_step}: {e}")
                 try:
                     await self.edit_message(interaction, content="An unexpected error occurred.", view=None, embed=None)
                 except Exception:
-                    pass
+                    logger.error("Failed to send error message to user")
                 self.stop()
 
         finally:
