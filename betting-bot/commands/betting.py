@@ -694,9 +694,9 @@ class BettingCog(commands.Cog):
         try:
             # Ensure services are available
             if not hasattr(self.bot, 'bet_service') or not hasattr(self.bot, 'game_service'):
-                 logger.error("Betting services not found on bot instance.")
-                 await interaction.response.send_message("❌ Bot is not properly configured (Service Error).", ephemeral=True)
-                 return
+                logger.error("Betting services not found on bot instance.")
+                await interaction.response.send_message("❌ Bot is not properly configured (Service Error).", ephemeral=True)
+                return
 
             # Check if user is authorized using BetService
             # Make sure admin has run /setid for this user first
@@ -721,35 +721,34 @@ class BettingCog(commands.Cog):
             await interaction.followup.send("❌ An error occurred while starting the bet command.", ephemeral=True)
 
     # Listener for persistent views (needed for BetResolutionView)
-    # This should ideally be in the main bot class or a dedicated cog
     @commands.Cog.listener()
     async def on_ready(self):
-         # Re-register persistent views if necessary
-         # Need to know the class and potentially parameters to reinstantiate
-         # Example: self.bot.add_view(BetResolutionView(bet_id=???)) # This is problematic
-         # A better approach for persistent buttons is to not rely on view state
-         # and parse the custom_id in the interaction callback if needed.
-         # For just adding reactions, the static custom_ids are fine.
-         logger.info("BettingCog ready, persistent views should re-register if needed.")
-         # If BetResolutionView needs bet_id, it must be encoded in custom_id or fetched differently.
-         # For simplicity, we'll assume BetResolutionView only *adds* reactions and doesn't need bet_id internally.
-         self.bot.add_view(BetResolutionView(bet_serial=0)) # Add dummy view instance to register buttons
+        # Re-register persistent views if necessary
+        logger.info("BettingCog ready, persistent views should re-register if needed.")
+        # Add dummy view instance to register buttons
+        self.bot.add_view(BetResolutionView(bet_serial=0))
 
     # Optional: Cog specific error handler
     async def cog_app_command_error(self, interaction: Interaction, error: app_commands.AppCommandError):
-         # Handle errors like MissingRole, CheckFailure, etc.
-         if isinstance(error, app_commands.CheckFailure):
-              await interaction.response.send_message("You do not have the required role/permissions for this command.", ephemeral=True)
-         else:
-              logger.error(f"Error in BettingCog command: {error}", exc_info=True)
-              if not interaction.response.is_done():
-                   await interaction.response.send_message("An internal error occurred with the betting command.", ephemeral=True)
-              else:
-                   try: await interaction.followup.send("An internal error occurred.", ephemeral=True)
-                   except Exception: pass # Ignore followup errors
+        # Handle errors like MissingRole, CheckFailure, etc.
+        if isinstance(error, app_commands.CheckFailure):
+            await interaction.response.send_message("You do not have the required role/permissions for this command.", ephemeral=True)
+        else:
+            logger.error(f"Error in BettingCog command: {error}", exc_info=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("An internal error occurred with the betting command.", ephemeral=True)
+            else:
+                try: 
+                    await interaction.followup.send("An internal error occurred.", ephemeral=True)
+                except Exception: 
+                    pass # Ignore followup errors
 
 
 # The setup function for the extension
 async def setup(bot: commands.Bot):
+    """Register the betting command with the bot."""
+    # Add the cog to the bot
     await bot.add_cog(BettingCog(bot))
-    logger.info("BettingCog loaded")
+    # Register the command with the command tree
+    bot.tree.add_command(BettingCog.bet_command)
+    logger.info("BettingCog loaded and command registered")
