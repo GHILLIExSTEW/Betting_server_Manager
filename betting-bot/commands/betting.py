@@ -160,11 +160,13 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
         self.add_item(self.units)
 
     async def on_submit(self, interaction: Interaction):
+        logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}")
         line = self.line.value.strip()
         odds = self.odds.value.strip()
         units = self.units.value.strip()
 
         if not all([line, odds, units]):
+            logger.warning("Modal submission failed: Missing required fields")
             await interaction.response.send_message("Please fill in all required fields.", ephemeral=True)
             return
 
@@ -177,6 +179,7 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
             team = self.team.value.strip()
             opponent = self.opponent.value.strip()
             if not all([team, opponent]):
+                logger.warning("Modal submission failed: Missing team or opponent/player")
                 await interaction.response.send_message("Please provide valid team and opponent/player.", ephemeral=True)
                 return
             leg['team'] = team
@@ -187,6 +190,7 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
         elif self.line_type == "player_prop":
             player = self.player.value.strip()
             if not player:
+                logger.warning("Modal submission failed: Missing player")
                 await interaction.response.send_message("Please provide a valid player.", ephemeral=True)
                 return
             leg['player'] = player
@@ -323,6 +327,7 @@ class BetWorkflowView(View):
                     step_content += ": Select Line Type"
                 elif self.current_step == 4:
                     league = self.bet_details.get('league')
+                    league_games = []
                     if league and league != "Other":
                         sport = None
                         if league in ["NFL", "NCAAF"]: sport = "american-football"
@@ -336,26 +341,13 @@ class BetWorkflowView(View):
                             self.games = await self.bot.game_service.get_upcoming_games(interaction.guild_id, hours=72)
                             league_games = [g for g in self.games if str(g.get('league_id')) == league or g.get('league_name','').lower() == league.lower()]
 
-                            if league_games:
-                                self.add_item(GameSelect(self, league_games))
-                                step_content += f": Select Game for {league} (or Other)"
-                            else:
-                                logger.warning(f"No upcoming games found for league {league}. Proceeding to manual entry.")
-                                self.bet_details['game_id'] = "Other"
-                                self.current_step = 4  # Ensure step 5 is next
-                                await self.go_next(interaction)
-                                return
-                        else:
-                            logger.warning(f"Sport/GameService unavailable for league {league}. Proceeding to manual entry.")
-                            self.bet_details['game_id'] = "Other"
-                            self.current_step = 4  # Ensure step 5 is next
-                            await self.go_next(interaction)
-                            return
+                    if league_games:
+                        self.add_item(GameSelect(self, league_games))
+                        step_content += f": Select Game for {league} (or Other)"
                     else:
+                        logger.warning(f"No upcoming games found for league {league}. Proceeding to manual entry.")
                         self.bet_details['game_id'] = "Other"
-                        self.current_step = 4  # Ensure step 5 is next
-                        await self.go_next(interaction)
-                        return
+                        # Do not call go_next; let current execution advance to step 5
                 elif self.current_step == 5:
                     line_type = self.bet_details.get('line_type')
                     game_id = self.bet_details.get('game_id')
@@ -379,15 +371,31 @@ class BetWorkflowView(View):
                             modal = BetDetailsModal(line_type=line_type, is_manual=False)
                             modal.view = self
                             logger.debug(f"Sending BetDetailsModal for player_prop, is_manual=False")
-                            await interaction.response.send_modal(modal)
+                            try:
+                                await interaction.response.send_modal(modal)
+                            except discord.HTTPException as e:
+                                logger.error(f"Failed to send BetDetailsModal: {e}")
+                                await self.edit_message(interaction, content="❌ Failed to send bet details modal. Please try again.", view=None)
+                                self.stop()
                             return
                     else:
                         modal = BetDetailsModal(line_type=line_type, is_manual=is_manual)
                         modal.view = self
                         logger.debug(f"Sending BetDetailsModal for line_type={line_type}, is_manual={is_manual}")
-                        await interaction.response.send_modal(modal)
+                        try:
+                            await interaction.response.send_modal(modal)
+                        except discord.HTTPException as e:
+                            logger.error(f"Failed to send BetDetailsModal: {e}")
+                            await self.edit_message(interaction, content="❌ Failed to send bet details modal. Please try again.", view=None)
+                            self.stop()
                         return
                 elif self.current_step == 6:
+                    if not self.bet_details.get('legs'):
+                        logger.error("No bet details provided for channel selection")
+                        await self.edit_message(interaction, content="❌ No bet details provided. Please start over.", view=None)
+                        self.stop()
+                        return
+
                     channels = []
                     if hasattr(self.bot, 'db_manager'):
                         settings = await self.bot.db_manager.fetch_one(
