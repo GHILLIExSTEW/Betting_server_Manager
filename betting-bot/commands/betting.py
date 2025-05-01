@@ -306,6 +306,8 @@ class BetWorkflowView(View):
         self.latest_interaction = interaction
         # Initialize the BetSlipGenerator
         self.bet_slip_generator = BetSlipGenerator()
+        # Store the generated image bytes for reuse
+        self.preview_image_bytes = None
 
     async def start_flow(self):
         logger.debug("Starting bet workflow")
@@ -325,19 +327,19 @@ class BetWorkflowView(View):
         self.latest_interaction = interaction
         return True
 
-    async def edit_message(self, interaction: Optional[Interaction] = None, content: Optional[str] = None, view: Optional[View] = None, embed: Optional[discord.Embed] = None):
-        logger.debug(f"Editing message: content={content}, view={view is not None}, embed={embed is not None}")
+    async def edit_message(self, interaction: Optional[Interaction] = None, content: Optional[str] = None, view: Optional[View] = None, embed: Optional[discord.Embed] = None, file: Optional[File] = None):
+        logger.debug(f"Editing message: content={content}, view={view is not None}, embed={embed is not None}, file={file is not None}")
         target_message = self.message
         try:
             if target_message:
                 if isinstance(target_message, discord.InteractionMessage):
-                    await target_message.edit(content=content, embed=embed, view=view)
+                    await target_message.edit(content=content, embed=embed, view=view, attachments=[file] if file else [])
                 elif isinstance(target_message, discord.WebhookMessage):
-                    await target_message.edit(content=content, embed=embed, view=view)
+                    await target_message.edit(content=content, embed=embed, view=view, attachments=[file] if file else [])
                 else:
-                    await self.original_interaction.edit_original_response(content=content, embed=embed, view=view)
+                    await self.original_interaction.edit_original_response(content=content, embed=embed, view=view, attachments=[file] if file else [])
             else:
-                await self.original_interaction.edit_original_response(content=content, embed=embed, view=view)
+                await self.original_interaction.edit_original_response(content=content, embed=embed, view=view, attachments=[file] if file else [])
         except (discord.NotFound, discord.HTTPException) as e:
             logger.warning(f"Failed to edit BetWorkflowView message: {e}")
             if interaction:
@@ -358,6 +360,7 @@ class BetWorkflowView(View):
             self.current_step += 1
             step_content = f"**Step {self.current_step}**"
             embed_to_send = None
+            file_to_send = None
 
             logger.debug(f"Entering step {self.current_step}")
 
@@ -474,11 +477,48 @@ class BetWorkflowView(View):
                         await self.edit_message(interaction, content="Error: No text channels found where I can post.", view=None)
                         self.stop()
                         return
+
+                    # Generate the preview image
+                    legs = self.bet_details.get('legs', [])
+                    if not legs:
+                        await self.edit_message(interaction, content="❌ No bet details provided. Please start over.", view=None)
+                        self.stop()
+                        return
+
+                    leg = legs[0]  # For straight bets, we only have one leg
+                    home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
+                    away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
+                    league = self.bet_details.get('league', 'NHL')
+                    line = leg.get('line', 'ML')
+                    odds = float(leg.get('odds_str', '-110'))  # Use odds_str since odds isn't validated yet
+                    units = float(leg.get('units_str', '1.00'))  # Use units_str since units isn't validated yet
+                    timestamp = datetime.now(timezone.utc)
+
+                    # Generate the image
+                    bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                        home_team=home_team,
+                        away_team=away_team,
+                        league=league,
+                        line=line,
+                        odds=odds,
+                        units=units,
+                        bet_id="TBD",  # Bet ID will be updated later
+                        timestamp=timestamp
+                    )
+
+                    # Save the image to a BytesIO object for reuse
+                    self.preview_image_bytes = io.BytesIO()
+                    bet_slip_image.save(self.preview_image_bytes, 'PNG')
+                    self.preview_image_bytes.seek(0)
+
+                    # Create a Discord file for the preview
+                    file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
+                    self.preview_image_bytes.seek(0)  # Reset the pointer for reuse
+
                     self.add_item(ChannelSelect(self, channels))
-                    embed_to_send = self.create_preview_embed()
                     step_content += ": Select Channel to Post Bet"
                     logger.debug(f"Showing channel selection for step 6")
-                    await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
+                    await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
                 elif self.current_step == 7:
                     try:
                         legs = self.bet_details.get('legs', [])
@@ -512,14 +552,20 @@ class BetWorkflowView(View):
                                 raise ValueError("Units must be between 0.1 and 10.0")
                             leg['units'] = units_val
 
-                        embed_to_send = self.create_confirmation_embed()
+                        # Reuse the preview image
+                        if self.preview_image_bytes:
+                            file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
+                            self.preview_image_bytes.seek(0)  # Reset pointer for reuse
+                        else:
+                            raise ValueError("Preview image not found. Please start over.")
+
                         self.add_item(ConfirmButton(self))
                         self.add_item(CancelButton(self))
                         if self.bet_details.get('bet_type') == "parlay":
                             self.add_item(AddLegButton(self))
                         step_content = f"**Step {self.current_step}**: Please Confirm Your Bet"
                         logger.debug(f"Showing confirmation for step 7")
-                        await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
+                        await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
                     except ValueError as ve:
                         logger.error(f"Bet input validation failed: {ve}")
                         await self.edit_message(interaction, content=f"❌ Error: {ve} Please start over.", view=None)
@@ -541,82 +587,6 @@ class BetWorkflowView(View):
 
         finally:
             self.is_processing = False
-
-    def create_preview_embed(self) -> discord.Embed:
-        details = self.bet_details
-        embed = discord.Embed(title="📊 Bet Preview", color=discord.Color.blue())
-        embed.add_field(name="Type", value=details.get('bet_type', 'N/A').title(), inline=True)
-        embed.add_field(name="League", value=details.get('league', 'N/A'), inline=True)
-        game_info = "Manual Entry"; game_id = details.get('game_id')
-        if game_id and game_id != 'Other': game_info = f"Game ID: {game_id}"
-        elif details.get('legs') and details['legs'][0].get('team'):
-            game_info = f"{details['legs'][0]['team']} vs {details['legs'][0].get('opponent', 'N/A')}"
-        embed.add_field(name="Game", value=game_info, inline=True)
-        
-        legs = details.get('legs', [])
-        for i, leg in enumerate(legs, 1):
-            selection = leg.get('line', 'N/A')
-            if leg.get('player'):
-                selection = f"{leg['player']} - {selection}"
-            embed.add_field(
-                name=f"Leg {i} Selection" if len(legs) > 1 else "Selection",
-                value=f"```{selection[:1000]}```",
-                inline=False
-            )
-            embed.add_field(name="Odds", value=f"{leg.get('odds_str', 'N/A')}", inline=True)
-            embed.add_field(name="Units", value=f"{leg.get('units_str', 'N/A')}u", inline=True)
-            if leg.get('team'):
-                embed.add_field(name="Team", value=leg['team'], inline=True)
-        
-        embed.set_footer(text="Select a channel to post the bet.")
-        return embed
-
-    def create_confirmation_embed(self) -> discord.Embed:
-        details = self.bet_details
-        embed = discord.Embed(title="📊 Bet Confirmation", color=discord.Color.blue())
-        embed.add_field(name="Type", value=details.get('bet_type', 'N/A').title(), inline=True)
-        embed.add_field(name="League", value=details.get('league', 'N/A'), inline=True)
-        game_info = "Manual Entry"; game_id = details.get('game_id')
-        if game_id and game_id != 'Other': game_info = f"Game ID: {game_id}"
-        elif details.get('legs') and details['legs'][0].get('team'):
-            game_info = f"{details['legs'][0]['team']} vs {details['legs'][0].get('opponent', 'N/A')}"
-        embed.add_field(name="Game", value=game_info, inline=True)
-        
-        legs = details.get('legs', [])
-        total_potential_profit = 0.0
-        total_units = 0.0
-        for i, leg in enumerate(legs, 1):
-            selection = leg.get('line', 'N/A')
-            if leg.get('player'):
-                selection = f"{leg['player']} - {selection}"
-            embed.add_field(
-                name=f"Leg {i} Selection" if len(legs) > 1 else "Selection",
-                value=f"```{selection[:1000]}```",
-                inline=False
-            )
-            odds_value = leg.get('odds', 0.0)
-            units_value = leg.get('units', 0.0)
-            embed.add_field(name="Odds", value=f"{odds_value:+}", inline=True)
-            embed.add_field(name="Units", value=f"{units_value:.2f}u", inline=True)
-            if leg.get('team'):
-                embed.add_field(name="Team", value=leg['team'], inline=True)
-            potential_profit = 0.0
-            if units_value > 0:
-                if odds_value > 0:
-                    potential_profit = units_value * (odds_value / 100.0)
-                elif odds_value < 0:
-                    potential_profit = units_value * (100.0 / abs(odds_value))
-            total_potential_profit += potential_profit
-            total_units += units_value
-        
-        channel_id = details.get('channel_id')
-        channel = self.bot.get_channel(channel_id) if channel_id else None
-        channel_mention = channel.mention if channel else "Invalid Channel"
-        embed.add_field(name="Post Channel", value=channel_mention, inline=True)
-        embed.add_field(name="Total To Win", value=f"{total_potential_profit:.2f}u", inline=True)
-        embed.add_field(name="Total Payout", value=f"{total_units + total_potential_profit:.2f}u", inline=True)
-        embed.set_footer(text="Confirm to place and post the bet.")
-        return embed
 
     async def submit_bet(self, interaction: Interaction):
         details = self.bet_details
@@ -642,37 +612,56 @@ class BetWorkflowView(View):
                     channel_id=post_channel_id,
                     player=leg.get('player')
                 )
-            else:  # Parlay (not supported in this image generation example)
-                raise ValueError("Parlay bets are not supported for image generation in this example.")
-
-            if post_channel and isinstance(post_channel, TextChannel):
-                # Generate the bet slip image
-                home_team = details.get('home_team_name', leg.get('team', 'Unknown'))
-                away_team = details.get('away_team_name', leg.get('opponent', 'Unknown'))
-                league = details.get('league', 'NHL')
-                line = leg.get('line', '-1.5')
-                odds = leg.get('odds', -110)
-                units = leg.get('units', 1.00)
-                timestamp = datetime.now(timezone.utc)
-
-                bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                    home_team=home_team,
-                    away_team=away_team,
-                    league=league,
-                    line=line,
-                    odds=odds,
-                    units=units,
-                    bet_id=str(bet_serial),
-                    timestamp=timestamp
+            else:  # Parlay
+                bet_serial = await self.bot.bet_service.create_parlay_bet(
+                    guild_id=interaction.guild_id,
+                    user_id=interaction.user.id,
+                    legs=[
+                        {
+                            'game_id': details.get('game_id') if details.get('game_id') != 'Other' else None,
+                            'bet_type': "player_prop" if leg.get('player') else "game_line",
+                            'team_name': leg.get('team', leg.get('line')),
+                            'units': leg.get('units'),
+                            'odds': leg.get('odds'),
+                            'player': leg.get('player')
+                        } for leg in legs
+                    ],
+                    channel_id=post_channel_id
                 )
 
-                # Convert the image to a Discord file
-                with io.BytesIO() as image_binary:
-                    bet_slip_image.save(image_binary, 'PNG')
-                    image_binary.seek(0)
-                    discord_file = File(image_binary, filename=f"bet_slip_{bet_serial}.png")
+            if post_channel and isinstance(post_channel, TextChannel):
+                # Reuse the preview image and update the bet ID
+                if self.preview_image_bytes:
+                    # Generate a new image with the updated bet ID
+                    leg = legs[0]  # For straight bets
+                    home_team = details.get('home_team_name', leg.get('team', 'Unknown'))
+                    away_team = details.get('away_team_name', leg.get('opponent', 'Unknown'))
+                    league = details.get('league', 'NHL')
+                    line = leg.get('line', 'ML')
+                    odds = leg.get('odds', -110)
+                    units = leg.get('units', 1.00)
+                    timestamp = datetime.now(timezone.utc)
 
-                # Send the image with a view
+                    bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                        home_team=home_team,
+                        away_team=away_team,
+                        league=league,
+                        line=line,
+                        odds=odds,
+                        units=units,
+                        bet_id=str(bet_serial),
+                        timestamp=timestamp
+                    )
+
+                    # Save the updated image to a new BytesIO object
+                    final_image_bytes = io.BytesIO()
+                    bet_slip_image.save(final_image_bytes, 'PNG')
+                    final_image_bytes.seek(0)
+
+                    discord_file = File(final_image_bytes, filename=f"bet_slip_{bet_serial}.png")
+                else:
+                    raise ValueError("Preview image not found. Please start over.")
+
                 view = BetResolutionView(bet_serial)
                 sent_message = await post_channel.send(file=discord_file, view=view)
 
@@ -702,6 +691,7 @@ class BetWorkflowView(View):
             logger.exception(f"Unexpected error submitting bet: {e}")
             await self.edit_message(interaction, content="❌ An unexpected error occurred.", view=None, embed=None)
         finally:
+            self.preview_image_bytes = None  # Clear the stored image
             self.stop()
 
 class BetResolutionView(View):
