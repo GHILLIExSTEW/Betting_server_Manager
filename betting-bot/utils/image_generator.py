@@ -26,6 +26,7 @@ class BetSlipGenerator:
         """Get the default font path for regular text."""
         custom_font_path = "betting-bot/static/fonts/Roboto-Regular.ttf"
         if os.path.exists(custom_font_path):
+            logger.debug(f"Using regular font at {custom_font_path}")
             return custom_font_path
         if os.name == 'nt':  # Windows
             return 'C:\\Windows\\Fonts\\arial.ttf'
@@ -36,13 +37,16 @@ class BetSlipGenerator:
         """Get the default bold font path for emphasized text."""
         custom_bold_font_path = "betting-bot/static/fonts/Roboto-Bold.ttf"
         if os.path.exists(custom_bold_font_path):
+            logger.debug(f"Using bold font at {custom_bold_font_path}")
             return custom_bold_font_path
+        logger.debug("Bold font not found, falling back to regular font")
         return self._get_default_font()
 
     def _get_default_emoji_font(self) -> str:
         """Get the default font path for emojis."""
         custom_emoji_font_path = "betting-bot/static/fonts/NotoColorEmoji-Regular.ttf"
         if os.path.exists(custom_emoji_font_path):
+            logger.debug(f"Using emoji font at {custom_emoji_font_path}")
             return custom_emoji_font_path
         if os.name == 'nt':  # Windows
             return 'C:\\Windows\\Fonts\\seguiemj.ttf'
@@ -56,6 +60,7 @@ class BetSlipGenerator:
             for font in ['Arial.ttf', 'DejaVuSans.ttf', 'LiberationSans-Regular.ttf']:
                 if os.path.exists(font):
                     self.font_path = font
+                    logger.debug(f"Falling back to regular font at {self.font_path}")
                     break
             else:
                 raise FileNotFoundError("Could not find a suitable font file. Please place 'Roboto-Regular.ttf' in betting-bot/static/fonts/")
@@ -73,9 +78,12 @@ class BetSlipGenerator:
             for font in ['seguiemj.ttf', 'NotoColorEmoji-Regular.ttf']:
                 if os.path.exists(font):
                     self.emoji_font_path = font
+                    logger.debug(f"Falling back to emoji font at {self.emoji_font_path}")
                     break
             else:
-                raise FileNotFoundError("Could not find a suitable emoji font file. Please place 'NotoColorEmoji-Regular.ttf' in betting-bot/static/fonts/")
+                logger.error("Could not find a suitable emoji font file. Emojis may not render correctly.")
+                # Fallback to regular font to avoid complete failure
+                self.emoji_font_path = self.font_path
 
     def _ensure_team_dir_exists(self) -> None:
         """Ensure the team logos directory exists."""
@@ -226,7 +234,11 @@ class BetSlipGenerator:
                 draw.text((lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y), units_text, fill=(255, 215, 0), font=units_font, anchor='mm')
             else:
                 # Fallback to emoji, using the emoji font
-                draw.text((width // 2, units_y), f"🔒 {units_text} 🔒", fill=(255, 215, 0), font=emoji_font, anchor='mm')
+                try:
+                    draw.text((width // 2, units_y), f"🔒 {units_text} 🔒", fill=(255, 215, 0), font=emoji_font, anchor='mm')
+                except Exception as e:
+                    logger.error(f"Failed to render emoji with emoji font: {str(e)}. Falling back to units text only.")
+                    draw.text((width // 2, units_y), units_text, fill=(255, 215, 0), font=units_font, anchor='mm')
 
             # Separator line before footer
             separator_y = height - 50
