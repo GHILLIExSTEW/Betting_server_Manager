@@ -9,13 +9,11 @@ from typing import Dict, Any, Optional, Tuple
 # Use relative imports assuming services/ is sibling to utils/
 try:
     from ..utils.errors import AdminServiceError
-    # Import DatabaseManager only for type hinting if needed
-    # from ..data.db_manager import DatabaseManager
 except ImportError:
-    from utils.errors import AdminServiceError # Fallback
-    # from data.db_manager import DatabaseManager
+    from utils.errors import AdminServiceError
 
 logger = logging.getLogger(__name__)
+
 
 class AdminService:
     def __init__(self, bot, db_manager):
@@ -45,38 +43,35 @@ class AdminService:
                     admin_channel_1 = VALUES(admin_channel_1),
                     admin_role = VALUES(admin_role),
                     authorized_role = VALUES(authorized_role),
-                    is_active = TRUE, -- Keep active on update
+                    is_active = TRUE,
                     updated_at = NOW()
-            """, # Use %s placeholders
+            """,
                 guild_id,
                 embed_ch_id,
                 command_ch_id,
                 admin_ch_id,
                 admin_role_id,
                 auth_role_id
-                # Other values are handled by INSERT defaults or ON DUPLICATE KEY UPDATE
             )
             logger.info(f"Server settings saved/updated for guild {guild_id}")
         except Exception as e:
             logger.exception(f"Error setting up server {guild_id}: {e}")
             raise AdminServiceError(f"Failed to set up server: {str(e)}")
 
-
     async def get_server_settings(self, guild_id: int) -> Optional[Dict[str, Any]]:
         """Get server settings using the shared db_manager."""
         try:
-            # Use %s placeholder
             settings_dict = await self.db.fetch_one(
-                "SELECT * FROM guild_settings WHERE guild_id = %s", # Use %s
+                "SELECT * FROM guild_settings WHERE guild_id = %s",
                 guild_id
             )
-            return settings_dict # Already returns a dict or None
+            return settings_dict
         except Exception as e:
             logger.exception(f"Error getting server settings for guild {guild_id}: {e}")
             return None
 
-    # sync_commands uses discord.py API, no DB query changes needed
     async def sync_commands(self, guild_id: int) -> None:
+        """Sync commands for a guild using the Discord API."""
         try:
             guild = self.bot.get_guild(guild_id)
             if not guild:
@@ -85,86 +80,72 @@ class AdminService:
             await self.bot.tree.sync(guild=guild)
             logger.info(f"Commands synced for guild {guild.name} ({guild_id})")
         except discord.errors.Forbidden:
-             logger.error(f"Permission error syncing commands for guild {guild_id}.")
+            logger.error(f"Permission error syncing commands for guild {guild_id}.")
         except Exception as e:
             logger.exception(f"Unexpected error syncing commands for guild {guild_id}: {e}")
             raise AdminServiceError(f"Failed to sync commands: {str(e)}")
 
-
     async def is_guild_paid(self, guild_id: int) -> bool:
         """Check if a guild has a paid subscription using the shared db_manager."""
         try:
-            # Use %s placeholder
             result = await self.db.fetch_one(
-                "SELECT is_paid FROM guild_settings WHERE guild_id = %s", # Use %s
+                "SELECT is_paid FROM guild_settings WHERE guild_id = %s",
                 guild_id
             )
-            # MySQL BOOLEAN is often stored as TINYINT(1), 0 or 1
-            # Check if result exists and the value is considered true (e.g., 1)
-            return bool(result and result.get('is_paid')) # bool(1) is True, bool(0) is False
+            return bool(result and result.get('is_paid'))
         except Exception as e:
             logger.exception(f"Error checking guild subscription status for guild {guild_id}: {e}")
             return False
 
-
     async def set_monthly_channel(self, guild_id: int, channel_id: Optional[int]) -> bool:
         """Set the monthly unit tracking voice channel using the shared db_manager."""
         try:
-            # Use %s placeholders
-            # Use NOW() for updated_at
             status = await self.db.execute(
-                "UPDATE guild_settings SET voice_channel_id = %s, updated_at = NOW() WHERE guild_id = %s", # Use %s
+                "UPDATE guild_settings SET voice_channel_id = %s, updated_at = NOW() WHERE guild_id = %s",
                 channel_id, guild_id
             )
-            # db.execute should return rowcount for UPDATE in aiomysql
             success = status is not None and status > 0
             if success:
-                 action = "set" if channel_id else "removed"
-                 logger.info(f"Successfully {action} monthly channel ({channel_id}) for guild {guild_id}")
+                action = "set" if channel_id else "removed"
+                logger.info(f"Successfully {action} monthly channel ({channel_id}) for guild {guild_id}")
             else:
-                 logger.warning(f"Failed to update monthly channel for guild {guild_id}. Guild settings might not exist or value unchanged. Rows affected: {status}")
+                logger.warning(f"Failed to update monthly channel for guild {guild_id}. Guild settings might not exist or value unchanged. Rows affected: {status}")
             return success
         except Exception as e:
             logger.exception(f"Error setting/removing monthly channel for guild {guild_id}: {e}")
             return False
 
-
     async def set_yearly_channel(self, guild_id: int, channel_id: Optional[int]) -> bool:
         """Set the yearly unit tracking voice channel using the shared db_manager."""
         try:
-            # Use %s placeholders
             status = await self.db.execute(
-                "UPDATE guild_settings SET yearly_channel_id = %s, updated_at = NOW() WHERE guild_id = %s", # Use %s
+                "UPDATE guild_settings SET yearly_channel_id = %s, updated_at = NOW() WHERE guild_id = %s",
                 channel_id, guild_id
             )
             success = status is not None and status > 0
             if success:
-                 action = "set" if channel_id else "removed"
-                 logger.info(f"Successfully {action} yearly channel ({channel_id}) for guild {guild_id}")
+                action = "set" if channel_id else "removed"
+                logger.info(f"Successfully {action} yearly channel ({channel_id}) for guild {guild_id}")
             else:
-                 logger.warning(f"Failed to update yearly channel for guild {guild_id}. Guild settings might not exist or value unchanged. Rows affected: {status}")
+                logger.warning(f"Failed to update yearly channel for guild {guild_id}. Guild settings might not exist or value unchanged. Rows affected: {status}")
             return success
         except Exception as e:
             logger.exception(f"Error setting/removing yearly channel for guild {guild_id}: {e}")
             return False
 
-
     async def remove_monthly_channel(self, guild_id: int) -> bool:
         """Remove the monthly unit tracking voice channel setting for a guild."""
         return await self.set_monthly_channel(guild_id, None)
-
 
     async def remove_yearly_channel(self, guild_id: int) -> bool:
         """Remove the yearly unit tracking voice channel setting for a guild."""
         return await self.set_yearly_channel(guild_id, None)
 
-
     async def get_voice_channels(self, guild_id: int) -> Tuple[Optional[int], Optional[int]]:
         """Get the configured monthly and yearly voice channel IDs for a guild."""
         try:
-            # Use %s placeholder
             result = await self.db.fetch_one(
-                "SELECT voice_channel_id, yearly_channel_id FROM guild_settings WHERE guild_id = %s", # Use %s
+                "SELECT voice_channel_id, yearly_channel_id FROM guild_settings WHERE guild_id = %s",
                 guild_id
             )
             if result:
