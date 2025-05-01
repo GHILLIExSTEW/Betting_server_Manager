@@ -108,15 +108,19 @@ class DatabaseManager:
 
     async def table_exists(self, conn, table_name: str) -> bool:
         """Check if a table exists in the database."""
-        # --- table_exists remains the same ---
-        async with conn.cursor() as cursor:
-            # Use %s placeholders for MySQL information_schema query
-            await cursor.execute(
-                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
-                (MYSQL_DB, table_name)
+        try:
+            result = await self.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_schema = %s AND table_name = %s
+                """,
+                self.db_name, table_name
             )
-            result = await cursor.fetchone()
-            return result[0] > 0 if result else False
+            return result > 0 if result is not None else False
+        except Exception as e:
+            logger.exception(f"Error checking if table '{table_name}' exists: {e}")
+            raise
 
 
     async def initialize_db(self):
