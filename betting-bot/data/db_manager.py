@@ -144,7 +144,7 @@ class DatabaseManager:
                     return row[0] if row else None
         except Exception as e:
             logger.error(f"Error fetching value: {query} Args: {args}. Error: {e}", exc_info=True)
-            return None
+            raise
 
     async def table_exists(self, conn, table_name: str) -> bool:
         """Check if a table exists in the database."""
