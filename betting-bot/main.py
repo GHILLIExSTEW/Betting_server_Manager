@@ -42,7 +42,7 @@ if not BOT_TOKEN:
     sys.exit("Missing DISCORD_TOKEN")
 
 # --- Bot Definition ---
-class BettingBot(commands.AutoShardedBot):
+class BettingBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
@@ -108,12 +108,10 @@ class BettingBot(commands.AutoShardedBot):
             if hasattr(self.data_sync_service, 'start'): await self.data_sync_service.start()
             logger.info("Services started.")
 
-            # Clear and Sync Commands (Test Guild Only)
+            # Sync Commands (Test Guild Only)
             if TEST_GUILD_ID:
                 try:
                     guild_obj = discord.Object(id=TEST_GUILD_ID)
-                    self.tree.clear_commands(guild=None)  # Clear global commands
-                    self.tree.clear_commands(guild=guild_obj)  # Clear guild commands
                     await self.tree.sync(guild=guild_obj)
                     logger.info(f"Commands synced to test guild {TEST_GUILD_ID}")
                 except Exception as e:
@@ -138,14 +136,7 @@ class BettingBot(commands.AutoShardedBot):
     async def on_guild_join(self, guild: discord.Guild):
         """Called when the bot joins a new guild."""
         logger.info(f"Joined new guild: {guild.name} ({guild.id})")
-        if TEST_GUILD_ID and guild.id == TEST_GUILD_ID:
-            try:
-                guild_obj = discord.Object(id=TEST_GUILD_ID)
-                self.tree.clear_commands(guild=guild_obj)  # Clear guild commands
-                await self.tree.sync(guild=guild_obj)
-                logger.info(f"Synced commands for test guild {guild.name}")
-            except Exception as e:
-                logger.error(f"Error syncing commands for test guild {guild.name}: {e}")
+        # Commands are already synced in setup_hook, no need to sync again
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         """Pass raw reaction events to BetService."""
