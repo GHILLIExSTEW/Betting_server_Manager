@@ -44,14 +44,20 @@ class BetSlipGenerator:
 
     def _get_default_emoji_font(self) -> str:
         """Get the default font path for emojis."""
-        custom_emoji_font_path = "betting-bot/static/fonts/NotoColorEmoji-Regular.ttf"
+        # Use NotoEmoji-Regular.ttf (monochrome) instead of NotoColorEmoji-Regular.ttf
+        custom_emoji_font_path = "betting-bot/static/fonts/NotoEmoji-Regular.ttf"
+        if os.path.exists(custom_emoji_font_path):
+            logger.debug(f"Using emoji font at {custom_emoji_font_path}")
+            return custom_emoji_font_path
+        # Try Segoe UI Emoji as a fallback
+        custom_emoji_font_path = "betting-bot/static/fonts/SegoeUIEmoji.ttf"
         if os.path.exists(custom_emoji_font_path):
             logger.debug(f"Using emoji font at {custom_emoji_font_path}")
             return custom_emoji_font_path
         if os.name == 'nt':  # Windows
             return 'C:\\Windows\\Fonts\\seguiemj.ttf'
         else:  # Linux/Mac (try common paths)
-            return '/usr/share/fonts/truetype/noto/NotoColorEmoji-Regular.ttf'
+            return '/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf'
 
     def _ensure_font_exists(self) -> None:
         """Ensure the regular font file exists."""
@@ -63,7 +69,9 @@ class BetSlipGenerator:
                     logger.debug(f"Falling back to regular font at {self.font_path}")
                     break
             else:
-                raise FileNotFoundError("Could not find a suitable font file. Please place 'Roboto-Regular.ttf' in betting-bot/static/fonts/")
+                raise FileNotFoundError(
+                    "Could not find a suitable font file. Please place 'Roboto-Regular.ttf' in betting-bot/static/fonts/"
+                )
 
     def _ensure_bold_font_exists(self) -> None:
         """Ensure the bold font file exists."""
@@ -75,14 +83,13 @@ class BetSlipGenerator:
         """Ensure the emoji font file exists."""
         if not os.path.exists(self.emoji_font_path):
             logger.warning(f"Emoji font file not found at {self.emoji_font_path}")
-            for font in ['seguiemj.ttf', 'NotoColorEmoji-Regular.ttf']:
+            for font in ['seguiemj.ttf', 'SegoeUIEmoji.ttf', 'NotoEmoji-Regular.ttf']:
                 if os.path.exists(font):
                     self.emoji_font_path = font
                     logger.debug(f"Falling back to emoji font at {self.emoji_font_path}")
                     break
             else:
-                logger.error("Could not find a suitable emoji font file. Emojis may not render correctly.")
-                # Fallback to regular font to avoid complete failure
+                logger.error("Could not find a suitable emoji font file. Falling back to text-based lock symbol.")
                 self.emoji_font_path = self.font_path
 
     def _ensure_team_dir_exists(self) -> None:
@@ -167,13 +174,49 @@ class BetSlipGenerator:
             image = Image.new('RGB', (width, height), (40, 40, 40))  # Dark gray background
             draw = ImageDraw.Draw(image)
 
-            # Load fonts
-            header_font = ImageFont.truetype(self.font_path, 24)
-            team_font = ImageFont.truetype(self.font_path, 18)
-            odds_font = ImageFont.truetype(self.font_path, 30)
-            small_font = ImageFont.truetype(self.font_path, 14)
-            units_font = ImageFont.truetype(self.bold_font_path, 14)  # Use bold font for units text
-            emoji_font = ImageFont.truetype(self.emoji_font_path, 14)  # Use emoji font for emoji rendering
+            # Load fonts with additional error handling
+            try:
+                header_font = ImageFont.truetype(self.font_path, 24)
+                logger.debug(f"Loaded header font: {self.font_path}")
+            except Exception as e:
+                logger.error(f"Failed to load header font {self.font_path}: {e}. Using default font.")
+                header_font = ImageFont.load_default()
+
+            try:
+                team_font = ImageFont.truetype(self.font_path, 18)
+                logger.debug(f"Loaded team font: {self.font_path}")
+            except Exception as e:
+                logger.error(f"Failed to load team font {self.font_path}: {e}. Using default font.")
+                team_font = ImageFont.load_default()
+
+            try:
+                odds_font = ImageFont.truetype(self.font_path, 30)
+                logger.debug(f"Loaded odds font: {self.font_path}")
+            except Exception as e:
+                logger.error(f"Failed to load odds font {self.font_path}: {e}. Using default font.")
+                odds_font = ImageFont.load_default()
+
+            try:
+                small_font = ImageFont.truetype(self.font_path, 14)
+                logger.debug(f"Loaded small font: {self.font_path}")
+            except Exception as e:
+                logger.error(f"Failed to load small font {self.font_path}: {e}. Using default font.")
+                small_font = ImageFont.load_default()
+
+            try:
+                units_font = ImageFont.truetype(self.bold_font_path, 14)
+                logger.debug(f"Loaded units font: {self.bold_font_path}")
+            except Exception as e:
+                logger.error(f"Failed to load units font {self.bold_font_path}: {e}. Using default font.")
+                units_font = ImageFont.load_default()
+
+            emoji_font_path = self.emoji_font_path
+            try:
+                emoji_font = ImageFont.truetype(emoji_font_path, 14)
+                logger.debug(f"Successfully loaded emoji font for rendering: {emoji_font_path}")
+            except Exception as e:
+                logger.error(f"Failed to load emoji font {emoji_font_path}: {e}. Falling back to regular font.")
+                emoji_font = small_font
 
             # Rounded rectangle background
             padding = 10
@@ -231,14 +274,36 @@ class BetSlipGenerator:
                 lock_x_right = lock_x_left + units_width + lock_icon.width + 2 * lock_spacing
                 image.paste(lock_icon, (lock_x_right, units_y - lock_icon.height // 2), lock_icon)
                 # Adjust text position to be between locks
-                draw.text((lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y), units_text, fill=(255, 215, 0), font=units_font, anchor='mm')
+                draw.text(
+                    (lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y),
+                    units_text,
+                    fill=(255, 215, 0),
+                    font=units_font,
+                    anchor='mm'
+                )
             else:
                 # Fallback to emoji, using the emoji font
                 try:
-                    draw.text((width // 2, units_y), f"🔒 {units_text} 🔒", fill=(255, 215, 0), font=emoji_font, anchor='mm')
+                    draw.text(
+                        (width // 2, units_y),
+                        f"🔒 {units_text} 🔒",
+                        fill=(255, 215, 0),
+                        font=emoji_font,
+                        anchor='mm'
+                    )
                 except Exception as e:
-                    logger.error(f"Failed to render emoji with emoji font: {str(e)}. Falling back to units text only.")
-                    draw.text((width // 2, units_y), units_text, fill=(255, 215, 0), font=units_font, anchor='mm')
+                    logger.error(
+                        f"Failed to render emoji with emoji font: {str(e)}. "
+                        "Falling back to text-based lock symbol."
+                    )
+                    # Fallback to text-based lock symbol
+                    draw.text(
+                        (width // 2, units_y),
+                        f"[L] {units_text} [L]",
+                        fill=(255, 215, 0),
+                        font=units_font,
+                        anchor='mm'
+                    )
 
             # Separator line before footer
             separator_y = height - 50
