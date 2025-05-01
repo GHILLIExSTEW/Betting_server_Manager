@@ -30,7 +30,6 @@ class DatabaseManager:
     def __init__(self):
         """Initializes the DatabaseManager."""
         self._pool: Optional[aiomysql.Pool] = None
-        # Store the database name from config for later use
         self.db_name = MYSQL_DB
         logger.info("MySQL DatabaseManager initialized.")
         if not all([MYSQL_HOST, MYSQL_USER, self.db_name,
@@ -55,37 +54,24 @@ class DatabaseManager:
             try:
                 self._pool = await aiomysql.create_pool(
                     host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER,
-                    password=MYSQL_PASSWORD, db=self.db_name, # Use self.db_name
+                    password=MYSQL_PASSWORD, db=self.db_name,
                     minsize=MYSQL_POOL_MIN_SIZE, maxsize=MYSQL_POOL_MAX_SIZE,
                     autocommit=True, connect_timeout=10,
                     charset='utf8mb4'
-                    # No default cursorclass specified, should default to tuple cursor
                 )
-                # Test the connection immediately
                 async with self._pool.acquire() as conn:
-                    async with conn.cursor() as cursor: # Default tuple cursor
+                    async with conn.cursor() as cursor:
                         await cursor.execute("SELECT 1")
                 logger.info(
                     "MySQL connection pool created and tested successfully."
                 )
-                await self.initialize_db() # Initialize schema after pool creation
+                await self.initialize_db()
             except aiomysql.OperationalError as op_err:
-                logger.critical(
-                    f"FATAL: OperationalError connecting to MySQL: {op_err}",
-                    exc_info=True
-                )
-                self._pool = None
-                raise ConnectionError(
-                    f"Failed to connect to MySQL (OperationalError): {op_err}"
-                ) from op_err
+                logger.critical(f"FATAL: OpError connecting to MySQL: {op_err}", exc_info=True)
+                self._pool = None; raise ConnectionError(f"Failed to connect (OperationalError): {op_err}") from op_err
             except Exception as e:
-                logger.critical(
-                    f"FATAL: Failed to connect to MySQL: {e}", exc_info=True
-                )
-                self._pool = None
-                raise ConnectionError(
-                    f"Failed to connect to MySQL: {e}"
-                ) from e
+                logger.critical(f"FATAL: Failed to connect to MySQL: {e}", exc_info=True)
+                self._pool = None; raise ConnectionError(f"Failed to connect: {e}") from e
         return self._pool
 
     async def close(self):
@@ -101,17 +87,13 @@ class DatabaseManager:
                 logger.error(f"Error closing MySQL pool: {e}")
 
     async def execute(self, query: str, *args) -> Optional[int]:
-        """
-        Execute a query (INSERT, UPDATE, DELETE).
-        Returns lastrowid for INSERT or rowcount for UPDATE/DELETE.
-        Uses default cursor (returns tuples).
-        """
+        """Execute INSERT, UPDATE, DELETE. Returns lastrowid or rowcount."""
         if not self._pool: await self.connect()
         if not self._pool: logger.error("Cannot execute: DB pool unavailable."); raise ConnectionError("DB pool unavailable.")
         logger.debug(f"Executing DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor() as cursor: # Default tuple cursor
+                async with conn.cursor() as cursor:
                     rowcount = await cursor.execute(query, args)
                     is_insert = query.strip().upper().startswith("INSERT")
                     return cursor.lastrowid if is_insert else rowcount
@@ -120,13 +102,12 @@ class DatabaseManager:
             return None
 
     async def fetch_one(self, query: str, *args) -> Optional[Dict[str, Any]]:
-        """Execute a query and return a single row as a dictionary."""
+        """Fetch one row as a dictionary."""
         if not self._pool: await self.connect()
         if not self._pool: logger.error("Cannot fetch_one: DB pool unavailable."); raise ConnectionError("DB pool unavailable.")
         logger.debug(f"Fetching One DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                # Explicitly request DictCursor here
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
                     await cursor.execute(query, args)
                     return await cursor.fetchone()
@@ -135,13 +116,12 @@ class DatabaseManager:
             return None
 
     async def fetch_all(self, query: str, *args) -> List[Dict[str, Any]]:
-        """Execute a query and return all rows as a list of dictionaries."""
+        """Fetch all rows as a list of dictionaries."""
         if not self._pool: await self.connect()
         if not self._pool: logger.error("Cannot fetch_all: DB pool unavailable."); raise ConnectionError("DB pool unavailable.")
         logger.debug(f"Fetching All DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                 # Explicitly request DictCursor here
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
                     await cursor.execute(query, args)
                     return await cursor.fetchall()
@@ -150,26 +130,22 @@ class DatabaseManager:
             return []
 
     async def fetchval(self, query: str, *args) -> Optional[Any]:
-        """Execute a query and return a single value from the first row."""
+        """Fetch a single value from the first row."""
         if not self._pool: await self.connect()
         if not self._pool: logger.error("Cannot fetchval: DB pool unavailable."); raise ConnectionError("DB pool unavailable.")
         logger.debug(f"Fetching Value DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                # FIX: Explicitly request the default tuple cursor
                 async with conn.cursor(aiomysql.Cursor) as cursor:
                     await cursor.execute(query, args)
                     row = await cursor.fetchone()
-                    # Access first element of tuple
                     return row[0] if row else None
         except Exception as e:
             logger.error(f"Error fetching value: {query} Args: {args}. Error: {e}", exc_info=True)
-            # Return None on error, let caller handle it
             return None
 
     async def table_exists(self, conn, table_name: str) -> bool:
         """Check if a table exists in the database."""
-        # FIX: Explicitly request the default tuple cursor
         async with conn.cursor(aiomysql.Cursor) as cursor:
             try:
                 await cursor.execute(
@@ -178,13 +154,25 @@ class DatabaseManager:
                     (self.db_name, table_name)
                 )
                 result = await cursor.fetchone()
-                # Access first element of tuple
                 return result[0] > 0 if result else False
             except Exception as e:
                 logger.error(f"Error checking if table '{table_name}' exists: {e}", exc_info=True)
-                # Reraise or return False? Returning False might mask DB issues.
-                # Let's re-raise to make the problem visible during init.
-                raise
+                raise # Re-raise to indicate failure during init
+
+    # --- Helper to check/add columns ---
+    async def _check_and_add_column(self, cursor, table_name, column_name, column_definition):
+        """Checks if a column exists and adds it if not."""
+        # Use DictCursor for SHOW COLUMNS
+        async with cursor.connection.cursor(aiomysql.DictCursor) as dict_cursor:
+            await dict_cursor.execute(f"SHOW COLUMNS FROM `{table_name}` LIKE %s", (column_name,))
+            exists = await dict_cursor.fetchone()
+        if not exists:
+            logger.info(f"Adding column '{column_name}' to table '{table_name}'...")
+            await cursor.execute(f"ALTER TABLE `{table_name}` ADD COLUMN {column_definition}")
+            logger.info(f"Successfully added column '{column_name}'.")
+        else:
+            logger.debug(f"Column '{column_name}' already exists in '{table_name}'.")
+
 
     async def initialize_db(self):
         """Initializes the database schema."""
@@ -193,21 +181,19 @@ class DatabaseManager:
             return
         try:
             async with self._pool.acquire() as conn:
-                # FIX: Explicitly request default tuple cursor for schema mods
-                async with conn.cursor(aiomysql.Cursor) as cursor:
+                async with conn.cursor(aiomysql.Cursor) as cursor: # Use default cursor for schema mods
                     logger.info("Attempting to initialize/verify database schema...")
 
-                    # --- Schema Definitions (Remain the same) ---
                     # --- USERS Table ---
                     if not await self.table_exists(conn, 'users'):
                         await cursor.execute('''
                             CREATE TABLE users (
                                 user_id BIGINT PRIMARY KEY COMMENT 'Discord User ID',
                                 username VARCHAR(100) NULL COMMENT 'Last known Discord username',
-                                balance DECIMAL(15, 2) DEFAULT 1000.00 NOT NULL COMMENT 'Available betting units',
-                                frozen_balance DECIMAL(15, 2) DEFAULT 0.00 NOT NULL COMMENT 'Units tied up in pending bets (if implemented)',
-                                join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'When user was first added',
-                                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last interaction time'
+                                balance DECIMAL(15, 2) DEFAULT 1000.00 NOT NULL,
+                                frozen_balance DECIMAL(15, 2) DEFAULT 0.00 NOT NULL,
+                                join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         logger.info("Table 'users' created.")
@@ -218,51 +204,56 @@ class DatabaseManager:
                         await cursor.execute('''
                             CREATE TABLE games (
                                 id BIGINT PRIMARY KEY COMMENT 'API Fixture ID',
-                                sport VARCHAR(50) NOT NULL COMMENT 'Sport key (e.g., soccer, basketball)',
-                                league_id BIGINT NULL COMMENT 'API League ID',
-                                league_name VARCHAR(150) NULL,
-                                home_team_id BIGINT NULL COMMENT 'API Team ID',
-                                away_team_id BIGINT NULL COMMENT 'API Team ID',
-                                home_team_name VARCHAR(150) NULL,
-                                away_team_name VARCHAR(150) NULL,
-                                home_team_logo VARCHAR(255) NULL,
-                                away_team_logo VARCHAR(255) NULL,
+                                sport VARCHAR(50) NOT NULL,
+                                league_id BIGINT NULL, league_name VARCHAR(150) NULL,
+                                home_team_id BIGINT NULL, away_team_id BIGINT NULL,
+                                home_team_name VARCHAR(150) NULL, away_team_name VARCHAR(150) NULL,
+                                home_team_logo VARCHAR(255) NULL, away_team_logo VARCHAR(255) NULL,
                                 start_time TIMESTAMP NULL COMMENT 'Game start time in UTC',
                                 end_time TIMESTAMP NULL COMMENT 'Game end time in UTC (if known)',
-                                status VARCHAR(20) NULL COMMENT 'Game status (e.g., TBD, NS, LIVE, FT, CANC)',
-                                score JSON NULL COMMENT 'JSON storing scores (e.g., {"home": 1, "away": 0})',
-                                venue VARCHAR(150) NULL,
-                                referee VARCHAR(100) NULL,
+                                status VARCHAR(20) NULL COMMENT 'Game status (e.g., NS, LIVE, FT)',
+                                score JSON NULL COMMENT 'JSON storing scores',
+                                venue VARCHAR(150) NULL, referee VARCHAR(100) NULL,
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
+                        # Add indexes after table creation
                         await cursor.execute('CREATE INDEX idx_games_league_status_time ON games (league_id, status, start_time)')
                         await cursor.execute('CREATE INDEX idx_games_start_time ON games (start_time)')
                         await cursor.execute('CREATE INDEX idx_games_status ON games (status)')
                         logger.info("Table 'games' created.")
-                    else: logger.info("Table 'games' already exists.")
+                    else:
+                        logger.info("Table 'games' already exists.")
+                        # Check and add potentially missing columns to existing games table
+                        await self._check_and_add_column(cursor, 'games', 'sport', "VARCHAR(50) NOT NULL COMMENT 'Sport key' AFTER id")
+                        await self._check_and_add_column(cursor, 'games', 'league_name', "VARCHAR(150) NULL AFTER league_id")
+                        await self._check_and_add_column(cursor, 'games', 'home_team_name', "VARCHAR(150) NULL AFTER away_team_id")
+                        await self._check_and_add_column(cursor, 'games', 'away_team_name', "VARCHAR(150) NULL AFTER home_team_name")
+                        await self._check_and_add_column(cursor, 'games', 'home_team_logo', "VARCHAR(255) NULL AFTER away_team_name")
+                        await self._check_and_add_column(cursor, 'games', 'away_team_logo', "VARCHAR(255) NULL AFTER home_team_logo")
+                        await self._check_and_add_column(cursor, 'games', 'end_time', "TIMESTAMP NULL COMMENT 'Game end time' AFTER start_time")
+                        await self._check_and_add_column(cursor, 'games', 'status', "VARCHAR(20) NULL COMMENT 'Game status' AFTER end_time")
+                        await self._check_and_add_column(cursor, 'games', 'score', "JSON NULL COMMENT 'JSON scores' AFTER status")
+                        await self._check_and_add_column(cursor, 'games', 'venue', "VARCHAR(150) NULL AFTER score")
+                        await self._check_and_add_column(cursor, 'games', 'referee', "VARCHAR(100) NULL AFTER venue")
+                        # Note: Checking/adding indexes to existing tables is more complex, often skipped or done manually.
 
                     # --- BETS Table ---
                     if not await self.table_exists(conn, 'bets'):
                         await cursor.execute('''
                             CREATE TABLE bets (
                                 bet_serial INT AUTO_INCREMENT PRIMARY KEY,
-                                guild_id BIGINT NOT NULL COMMENT 'Discord Guild ID',
-                                user_id BIGINT NOT NULL COMMENT 'Discord User ID of better',
-                                game_id BIGINT NULL COMMENT 'FK to games.id (API Fixture ID)',
-                                bet_type VARCHAR(50) NOT NULL COMMENT 'e.g., moneyline, spread, total',
-                                team_name VARCHAR(255) NOT NULL COMMENT 'Team/Selection description',
-                                stake DECIMAL(15, 2) NOT NULL COMMENT 'Units risked',
-                                odds DECIMAL(10, 2) NOT NULL COMMENT 'American odds',
-                                channel_id BIGINT NOT NULL COMMENT 'Discord Channel ID where bet was placed/posted',
-                                message_id BIGINT NULL COMMENT 'Discord Message ID of the posted bet',
+                                guild_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                                game_id BIGINT NULL COMMENT 'FK to games.id',
+                                bet_type VARCHAR(50) NOT NULL, team_name VARCHAR(255) NOT NULL,
+                                stake DECIMAL(15, 2) NOT NULL, odds DECIMAL(10, 2) NOT NULL,
+                                channel_id BIGINT NOT NULL, message_id BIGINT NULL,
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                status VARCHAR(20) DEFAULT 'pending' NOT NULL COMMENT 'pending, won, lost, push, canceled, expired',
+                                status VARCHAR(20) DEFAULT 'pending' NOT NULL,
                                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                                expiration_time TIMESTAMP NULL COMMENT 'Optional: Time when pending bet should auto-expire',
-                                result_value DECIMAL(15, 2) NULL COMMENT 'Net units won/lost (+/-)',
-                                result_description TEXT NULL COMMENT 'Optional description of result (e.g., who resolved)',
+                                expiration_time TIMESTAMP NULL,
+                                result_value DECIMAL(15, 2) NULL, result_description TEXT NULL,
                                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
                                 FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE SET NULL
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -273,7 +264,20 @@ class DatabaseManager:
                         await cursor.execute('CREATE INDEX idx_bets_status ON bets(status)')
                         await cursor.execute('CREATE INDEX idx_bets_created_at ON bets(created_at)')
                         logger.info("Table 'bets' created.")
-                    else: logger.info("Table 'bets' already exists.")
+                    else:
+                        logger.info("Table 'bets' already exists.")
+                        # Check and potentially alter bets.game_id type if needed
+                        # This requires careful handling of FK constraints (drop, alter, add back)
+                        # Example check (using DictCursor):
+                        async with conn.cursor(aiomysql.DictCursor) as dict_cursor:
+                            await dict_cursor.execute("SHOW COLUMNS FROM bets LIKE 'game_id'")
+                            col_info = await dict_cursor.fetchone()
+                            if col_info and 'bigint' not in col_info.get('Type', '').lower():
+                                logger.warning("Column 'bets.game_id' is not BIGINT. Manual alteration might be needed (requires dropping/re-adding FK).")
+                                # Manual SQL would be like:
+                                # ALTER TABLE bets DROP FOREIGN KEY <fk_name>;
+                                # ALTER TABLE bets MODIFY COLUMN game_id BIGINT NULL COMMENT 'FK to games.id';
+                                # ALTER TABLE bets ADD CONSTRAINT <fk_name> FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE SET NULL;
 
 
                     # --- UNIT_RECORDS Table ---
@@ -282,14 +286,13 @@ class DatabaseManager:
                             CREATE TABLE unit_records (
                                 record_id INT AUTO_INCREMENT PRIMARY KEY,
                                 bet_serial INT NOT NULL COMMENT 'FK to bets.bet_serial',
-                                guild_id BIGINT NOT NULL,
-                                user_id BIGINT NOT NULL,
-                                year INT NOT NULL COMMENT 'Year the bet resolved',
-                                month INT NOT NULL COMMENT 'Month the bet resolved (1-12)',
-                                units DECIMAL(15, 2) NOT NULL COMMENT 'Units staked on the original bet',
-                                odds DECIMAL(10, 2) NOT NULL COMMENT 'Odds of the original bet',
-                                result_value DECIMAL(15, 2) NOT NULL COMMENT 'Net units won/lost from the bet',
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Timestamp when record was created (bet resolved)',
+                                guild_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                                year INT NOT NULL COMMENT 'Year bet resolved',
+                                month INT NOT NULL COMMENT 'Month bet resolved (1-12)',
+                                units DECIMAL(15, 2) NOT NULL COMMENT 'Original stake',
+                                odds DECIMAL(10, 2) NOT NULL COMMENT 'Original odds',
+                                result_value DECIMAL(15, 2) NOT NULL COMMENT 'Net units won/lost',
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Timestamp bet resolved',
                                 FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE,
                                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -301,17 +304,8 @@ class DatabaseManager:
                         logger.info("Table 'unit_records' created.")
                     else:
                         logger.info("Table 'unit_records' already exists.")
-                        # Check and add columns if they don't exist
-                        # Need DictCursor to check column existence easily by name
-                        async with conn.cursor(aiomysql.DictCursor) as dict_cursor:
-                            await dict_cursor.execute("SHOW COLUMNS FROM unit_records LIKE 'year'")
-                            if not await dict_cursor.fetchone():
-                                await cursor.execute("ALTER TABLE unit_records ADD COLUMN year INT NOT NULL COMMENT 'Year the bet resolved' AFTER user_id")
-                                logger.info("Added 'year' column to 'unit_records'.")
-                            await dict_cursor.execute("SHOW COLUMNS FROM unit_records LIKE 'month'")
-                            if not await dict_cursor.fetchone():
-                                await cursor.execute("ALTER TABLE unit_records ADD COLUMN month INT NOT NULL COMMENT 'Month the bet resolved (1-12)' AFTER year")
-                                logger.info("Added 'month' column to 'unit_records'.")
+                        await self._check_and_add_column(cursor, 'unit_records', 'year', "INT NOT NULL COMMENT 'Year bet resolved' AFTER user_id")
+                        await self._check_and_add_column(cursor, 'unit_records', 'month', "INT NOT NULL COMMENT 'Month bet resolved (1-12)' AFTER year")
 
 
                     # --- GUILD_SETTINGS Table ---
@@ -319,19 +313,13 @@ class DatabaseManager:
                         await cursor.execute('''
                             CREATE TABLE guild_settings (
                                 guild_id BIGINT PRIMARY KEY,
-                                is_active BOOLEAN DEFAULT TRUE,
-                                subscription_level INTEGER DEFAULT 0,
-                                is_paid BOOLEAN DEFAULT FALSE,
-                                embed_channel_1 BIGINT NULL,
-                                command_channel_1 BIGINT NULL,
-                                admin_channel_1 BIGINT NULL,
-                                admin_role BIGINT NULL,
-                                authorized_role BIGINT NULL COMMENT 'Role ID for authorized cappers',
-                                voice_channel_id BIGINT NULL COMMENT 'Monthly stats voice channel ID',
-                                yearly_channel_id BIGINT NULL COMMENT 'Yearly stats voice channel ID',
-                                total_units_channel_id BIGINT NULL COMMENT 'Optional: Lifetime units channel ID',
-                                min_units DECIMAL(15, 2) DEFAULT 0.1,
-                                max_units DECIMAL(15, 2) DEFAULT 10.0,
+                                is_active BOOLEAN DEFAULT TRUE, subscription_level INTEGER DEFAULT 0,
+                                is_paid BOOLEAN DEFAULT FALSE, embed_channel_1 BIGINT NULL,
+                                command_channel_1 BIGINT NULL, admin_channel_1 BIGINT NULL,
+                                admin_role BIGINT NULL, authorized_role BIGINT NULL,
+                                voice_channel_id BIGINT NULL, yearly_channel_id BIGINT NULL,
+                                total_units_channel_id BIGINT NULL,
+                                min_units DECIMAL(15, 2) DEFAULT 0.1, max_units DECIMAL(15, 2) DEFAULT 10.0,
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -343,13 +331,10 @@ class DatabaseManager:
                     if not await self.table_exists(conn, 'cappers'):
                         await cursor.execute('''
                             CREATE TABLE cappers (
-                                guild_id BIGINT NOT NULL,
-                                user_id BIGINT NOT NULL,
-                                display_name VARCHAR(100) NULL,
-                                image_path VARCHAR(255) NULL,
+                                guild_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                                display_name VARCHAR(100) NULL, image_path VARCHAR(255) NULL,
                                 banner_color VARCHAR(7) NULL DEFAULT '#0096FF',
-                                bet_won INTEGER DEFAULT 0 NOT NULL,
-                                bet_loss INTEGER DEFAULT 0 NOT NULL,
+                                bet_won INTEGER DEFAULT 0 NOT NULL, bet_loss INTEGER DEFAULT 0 NOT NULL,
                                 bet_push INTEGER DEFAULT 0 NOT NULL,
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -360,27 +345,17 @@ class DatabaseManager:
                         logger.info("Table 'cappers' created.")
                     else:
                         logger.info("Table 'cappers' already exists.")
-                        # Need DictCursor to check column existence easily by name
-                        async with conn.cursor(aiomysql.DictCursor) as dict_cursor:
-                            await dict_cursor.execute("SHOW COLUMNS FROM cappers LIKE 'bet_push'")
-                            if not await dict_cursor.fetchone():
-                                await cursor.execute("ALTER TABLE cappers ADD COLUMN bet_push INTEGER DEFAULT 0 NOT NULL COMMENT 'Count of pushed bets' AFTER bet_loss")
-                                logger.info("Added 'bet_push' column to 'cappers'.")
+                        await self._check_and_add_column(cursor, 'cappers', 'bet_push', "INTEGER DEFAULT 0 NOT NULL COMMENT 'Count of pushed bets' AFTER bet_loss")
 
 
                     # --- LEAGUES Table ---
                     if not await self.table_exists(conn, 'leagues'):
                         await cursor.execute('''
                             CREATE TABLE leagues (
-                                id BIGINT PRIMARY KEY COMMENT 'API League ID',
-                                name VARCHAR(150) NULL,
-                                sport VARCHAR(50) NOT NULL,
-                                type VARCHAR(50) NULL,
-                                logo VARCHAR(255) NULL,
-                                country VARCHAR(100) NULL,
-                                country_code CHAR(3) NULL,
-                                country_flag VARCHAR(255) NULL,
-                                season INTEGER NULL COMMENT 'Typically the starting year of the season'
+                                id BIGINT PRIMARY KEY COMMENT 'API League ID', name VARCHAR(150) NULL,
+                                sport VARCHAR(50) NOT NULL, type VARCHAR(50) NULL, logo VARCHAR(255) NULL,
+                                country VARCHAR(100) NULL, country_code CHAR(3) NULL,
+                                country_flag VARCHAR(255) NULL, season INTEGER NULL
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         await cursor.execute('CREATE INDEX idx_leagues_sport_country ON leagues (sport, country)')
@@ -391,21 +366,12 @@ class DatabaseManager:
                     if not await self.table_exists(conn, 'teams'):
                         await cursor.execute('''
                             CREATE TABLE teams (
-                                id BIGINT PRIMARY KEY COMMENT 'API Team ID',
-                                name VARCHAR(150) NULL,
-                                sport VARCHAR(50) NOT NULL,
-                                code VARCHAR(10) NULL COMMENT 'Short code (e.g., LAL)',
-                                country VARCHAR(100) NULL,
-                                founded INTEGER NULL,
-                                national BOOLEAN DEFAULT FALSE,
-                                logo VARCHAR(255) NULL,
-                                venue_id BIGINT NULL COMMENT 'API Venue ID',
-                                venue_name VARCHAR(150) NULL,
-                                venue_address VARCHAR(255) NULL,
-                                venue_city VARCHAR(100) NULL,
-                                venue_capacity INTEGER NULL,
-                                venue_surface VARCHAR(50) NULL,
-                                venue_image VARCHAR(255) NULL
+                                id BIGINT PRIMARY KEY COMMENT 'API Team ID', name VARCHAR(150) NULL,
+                                sport VARCHAR(50) NOT NULL, code VARCHAR(10) NULL, country VARCHAR(100) NULL,
+                                founded INTEGER NULL, national BOOLEAN DEFAULT FALSE, logo VARCHAR(255) NULL,
+                                venue_id BIGINT NULL, venue_name VARCHAR(150) NULL, venue_address VARCHAR(255) NULL,
+                                venue_city VARCHAR(100) NULL, venue_capacity INTEGER NULL,
+                                venue_surface VARCHAR(50) NULL, venue_image VARCHAR(255) NULL
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         await cursor.execute('CREATE INDEX idx_teams_sport_country ON teams (sport, country)')
@@ -417,38 +383,26 @@ class DatabaseManager:
                     if not await self.table_exists(conn, 'standings'):
                         await cursor.execute('''
                             CREATE TABLE standings (
-                                league_id BIGINT NOT NULL COMMENT 'API League ID',
-                                team_id BIGINT NOT NULL COMMENT 'API Team ID',
-                                season INT NOT NULL COMMENT 'Season year',
-                                sport VARCHAR(50) NOT NULL,
-                                `rank` INTEGER NULL COMMENT 'Team rank in group/league',
-                                points INTEGER NULL,
-                                goals_diff INTEGER NULL,
-                                form VARCHAR(20) NULL COMMENT 'e.g., WWLDW',
-                                status VARCHAR(50) NULL COMMENT 'e.g., same',
-                                description VARCHAR(100) NULL COMMENT 'Promotion/relegation zone etc.',
-                                group_name VARCHAR(100) NULL COMMENT 'League group/conference name',
-                                played INTEGER DEFAULT 0,
-                                won INTEGER DEFAULT 0,
-                                draw INTEGER DEFAULT 0,
-                                lost INTEGER DEFAULT 0,
-                                goals_for INTEGER DEFAULT 0,
-                                goals_against INTEGER DEFAULT 0,
+                                league_id BIGINT NOT NULL, team_id BIGINT NOT NULL, season INT NOT NULL,
+                                sport VARCHAR(50) NOT NULL, `rank` INTEGER NULL, points INTEGER NULL,
+                                goals_diff INTEGER NULL, form VARCHAR(20) NULL, status VARCHAR(50) NULL,
+                                description VARCHAR(100) NULL, group_name VARCHAR(100) NULL,
+                                played INTEGER DEFAULT 0, won INTEGER DEFAULT 0, draw INTEGER DEFAULT 0, lost INTEGER DEFAULT 0,
+                                goals_for INTEGER DEFAULT 0, goals_against INTEGER DEFAULT 0,
                                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                                PRIMARY KEY (league_id, team_id, season) COMMENT 'Composite primary key'
+                                PRIMARY KEY (league_id, team_id, season)
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         await cursor.execute('CREATE INDEX idx_standings_league_season_rank ON standings (league_id, season, `rank`)')
                         logger.info("Table 'standings' created.")
                     else:
                         logger.info("Table 'standings' already exists.")
-                        # Need DictCursor to check column existence easily by name
+                        # Check/add season column and modify PK if needed
                         async with conn.cursor(aiomysql.DictCursor) as dict_cursor:
                             await dict_cursor.execute("SHOW COLUMNS FROM standings LIKE 'season'")
                             if not await dict_cursor.fetchone():
                                 logger.warning("Attempting to add 'season' column and modify PK for 'standings'. BACKUP RECOMMENDED.")
                                 try:
-                                    # Use default cursor for ALTER statements
                                     await cursor.execute("ALTER TABLE standings DROP PRIMARY KEY")
                                     await cursor.execute("ALTER TABLE standings ADD COLUMN season INT NOT NULL COMMENT 'Season year' AFTER team_id")
                                     await cursor.execute("ALTER TABLE standings ADD PRIMARY KEY (league_id, team_id, season)")
@@ -461,12 +415,9 @@ class DatabaseManager:
                     if not await self.table_exists(conn, 'game_events'):
                         await cursor.execute('''
                             CREATE TABLE game_events (
-                                event_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                                game_id BIGINT NOT NULL COMMENT 'FK to games.id',
-                                guild_id BIGINT NULL COMMENT 'Optional: Guild context if event is guild-specific',
-                                event_type VARCHAR(50) NOT NULL COMMENT 'e.g., game_start, score_change, game_end',
-                                details TEXT NULL COMMENT 'JSON or text details about the event',
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                event_id BIGINT AUTO_INCREMENT PRIMARY KEY, game_id BIGINT NOT NULL,
+                                guild_id BIGINT NULL, event_type VARCHAR(50) NOT NULL,
+                                details TEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                                 FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
