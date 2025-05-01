@@ -273,10 +273,15 @@ class BetWorkflowView(View):
         self.is_processing = False  # Prevent double advancement
 
     async def start_flow(self):
-        self.message = await self.original_interaction.followup.send(
-            "Starting bet placement...", view=self, ephemeral=True
-        )
-        await self.go_next(self.original_interaction)
+        logger.debug("Starting bet workflow")
+        try:
+            self.message = await self.original_interaction.followup.send(
+                "Starting bet placement...", view=self, ephemeral=True
+            )
+            await self.go_next(self.original_interaction)
+        except discord.HTTPException as e:
+            logger.error(f"Failed to send initial message: {e}")
+            await self.original_interaction.followup.send("❌ Failed to start bet workflow. Please try again.", ephemeral=True)
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         if interaction.user.id != self.original_interaction.user.id:
@@ -285,6 +290,7 @@ class BetWorkflowView(View):
         return True
 
     async def edit_message(self, interaction: Optional[Interaction] = None, content: Optional[str] = None, view: Optional[View] = None, embed: Optional[discord.Embed] = None):
+        logger.debug(f"Editing message: content={content}, view={view is not None}, embed={embed is not None}")
         target_message = self.message
         try:
             if target_message:
@@ -298,8 +304,12 @@ class BetWorkflowView(View):
                 await self.original_interaction.edit_original_response(content=content, embed=embed, view=view)
         except (discord.NotFound, discord.HTTPException) as e:
             logger.warning(f"Failed to edit BetWorkflowView message: {e}")
+            if interaction:
+                await interaction.followup.send("❌ Failed to update bet workflow. Please try again.", ephemeral=True)
         except Exception as e:
             logger.exception(f"Unexpected error editing BetWorkflowView message: {e}")
+            if interaction:
+                await interaction.followup.send("❌ An unexpected error occurred. Please try again.", ephemeral=True)
 
     async def go_next(self, interaction: Interaction):
         if self.is_processing:
@@ -307,6 +317,7 @@ class BetWorkflowView(View):
             return
         self.is_processing = True
         try:
+            logger.debug(f"Processing go_next: current_step={self.current_step}, interaction_done={interaction.response.is_done()}")
             self.clear_items()
             self.current_step += 1
             step_content = f"**Step {self.current_step}**"
@@ -347,13 +358,12 @@ class BetWorkflowView(View):
                     else:
                         logger.warning(f"No upcoming games found for league {league}. Proceeding to manual entry.")
                         self.bet_details['game_id'] = "Other"
-                        # Do not call go_next; let current execution advance to step 5
                 elif self.current_step == 5:
                     line_type = self.bet_details.get('line_type')
                     game_id = self.bet_details.get('game_id')
                     is_manual = game_id == "Other"
 
-                    logger.debug(f"Step 5: line_type={line_type}, is_manual={is_manual}, game_id={game_id}")
+                    logger.debug(f"Step 5: line_type={line_type}, is_manual={is_manual}, game_id={game_id}, interaction_done={interaction.response.is_done()}")
 
                     if line_type == "player_prop" and not is_manual and hasattr(self.bot, 'game_service'):
                         players_data = await self.bot.game_service.get_game_players(game_id)
@@ -372,10 +382,15 @@ class BetWorkflowView(View):
                             modal.view = self
                             logger.debug(f"Sending BetDetailsModal for player_prop, is_manual=False")
                             try:
+                                if interaction.response.is_done():
+                                    logger.warning("Interaction response already used; cannot send modal")
+                                    await interaction.followup.send("❌ Please restart the bet workflow to enter details.", ephemeral=True)
+                                    self.stop()
+                                    return
                                 await interaction.response.send_modal(modal)
                             except discord.HTTPException as e:
                                 logger.error(f"Failed to send BetDetailsModal: {e}")
-                                await self.edit_message(interaction, content="❌ Failed to send bet details modal. Please try again.", view=None)
+                                await interaction.followup.send("❌ Failed to send bet details modal. Please try again.", ephemeral=True)
                                 self.stop()
                             return
                     else:
@@ -383,10 +398,15 @@ class BetWorkflowView(View):
                         modal.view = self
                         logger.debug(f"Sending BetDetailsModal for line_type={line_type}, is_manual={is_manual}")
                         try:
+                            if interaction.response.is_done():
+                                logger.warning("Interaction response already used; cannot send modal")
+                                await interaction.followup.send("❌ Please restart the bet workflow to enter details.", ephemeral=True)
+                                self.stop()
+                                return
                             await interaction.response.send_modal(modal)
                         except discord.HTTPException as e:
                             logger.error(f"Failed to send BetDetailsModal: {e}")
-                            await self.edit_message(interaction, content="❌ Failed to send bet details modal. Please try again.", view=None)
+                            await interaction.followup.send("❌ Failed to send bet details modal. Please try again.", ephemeral=True)
                             self.stop()
                         return
                 elif self.current_step == 6:
@@ -470,6 +490,7 @@ class BetWorkflowView(View):
                     self.stop()
                     return
 
+                logger.debug(f"Updating message for step {self.current_step}")
                 await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
 
             except Exception as e:
