@@ -138,7 +138,7 @@ class DatabaseManager:
         logger.debug(f"Fetching Value DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor() as cursor:
+                async with conn.cursor() as cursor:  # Use standard cursor
                     await cursor.execute(query, args)
                     row = await cursor.fetchone()
                     return row[0] if row else None
@@ -187,6 +187,21 @@ class DatabaseManager:
                         logger.info("Table 'users' created.")
                     else:
                         logger.info("Table 'users' already exists.")
+                        # Check and add missing columns
+                        await cursor.execute("SHOW COLUMNS FROM users LIKE 'frozen_balance'")
+                        if not await cursor.fetchone():
+                            await cursor.execute("""
+                                ALTER TABLE users
+                                ADD COLUMN frozen_balance DECIMAL(15,2) DEFAULT 0.00 NOT NULL COMMENT 'Units tied up in pending bets' AFTER balance
+                            """)
+                            logger.info("Added 'frozen_balance' column to existing 'users' table.")
+                        await cursor.execute("SHOW COLUMNS FROM users LIKE 'last_seen'")
+                        if not await cursor.fetchone():
+                            await cursor.execute("""
+                                ALTER TABLE users
+                                ADD COLUMN last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last interaction time'
+                            """)
+                            logger.info("Added 'last_seen' column to existing 'users' table.")
 
                     # GUILD_SETTINGS Table
                     if not await self.table_exists(conn, 'guild_settings'):
