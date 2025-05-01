@@ -145,21 +145,28 @@ class ManualEntryButton(Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: Interaction):
-        logger.debug("Manual Entry button clicked")
+        """Callback for the button shown when no games are found."""
+        logger.debug("Manual Entry button clicked (from no games found)")
         self.parent_view.bet_details['game_id'] = "Other"
-        self.disabled = True
-        for item in self.parent_view.children:
-            if isinstance(item, CancelButton):
-                item.disabled = True
-        # Use followup to send feedback, preserving response for modal
+        line_type = self.parent_view.bet_details.get('line_type')
+
+        # Create the modal instance
+        modal = BetDetailsModal(line_type=line_type, is_manual=True)
+        modal.view = self.parent_view # Pass view reference for the modal's on_submit
+
+        # Send the modal as the *first and only* response to this interaction.
         try:
-            await interaction.followup.send("Proceeding to manual entry...", ephemeral=True)
-            await interaction.response.defer()  # Preserve response for modal
-            await self.parent_view.go_next(interaction)
-        except discord.HTTPException as e:
-            logger.error(f"Failed to send followup in ManualEntryButton: {e}")
-            await interaction.response.send_message("❌ Failed to proceed to manual entry. Please restart the /bet command.", ephemeral=True)
-            self.parent_view.stop()
+            await interaction.response.send_modal(modal)
+            logger.debug("Manual entry modal sent successfully.")
+            # NOTE: Do NOT add any followup.send or response.send_message here.
+            # The modal submission (on_submit) will handle the next step.
+        except Exception as e:
+            # Log if sending the modal itself fails
+            logger.exception(f"Failed to send Manual Entry modal: {e}")
+            # We cannot reliably send a message back to the user here,
+            # as the interaction response likely failed. Log is the best option.
+            # Optionally, stop the parent view if modal fails critically.
+            # self.parent_view.stop()
 
 class CancelButton(Button):
     def __init__(self, parent_view):
