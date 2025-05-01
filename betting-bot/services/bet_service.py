@@ -151,7 +151,7 @@ class BetService:
                     result_value, result_description
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            # Remove extra parentheses around args
+            # Ensure args is a flat tuple with 14 elements
             args = (
                 guild_id, user_id, db_game_id, bet_type,
                 units, odds, channel_id, message_id,
@@ -240,7 +240,7 @@ class BetService:
                     result_value, result_description
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            # Remove extra parentheses around args
+            # Ensure args is a flat tuple with 14 elements
             args = (
                 guild_id, user_id, db_game_id, bet_type,
                 units, odds, channel_id, None,
@@ -440,7 +440,7 @@ class BetService:
                 self.logger.warning(f"Reactor {payload.user_id} not found in guild {guild_id}.")
                 return
             except Exception as e:
-                self.logger.error(f"Error fetching rector member {payload.user_id}: {e}")
+                self.logger.error(f"Error fetching reactor member {payload.user_id}: {e}")
                 return
 
         is_original_user = reactor_member.id == original_user_id
