@@ -261,14 +261,25 @@ class DatabaseManager:
                     ''')
                     logger.info("Checked/created 'guild_settings' table.")
 
-                    # Create indexes
-                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_bets_user_id ON bets(user_id)')
-                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_bets_guild_id ON bets(guild_id)')
-                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_bets_created_at ON bets(created_at)')
-                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_unit_records_user_id ON unit_records(user_id)')
-                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_unit_records_guild_id ON unit_records(guild_id)')
-                    await cursor.execute('CREATE INDEX IF NOT EXISTS idx_unit_records_year_month ON unit_records(year, month)')
-                    logger.info("Checked/created indexes.")
+                    # Create indexes after all tables are created
+                    # First check if the table exists
+                    if await self.table_exists(conn, 'unit_records'):
+                        try:
+                            await cursor.execute('CREATE INDEX IF NOT EXISTS idx_unit_records_year_month ON unit_records(year, month)')
+                            logger.info("Created index on unit_records(year, month)")
+                        except Exception as e:
+                            logger.warning(f"Could not create index on unit_records: {e}")
+
+                    # Create other indexes
+                    try:
+                        await cursor.execute('CREATE INDEX IF NOT EXISTS idx_bets_user_id ON bets(user_id)')
+                        await cursor.execute('CREATE INDEX IF NOT EXISTS idx_bets_guild_id ON bets(guild_id)')
+                        await cursor.execute('CREATE INDEX IF NOT EXISTS idx_bets_created_at ON bets(created_at)')
+                        await cursor.execute('CREATE INDEX IF NOT EXISTS idx_unit_records_user_id ON unit_records(user_id)')
+                        await cursor.execute('CREATE INDEX IF NOT EXISTS idx_unit_records_guild_id ON unit_records(guild_id)')
+                        logger.info("Created all necessary indexes")
+                    except Exception as e:
+                        logger.warning(f"Could not create some indexes: {e}")
 
                     # Remove duplicate guild_settings creation
                     if not await self.table_exists(conn, 'cappers'):
