@@ -109,16 +109,11 @@ class BettingBot(commands.Bot):
             if hasattr(self.data_sync_service, 'start'): await self.data_sync_service.start()
             logger.info("Services started.")
 
-            # Clear all commands (both global and guild)
+            # Clear all commands without syncing
             try:
                 # Clear global commands
                 self.tree.clear_commands(guild=None)
                 logger.info("Cleared all global commands")
-                
-                # Clear commands for all guilds
-                for guild in self.guilds:
-                    self.tree.clear_commands(guild=guild)
-                    logger.info(f"Cleared commands for guild {guild.id}")
                 
                 # Clear test guild commands if specified
                 if TEST_GUILD_ID:
