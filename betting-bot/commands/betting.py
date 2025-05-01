@@ -151,7 +151,9 @@ class ManualEntryButton(Button):
         for item in self.parent_view.children:
             if isinstance(item, CancelButton):
                 item.disabled = True
-        await interaction.response.edit_message(content="Proceeding to manual entry...", view=self.parent_view)
+        # Use followup to avoid consuming response
+        await interaction.followup.send("Proceeding to manual entry...", ephemeral=True)
+        await interaction.response.defer()  # Preserve response for modal
         await self.parent_view.go_next(interaction)
 
 class CancelButton(Button):
@@ -258,6 +260,16 @@ class ChannelSelect(Select):
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
 
+class AddLegButton(Button):
+    def __init__(self, parent_view):
+        super().__init__(style=ButtonStyle.blurple, label="Add Leg", custom_id=f"add_leg_{parent_view.original_interaction.id}")
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: Interaction):
+        self.parent_view.current_step = 2  # Reset to league selection for new leg
+        await interaction.response.defer()
+        await self.parent_view.go_next(interaction)
+
 class ConfirmButton(Button):
     def __init__(self, parent_view):
         super().__init__(style=ButtonStyle.green, label="Confirm & Post", custom_id=f"confirm_bet_{parent_view.original_interaction.id}")
@@ -268,6 +280,20 @@ class ConfirmButton(Button):
             if isinstance(item, Button): item.disabled = True
         await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.submit_bet(interaction)
+
+class CancelButton(Button):
+    def __init__(self, parent_view):
+        super().__init__(style=ButtonStyle.red, label="Cancel", custom_id=f"cancel_{parent_view.original_interaction.id}")
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: Interaction):
+        logger.debug("Cancel button clicked")
+        self.disabled = True
+        for item in self.parent_view.children:
+            if isinstance(item, ManualEntryButton) or isinstance(item, AddLegButton):
+                item.disabled = True
+        await interaction.response.edit_message(content="Bet workflow cancelled.", view=None)
+        self.parent_view.stop()
 
 class BetWorkflowView(View):
     def __init__(self, interaction: Interaction, bot: commands.Bot):
@@ -405,7 +431,7 @@ class BetWorkflowView(View):
                             try:
                                 if interaction.response.is_done():
                                     logger.warning("Interaction response already used; cannot send modal")
-                                    await interaction.followup.send("❌ Please restart the bet workflow to enter details.", ephemeral=True)
+                                    await interaction.followup.send("❌ Please restart the /bet command to enter details.", ephemeral=True)
                                     self.stop()
                                     return
                                 await interaction.response.send_modal(modal)
@@ -421,7 +447,7 @@ class BetWorkflowView(View):
                         try:
                             if interaction.response.is_done():
                                 logger.warning("Interaction response already used; cannot send modal")
-                                await interaction.followup.send("❌ Please restart the bet workflow to enter details.", ephemeral=True)
+                                await interaction.followup.send("❌ Please restart the /bet command to enter details.", ephemeral=True)
                                 self.stop()
                                 return
                             await interaction.response.send_modal(modal)
