@@ -9,27 +9,38 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 class BetSlipGenerator:
-    def __init__(self, font_path: Optional[str] = None, assets_dir: str = "betting-bot/static/"):
+    def __init__(self, font_path: Optional[str] = None, emoji_font_path: Optional[str] = None, assets_dir: str = "betting-bot/static/"):
         self.font_path = font_path or self._get_default_font()
+        self.emoji_font_path = emoji_font_path or self._get_default_emoji_font()
         self.assets_dir = assets_dir
         self.league_team_dir = os.path.join(self.assets_dir, "logos/teams/HOCKEY/NHL")
         self._ensure_font_exists()
+        self._ensure_emoji_font_exists()
         self._ensure_team_dir_exists()
 
     def _get_default_font(self) -> str:
-        """Get the default font path."""
-        # First, try the custom font directory
+        """Get the default font path for regular text."""
         custom_font_path = "betting-bot/static/fonts/Roboto-Regular.ttf"
         if os.path.exists(custom_font_path):
             return custom_font_path
-        # Fallback to system fonts
         if os.name == 'nt':  # Windows
             return 'C:\\Windows\\Fonts\\arial.ttf'
         else:  # Linux/Mac
             return '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
 
+    def _get_default_emoji_font(self) -> str:
+        """Get the default font path for emojis."""
+        custom_emoji_font_path = "betting-bot/static/fonts/NotoEmoji-Regular.ttf"
+        if os.path.exists(custom_emoji_font_path):
+            return custom_emoji_font_path
+        # Fallback to a system emoji font
+        if os.name == 'nt':  # Windows
+            return 'C:\\Windows\\Fonts\\seguiemj.ttf'
+        else:  # Linux/Mac (try common paths)
+            return '/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf'
+
     def _ensure_font_exists(self) -> None:
-        """Ensure the font file exists."""
+        """Ensure the regular font file exists."""
         if not os.path.exists(self.font_path):
             logger.warning(f"Font file not found at {self.font_path}")
             for font in ['Arial.ttf', 'DejaVuSans.ttf', 'LiberationSans-Regular.ttf']:
@@ -38,6 +49,17 @@ class BetSlipGenerator:
                     break
             else:
                 raise FileNotFoundError("Could not find a suitable font file. Please place 'Roboto-Regular.ttf' in betting-bot/static/fonts/")
+
+    def _ensure_emoji_font_exists(self) -> None:
+        """Ensure the emoji font file exists."""
+        if not os.path.exists(self.emoji_font_path):
+            logger.warning(f"Emoji font file not found at {self.emoji_font_path}")
+            for font in ['seguiemj.ttf', 'NotoEmoji-Regular.ttf']:
+                if os.path.exists(font):
+                    self.emoji_font_path = font
+                    break
+            else:
+                raise FileNotFoundError("Could not find a suitable emoji font file. Please place 'NotoEmoji-Regular.ttf' in betting-bot/static/fonts/")
 
     def _ensure_team_dir_exists(self) -> None:
         """Ensure the team logos directory exists."""
@@ -48,12 +70,10 @@ class BetSlipGenerator:
     def _load_team_logo(self, team_name: str) -> Optional[Image.Image]:
         """Load the team logo image based on team name."""
         try:
-            # Convert team name to a filename (e.g., "Oilers" -> "oilers.png")
             logo_filename = team_name.lower().replace(" ", "_") + ".png"
             logo_path = os.path.join(self.league_team_dir, logo_filename)
             if os.path.exists(logo_path):
                 logo = Image.open(logo_path).convert("RGBA")
-                # Resize logo to a standard size (e.g., 100x100)
                 logo = logo.resize((100, 100), Image.Resampling.LANCZOS)
                 return logo
             else:
@@ -69,7 +89,6 @@ class BetSlipGenerator:
             lock_path = os.path.join(self.assets_dir, "lock_icon.png")
             if os.path.exists(lock_path):
                 lock = Image.open(lock_path).convert("RGBA")
-                # Resize lock icon to a smaller size (e.g., 20x20)
                 lock = lock.resize((20, 20), Image.Resampling.LANCZOS)
                 return lock
             else:
@@ -102,6 +121,7 @@ class BetSlipGenerator:
             team_font = ImageFont.truetype(self.font_path, 18)
             odds_font = ImageFont.truetype(self.font_path, 30)
             small_font = ImageFont.truetype(self.font_path, 14)
+            emoji_font = ImageFont.truetype(self.emoji_font_path, 14)  # Use emoji font for emoji rendering
 
             # Rounded rectangle background
             padding = 10
@@ -136,7 +156,6 @@ class BetSlipGenerator:
             line_text = f"{home_team}: {line}"
             draw.text((width // 2, details_y), line_text, fill='white', font=team_font, anchor='mm')
             odds_y = details_y + 40
-            # Fix: Format odds as a float with a sign, no decimal places
             odds_text = f"{odds:+.0f}"  # Ensure no decimal places, show sign (e.g., "-110")
             draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
             units_y = odds_y + 40
@@ -155,8 +174,8 @@ class BetSlipGenerator:
                 # Adjust text position to be between locks
                 draw.text((lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y), units_text, fill=(255, 215, 0), font=small_font, anchor='mm')
             else:
-                # Fallback to text if lock icon is unavailable
-                draw.text((width // 2, units_y), f"🔒 {units_text} 🔒", fill=(255, 215, 0), font=small_font, anchor='mm')
+                # Fallback to emoji, using the emoji font
+                draw.text((width // 2, units_y), f"🔒 {units_text} 🔒", fill=(255, 215, 0), font=emoji_font, anchor='mm')
 
             # Footer: Bet ID and Timestamp
             footer_y = height - 30
