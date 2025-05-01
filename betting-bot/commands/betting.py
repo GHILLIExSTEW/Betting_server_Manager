@@ -3,17 +3,20 @@
 """Betting command for placing bets."""
 
 import discord
-from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel
+from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel, File
 from discord.ext import commands
 from discord.ui import View, Select, Modal, TextInput, Button
 import logging
 from typing import Optional, List, Dict, Union
 from datetime import datetime, timezone
+import io
 
 try:
     from ..utils.errors import BetServiceError, ValidationError, GameNotFoundError
+    from ..utils.image_generator import BetSlipGenerator
 except ImportError:
     from utils.errors import BetServiceError, ValidationError, GameNotFoundError
+    from utils.image_generator import BetSlipGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -153,14 +156,11 @@ class ManualEntryButton(Button):
                 item.disabled = True
         line_type = self.parent_view.bet_details.get('line_type')
         try:
-            # Send the modal directly
             modal = BetDetailsModal(line_type=line_type, is_manual=True)
             modal.view = self.parent_view
             await interaction.response.send_modal(modal)
             logger.debug("Manual entry modal sent successfully")
-            # Update the existing message without consuming response
             await self.parent_view.edit_message(interaction, content="Manual entry form opened.", view=self.parent_view)
-            # Set step to 4 so on_submit advances to step 6
             self.parent_view.current_step = 4
         except discord.HTTPException as e:
             logger.error(f"Failed to send manual entry modal: {e}")
@@ -241,11 +241,9 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
             self.view.bet_details['legs'] = []
         self.view.bet_details['legs'].append(leg)
         logger.debug(f"Bet details entered: {leg}")
-        # Defer response to avoid consuming it
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
-        # Advance to step 6 (channel selection)
-        self.view.current_step = 5  # Set to 5 so go_next advances to 6
+        self.view.current_step = 5
         await self.view.go_next(interaction)
 
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
@@ -302,10 +300,12 @@ class BetWorkflowView(View):
         self.bot = bot
         self.current_step = 0
         self.bet_details = {'legs': []}
-        self.games = []  # Store games for access in GameSelect
+        self.games = []
         self.message: Optional[discord.WebhookMessage | discord.InteractionMessage] = None
-        self.is_processing = False  # Prevent double advancement
-        self.latest_interaction = interaction  # Track the latest interaction
+        self.is_processing = False
+        self.latest_interaction = interaction
+        # Initialize the BetSlipGenerator
+        self.bet_slip_generator = BetSlipGenerator()
 
     async def start_flow(self):
         logger.debug("Starting bet workflow")
@@ -322,7 +322,7 @@ class BetWorkflowView(View):
         if interaction.user.id != self.original_interaction.user.id:
             await interaction.response.send_message("You cannot interact with this bet placement.", ephemeral=True)
             return False
-        self.latest_interaction = interaction  # Update latest interaction
+        self.latest_interaction = interaction
         return True
 
     async def edit_message(self, interaction: Optional[Interaction] = None, content: Optional[str] = None, view: Optional[View] = None, embed: Optional[discord.Embed] = None):
@@ -441,9 +441,8 @@ class BetWorkflowView(View):
                                 self.stop()
                             return
                     else:
-                        # For manual entry, modal is already handled by ManualEntryButton
                         logger.debug("Skipping modal in step 5 for manual entry; advancing to step 6")
-                        self.current_step = 5  # Set to 5 so next go_next goes to 6
+                        self.current_step = 5
                         await self.go_next(interaction)
                         return
                 elif self.current_step == 6:
@@ -643,27 +642,39 @@ class BetWorkflowView(View):
                     channel_id=post_channel_id,
                     player=leg.get('player')
                 )
-            else:  # Parlay
-                bet_serial = await self.bot.bet_service.create_parlay_bet(
-                    guild_id=interaction.guild_id,
-                    user_id=interaction.user.id,
-                    legs=[
-                        {
-                            'game_id': details.get('game_id') if details.get('game_id') != 'Other' else None,
-                            'bet_type': "player_prop" if leg.get('player') else "game_line",
-                            'team_name': leg.get('team', leg.get('line')),
-                            'units': leg.get('units'),
-                            'odds': leg.get('odds'),
-                            'player': leg.get('player')
-                        } for leg in legs
-                    ],
-                    channel_id=post_channel_id
-                )
+            else:  # Parlay (not supported in this image generation example)
+                raise ValueError("Parlay bets are not supported for image generation in this example.")
 
             if post_channel and isinstance(post_channel, TextChannel):
-                final_embed = self.create_final_bet_embed(bet_serial)
+                # Generate the bet slip image
+                home_team = details.get('home_team_name', leg.get('team', 'Unknown'))
+                away_team = details.get('away_team_name', leg.get('opponent', 'Unknown'))
+                league = details.get('league', 'NHL')
+                line = leg.get('line', '-1.5')
+                odds = leg.get('odds', -110)
+                units = leg.get('units', 1.00)
+                timestamp = datetime.now(timezone.utc)
+
+                bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                    home_team=home_team,
+                    away_team=away_team,
+                    league=league,
+                    line=line,
+                    odds=odds,
+                    units=units,
+                    bet_id=str(bet_serial),
+                    timestamp=timestamp
+                )
+
+                # Convert the image to a Discord file
+                with io.BytesIO() as image_binary:
+                    bet_slip_image.save(image_binary, 'PNG')
+                    image_binary.seek(0)
+                    discord_file = File(image_binary, filename=f"bet_slip_{bet_serial}.png")
+
+                # Send the image with a view
                 view = BetResolutionView(bet_serial)
-                sent_message = await post_channel.send(embed=final_embed, view=view)
+                sent_message = await post_channel.send(file=discord_file, view=view)
 
                 if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
                     self.bot.bet_service.pending_reactions[sent_message.id] = {
@@ -692,56 +703,6 @@ class BetWorkflowView(View):
             await self.edit_message(interaction, content="❌ An unexpected error occurred.", view=None, embed=None)
         finally:
             self.stop()
-
-    def create_final_bet_embed(self, bet_serial: int) -> discord.Embed:
-        details = self.bet_details
-        user = self.original_interaction.user
-        bet_type = details.get('bet_type', 'Bet').title()
-        embed_title = f"{bet_type} Bet"
-        if bet_type == "Parlay" and len(details.get('legs', [])) > 1:
-            embed_title = "Multi-Leg Parlay Bet"
-        embed = discord.Embed(title=embed_title, color=discord.Color.gold())
-        embed.set_author(name=f"{user.display_name}'s Pick", icon_url=user.display_avatar.url if user.display_avatar else None)
-        league_name = details.get('league', 'N/A')
-        game_info = "Manual Entry"; game_id = details.get('game_id')
-        if game_id and game_id != 'Other': game_info = f"Game ID: {game_id}"
-        elif details.get('legs') and details['legs'][0].get('team'):
-            game_info = f"{details['legs'][0]['team']} vs {details['legs'][0].get('opponent', 'N/A')}"
-        embed.add_field(name="League", value=league_name, inline=True)
-        embed.add_field(name="Game", value=game_info, inline=True)
-        embed.add_field(name="\u200B", value="\u200B", inline=True)
-
-        legs = details.get('legs', [])
-        total_potential_profit = 0.0
-        total_units = 0.0
-        for i, leg in enumerate(legs, 1):
-            selection = leg.get('line', 'N/A')
-            if leg.get('player'):
-                selection = f"{leg['player']} - {selection}"
-            embed.add_field(
-                name=f"Leg {i} Selection" if len(legs) > 1 else "Selection",
-                value=f"```{selection[:1000]}```",
-                inline=False
-            )
-            odds_value = leg.get('odds', 0.0)
-            units_value = leg.get('units', 0.0)
-            embed.add_field(name="Odds", value=f"{odds_value:+}", inline=True)
-            embed.add_field(name="Units", value=f"{units_value:.2f}u", inline=True)
-            if leg.get('team'):
-                embed.add_field(name="Team", value=leg['team'], inline=True)
-            potential_profit = 0.0
-            if units_value > 0:
-                if odds_value > 0:
-                    potential_profit = units_value * (odds_value / 100.0)
-                elif odds_value < 0:
-                    potential_profit = units_value * (100.0 / abs(odds_value))
-            total_potential_profit += potential_profit
-            total_units += units_value
-
-        embed.add_field(name="Total To Win", value=f"{total_potential_profit:.2f}u", inline=True)
-        embed.set_footer(text=f"Bet Serial: {bet_serial} | Status: Pending")
-        embed.timestamp = datetime.now(timezone.utc)
-        return embed
 
 class BetResolutionView(View):
     def __init__(self, bet_serial: int):
