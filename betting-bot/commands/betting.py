@@ -200,7 +200,7 @@ class ChannelSelect(Select):
 
 # Define the main View managing the betting flow
 class BetWorkflowView(View):
-    def __init__(self, interaction: Interaction, bot: commands.Bot):
+    def __init__(self, interaction: Interaction, bot: discord.Client):
         super().__init__(timeout=600) # 10 minute timeout for the whole flow
         self.original_interaction = interaction # Original interaction
         self.bot = bot
