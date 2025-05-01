@@ -11,12 +11,16 @@ logger = logging.getLogger(__name__)
 class BetSlipGenerator:
     def __init__(self, font_path: Optional[str] = None, emoji_font_path: Optional[str] = None, assets_dir: str = "betting-bot/static/"):
         self.font_path = font_path or self._get_default_font()
+        self.bold_font_path = self._get_default_bold_font()
         self.emoji_font_path = emoji_font_path or self._get_default_emoji_font()
         self.assets_dir = assets_dir
         self.league_team_dir = os.path.join(self.assets_dir, "logos/teams/HOCKEY/NHL")
+        self.league_logo_dir = os.path.join(self.assets_dir, "logos/leagues/HOCKEY/NHL")
         self._ensure_font_exists()
+        self._ensure_bold_font_exists()
         self._ensure_emoji_font_exists()
         self._ensure_team_dir_exists()
+        self._ensure_league_dir_exists()
 
     def _get_default_font(self) -> str:
         """Get the default font path for regular text."""
@@ -28,12 +32,18 @@ class BetSlipGenerator:
         else:  # Linux/Mac
             return '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
 
+    def _get_default_bold_font(self) -> str:
+        """Get the default bold font path for emphasized text."""
+        custom_bold_font_path = "betting-bot/static/fonts/Roboto-Bold.ttf"
+        if os.path.exists(custom_bold_font_path):
+            return custom_bold_font_path
+        return self._get_default_font()
+
     def _get_default_emoji_font(self) -> str:
         """Get the default font path for emojis."""
         custom_emoji_font_path = "betting-bot/static/fonts/NotoColorEmoji-Regular.ttf"
         if os.path.exists(custom_emoji_font_path):
             return custom_emoji_font_path
-        # Fallback to a system emoji font
         if os.name == 'nt':  # Windows
             return 'C:\\Windows\\Fonts\\seguiemj.ttf'
         else:  # Linux/Mac (try common paths)
@@ -49,6 +59,12 @@ class BetSlipGenerator:
                     break
             else:
                 raise FileNotFoundError("Could not find a suitable font file. Please place 'Roboto-Regular.ttf' in betting-bot/static/fonts/")
+
+    def _ensure_bold_font_exists(self) -> None:
+        """Ensure the bold font file exists."""
+        if not os.path.exists(self.bold_font_path):
+            logger.warning(f"Bold font file not found at {self.bold_font_path}. Falling back to regular font.")
+            self.bold_font_path = self.font_path
 
     def _ensure_emoji_font_exists(self) -> None:
         """Ensure the emoji font file exists."""
@@ -67,10 +83,37 @@ class BetSlipGenerator:
             logger.warning(f"Team logos directory not found at {self.league_team_dir}")
             os.makedirs(self.league_team_dir, exist_ok=True)
 
+    def _ensure_league_dir_exists(self) -> None:
+        """Ensure the league logos directory exists."""
+        if not os.path.exists(self.league_logo_dir):
+            logger.warning(f"League logos directory not found at {self.league_logo_dir}")
+            os.makedirs(self.league_logo_dir, exist_ok=True)
+
+    def _load_league_logo(self, league: str) -> Optional[Image.Image]:
+        """Load the league logo image based on league name."""
+        try:
+            logo_filename = league.lower() + ".png"  # e.g., "nhl.png"
+            logo_path = os.path.join(self.league_logo_dir, logo_filename)
+            if os.path.exists(logo_path):
+                logo = Image.open(logo_path).convert("RGBA")
+                logo = logo.resize((30, 30), Image.Resampling.LANCZOS)  # Small size for the header
+                return logo
+            else:
+                logger.warning(f"League logo not found for {league} at {logo_path}")
+                return None
+        except Exception as e:
+            logger.error(f"Error loading league logo for {league}: {str(e)}")
+            return None
+
     def _load_team_logo(self, team_name: str) -> Optional[Image.Image]:
         """Load the team logo image based on team name."""
         try:
-            logo_filename = team_name.lower().replace(" ", "_") + ".png"
+            # Map short team names to full filenames
+            team_name_map = {
+                "oilers": "edmonton_oilers",
+                "bruins": "boston_bruins"
+            }
+            logo_filename = team_name_map.get(team_name.lower(), team_name.lower().replace(" ", "_")) + ".png"
             logo_path = os.path.join(self.league_team_dir, logo_filename)
             if os.path.exists(logo_path):
                 logo = Image.open(logo_path).convert("RGBA")
@@ -121,6 +164,7 @@ class BetSlipGenerator:
             team_font = ImageFont.truetype(self.font_path, 18)
             odds_font = ImageFont.truetype(self.font_path, 30)
             small_font = ImageFont.truetype(self.font_path, 14)
+            units_font = ImageFont.truetype(self.bold_font_path, 14)  # Use bold font for units text
             emoji_font = ImageFont.truetype(self.emoji_font_path, 14)  # Use emoji font for emoji rendering
 
             # Rounded rectangle background
@@ -133,14 +177,21 @@ class BetSlipGenerator:
                 outline=None
             )
 
-            # Header: "NHL - Straight Bet"
+            # League logo and header
+            league_logo = self._load_league_logo(league)
             header_text = f"{league.upper()} - Straight Bet"
-            draw.text((width // 2, 30), header_text, fill='white', font=header_font, anchor='mm')
+            header_y = 50
+            if league_logo:
+                # Center the logo above the header text
+                logo_x = (width - league_logo.width) // 2
+                image.paste(league_logo, (logo_x, 20), league_logo)
+                header_y = 60  # Adjust header position to be below the logo
+            draw.text((width // 2, header_y), header_text, fill='white', font=header_font, anchor='mm')
 
             # Load and draw team logos
             home_logo = self._load_team_logo(home_team)
             away_logo = self._load_team_logo(away_team)
-            logo_y = 70
+            logo_y = 90
             if home_logo:
                 image.paste(home_logo, (width // 4 - 50, logo_y), home_logo)
             if away_logo:
@@ -160,7 +211,7 @@ class BetSlipGenerator:
             draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
             units_y = odds_y + 40
             units_text = f"To Win {units:.2f} Unit"
-            units_bbox = draw.textbbox((0, 0), units_text, font=small_font)
+            units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
             units_width = units_bbox[2] - units_bbox[0]
             lock_icon = self._load_lock_icon()
             lock_spacing = 10
@@ -172,10 +223,14 @@ class BetSlipGenerator:
                 lock_x_right = lock_x_left + units_width + lock_icon.width + 2 * lock_spacing
                 image.paste(lock_icon, (lock_x_right, units_y - lock_icon.height // 2), lock_icon)
                 # Adjust text position to be between locks
-                draw.text((lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y), units_text, fill=(255, 215, 0), font=small_font, anchor='mm')
+                draw.text((lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y), units_text, fill=(255, 215, 0), font=units_font, anchor='mm')
             else:
                 # Fallback to emoji, using the emoji font
                 draw.text((width // 2, units_y), f"🔒 {units_text} 🔒", fill=(255, 215, 0), font=emoji_font, anchor='mm')
+
+            # Separator line before footer
+            separator_y = height - 50
+            draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
 
             # Footer: Bet ID and Timestamp
             footer_y = height - 30
