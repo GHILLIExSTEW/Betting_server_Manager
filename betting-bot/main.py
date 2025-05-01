@@ -109,20 +109,24 @@ class BettingBot(commands.Bot):
             if hasattr(self.data_sync_service, 'start'): await self.data_sync_service.start()
             logger.info("Services started.")
 
-            # Sync Commands (Test Guild Only)
-            if TEST_GUILD_ID:
-                try:
+            # Clear all commands (both global and guild)
+            try:
+                # Clear global commands
+                self.tree.clear_commands(guild=None)
+                logger.info("Cleared all global commands")
+                
+                # Clear commands for all guilds
+                for guild in self.guilds:
+                    self.tree.clear_commands(guild=guild)
+                    logger.info(f"Cleared commands for guild {guild.id}")
+                
+                # Clear test guild commands if specified
+                if TEST_GUILD_ID:
                     guild_obj = discord.Object(id=TEST_GUILD_ID)
-                    # Clear and sync commands for the test guild
                     self.tree.clear_commands(guild=guild_obj)
-                    # Wait for commands to be registered
-                    await asyncio.sleep(2)
-                    synced_commands = await self.tree.sync(guild=guild_obj)
-                    logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced_commands]}")
-                except Exception as e:
-                    logger.error(f"Test guild command sync failed for ID {TEST_GUILD_ID}: {e}")
-            else:
-                logger.warning("TEST_GUILD_ID not set, skipping guild command sync.")
+                    logger.info(f"Cleared commands for test guild {TEST_GUILD_ID}")
+            except Exception as e:
+                logger.error(f"Error clearing commands: {e}")
 
             logger.info("Bot setup hook completed successfully.")
 
