@@ -304,9 +304,7 @@ class BetWorkflowView(View):
         self.message: Optional[discord.WebhookMessage | discord.InteractionMessage] = None
         self.is_processing = False
         self.latest_interaction = interaction
-        # Initialize the BetSlipGenerator
         self.bet_slip_generator = BetSlipGenerator()
-        # Store the generated image bytes for reuse
         self.preview_image_bytes = None
 
     async def start_flow(self):
@@ -478,7 +476,7 @@ class BetWorkflowView(View):
                         self.stop()
                         return
 
-                    # Generate the preview image
+                    # Generate the bet serial number by creating the bet
                     legs = self.bet_details.get('legs', [])
                     if not legs:
                         await self.edit_message(interaction, content="❌ No bet details provided. Please start over.", view=None)
@@ -486,15 +484,48 @@ class BetWorkflowView(View):
                         return
 
                     leg = legs[0]  # For straight bets, we only have one leg
+                    # Temporarily set channel_id to None since we haven't selected it yet
+                    bet_type = self.bet_details.get('bet_type')
+                    if bet_type == "straight":
+                        bet_serial = await self.bot.bet_service.create_bet(
+                            guild_id=interaction.guild_id,
+                            user_id=interaction.user.id,
+                            game_id=self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
+                            bet_type="player_prop" if leg.get('player') else "game_line",
+                            team_name=leg.get('team', leg.get('line')),
+                            units=float(leg.get('units_str', '1.00')),
+                            odds=float(leg.get('odds_str', '-110')),
+                            channel_id=None,  # Will update later in submit_bet
+                            player=leg.get('player')
+                        )
+                    else:  # Parlay
+                        bet_serial = await self.bot.bet_service.create_parlay_bet(
+                            guild_id=interaction.guild_id,
+                            user_id=interaction.user.id,
+                            legs=[
+                                {
+                                    'game_id': self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
+                                    'bet_type': "player_prop" if leg.get('player') else "game_line",
+                                    'team_name': leg.get('team', leg.get('line')),
+                                    'units': float(leg.get('units_str', '1.00')),
+                                    'odds': float(leg.get('odds_str', '-110')),
+                                    'player': leg.get('player')
+                                } for leg in legs
+                            ],
+                            channel_id=None
+                        )
+
+                    self.bet_details['bet_serial'] = bet_serial  # Store for use in submit_bet
+
+                    # Generate the preview image with the bet serial
                     home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
                     away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
                     league = self.bet_details.get('league', 'NHL')
                     line = leg.get('line', 'ML')
-                    odds = float(leg.get('odds_str', '-110'))  # Use odds_str since odds isn't validated yet
-                    units = float(leg.get('units_str', '1.00'))  # Use units_str since units isn't validated yet
+                    odds = float(leg.get('odds_str', '-110'))
+                    units = float(leg.get('units_str', '1.00'))
                     timestamp = datetime.now(timezone.utc)
 
-                    # Generate the image
                     bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                         home_team=home_team,
                         away_team=away_team,
@@ -502,7 +533,7 @@ class BetWorkflowView(View):
                         line=line,
                         odds=odds,
                         units=units,
-                        bet_id="TBD",  # Bet ID will be updated later
+                        bet_id=str(bet_serial),
                         timestamp=timestamp
                     )
 
@@ -594,71 +625,30 @@ class BetWorkflowView(View):
         sent_message = None
 
         try:
-            legs = details.get('legs', [])
-            bet_type = details.get('bet_type')
             post_channel_id = details.get('channel_id')
             post_channel = self.bot.get_channel(post_channel_id) if post_channel_id else None
 
-            if bet_type == "straight":
-                leg = legs[0]
-                bet_serial = await self.bot.bet_service.create_bet(
-                    guild_id=interaction.guild_id,
-                    user_id=interaction.user.id,
-                    game_id=details.get('game_id') if details.get('game_id') != 'Other' else None,
-                    bet_type="player_prop" if leg.get('player') else "game_line",
-                    team_name=leg.get('team', leg.get('line')),
-                    units=leg.get('units'),
-                    odds=leg.get('odds'),
-                    channel_id=post_channel_id,
-                    player=leg.get('player')
-                )
-            else:  # Parlay
-                bet_serial = await self.bot.bet_service.create_parlay_bet(
-                    guild_id=interaction.guild_id,
-                    user_id=interaction.user.id,
-                    legs=[
-                        {
-                            'game_id': details.get('game_id') if details.get('game_id') != 'Other' else None,
-                            'bet_type': "player_prop" if leg.get('player') else "game_line",
-                            'team_name': leg.get('team', leg.get('line')),
-                            'units': leg.get('units'),
-                            'odds': leg.get('odds'),
-                            'player': leg.get('player')
-                        } for leg in legs
-                    ],
-                    channel_id=post_channel_id
-                )
-
             if post_channel and isinstance(post_channel, TextChannel):
-                # Reuse the preview image and update the bet ID
-                if self.preview_image_bytes:
-                    # Generate a new image with the updated bet ID
-                    leg = legs[0]  # For straight bets
-                    home_team = details.get('home_team_name', leg.get('team', 'Unknown'))
-                    away_team = details.get('away_team_name', leg.get('opponent', 'Unknown'))
-                    league = details.get('league', 'NHL')
-                    line = leg.get('line', 'ML')
-                    odds = leg.get('odds', -110)
-                    units = leg.get('units', 1.00)
-                    timestamp = datetime.now(timezone.utc)
+                # Update the bet with the selected channel
+                bet_serial = details.get('bet_serial')
+                if not bet_serial:
+                    raise ValueError("Bet serial not found. Please start over.")
 
-                    bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                        home_team=home_team,
-                        away_team=away_team,
-                        league=league,
-                        line=line,
-                        odds=odds,
-                        units=units,
-                        bet_id=str(bet_serial),
-                        timestamp=timestamp
+                # Update the bet with the channel_id (since it was created with channel_id=None)
+                if details.get('bet_type') == "straight":
+                    await self.bot.bet_service.update_bet_channel(
+                        bet_serial=bet_serial,
+                        channel_id=post_channel_id
+                    )
+                else:  # Parlay
+                    await self.bot.bet_service.update_parlay_bet_channel(
+                        bet_serial=bet_serial,
+                        channel_id=post_channel_id
                     )
 
-                    # Save the updated image to a new BytesIO object
-                    final_image_bytes = io.BytesIO()
-                    bet_slip_image.save(final_image_bytes, 'PNG')
-                    final_image_bytes.seek(0)
-
-                    discord_file = File(final_image_bytes, filename=f"bet_slip_{bet_serial}.png")
+                # Reuse the preview image with the updated bet serial (already includes the serial)
+                if self.preview_image_bytes:
+                    discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
                 else:
                     raise ValueError("Preview image not found. Please start over.")
 
@@ -673,7 +663,7 @@ class BetWorkflowView(View):
                         'channel_id': post_channel_id,
                         'legs': details.get('legs'),
                         'league': details.get('league'),
-                        'bet_type': bet_type
+                        'bet_type': details.get('bet_type')
                     }
                     logger.debug(f"Tracking reactions for msg {sent_message.id} (Bet: {bet_serial})")
 
