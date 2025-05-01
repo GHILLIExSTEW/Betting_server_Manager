@@ -4,14 +4,17 @@
 
 import discord
 from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel
+# Import commands for Cog structure
+from discord.ext import commands
 from discord.ui import View, Select, Modal, TextInput, Button
 import logging
 from typing import Optional, List, Dict, Union
 from datetime import datetime, timezone
 
-# Use relative imports assuming commands/ is sibling to services/, utils/, etc.
+# Use relative imports (assuming commands/ is sibling to services/, utils/)
 try:
     # Import necessary services and errors
+    # We access services via self.bot now, but keep error imports
     from ..utils.errors import BetServiceError, ValidationError, GameNotFoundError
 except ImportError:
     # Fallbacks
@@ -19,18 +22,19 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# --- Define UI Components used by this command ---
+# --- UI Component Classes (Moved inside or kept at module level, accessible by Cog) ---
+# These classes remain largely the same, but ensure they access the bot/services
+# correctly via their parent view (`self.view.bot` inside modals, `self.parent_view.bot` inside selects)
 
-# Define BetType Select (can be defined here or imported)
 class BetTypeSelect(Select):
+    # No changes needed in init/callback logic itself, but ensure parent_view has bot access
     def __init__(self, parent_view):
         self.parent_view = parent_view
         options = [
             SelectOption(label="Moneyline", value="moneyline", description="Bet on who will win"),
             SelectOption(label="Spread", value="spread", description="Bet on the margin of victory"),
             SelectOption(label="Total", value="total", description="Bet on the total score (Over/Under)"),
-            SelectOption(label="Parlay", value="parlay", description="Combine multiple bets") # Example: Add Parlay
-            # Add more types like 'Player Prop' if supported
+            SelectOption(label="Parlay", value="parlay", description="Combine multiple bets")
         ]
         super().__init__(placeholder="Select Bet Type...", options=options, min_values=1, max_values=1)
 
@@ -38,16 +42,15 @@ class BetTypeSelect(Select):
         self.parent_view.bet_details['bet_type'] = self.values[0]
         logger.debug(f"Bet Type selected: {self.values[0]}")
         await interaction.response.defer()
-        # Disable this select and move to the next step
         self.disabled = True
         await self.parent_view.go_next(interaction)
 
-# Define League Select
 class LeagueSelect(Select):
+    # No changes needed
     def __init__(self, parent_view, leagues: List[str]):
         self.parent_view = parent_view
-        options = [SelectOption(label=league, value=league) for league in leagues[:24]] # Limit options
-        options.append(SelectOption(label="Other", value="Other")) # Allow manual entry
+        options = [SelectOption(label=league, value=league) for league in leagues[:24]]
+        options.append(SelectOption(label="Other", value="Other"))
         super().__init__(placeholder="Select League...", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: Interaction):
@@ -57,32 +60,22 @@ class LeagueSelect(Select):
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
 
-# Define Game Select
 class GameSelect(Select):
+    # No changes needed
      def __init__(self, parent_view, games: List[Dict]):
          self.parent_view = parent_view
          options = []
-         # Limit number of options in select menu (max 25)
-         for game in games[:24]: # Show max 24 games + Other
-              # Ensure keys exist safely
+         for game in games[:24]:
               home = game.get('home_team_name', 'Unknown')
               away = game.get('away_team_name', 'Unknown')
               start_dt = game.get('start_time')
-              # Format time better, handle potential None
               if isinstance(start_dt, datetime):
-                   # Convert to user's local time? Or keep UTC? Keeping UTC for now.
-                   # time_str = discord.utils.format_dt(start_dt, style='t') # Example using format_dt
-                   time_str = start_dt.strftime('%m/%d %H:%M %Z') # Basic format
+                   time_str = start_dt.strftime('%m/%d %H:%M %Z')
               else:
                    time_str = 'Time N/A'
-
               label = f"{away} @ {home} ({time_str})"
-              # Use API game ID from 'id' key, ensure it's a string for the value
               game_api_id = game.get('id')
-              if game_api_id is None:
-                   logger.warning(f"Game missing 'id' field: {game}")
-                   continue # Skip games without an API ID
-
+              if game_api_id is None: continue
               options.append(SelectOption(label=label[:100], value=str(game_api_id)))
          options.append(SelectOption(label="Other (Manual Entry)", value="Other"))
          super().__init__(placeholder="Select Game (or Other)...", options=options, min_values=1, max_values=1)
@@ -94,103 +87,64 @@ class GameSelect(Select):
          await interaction.response.defer()
          await self.parent_view.go_next(interaction)
 
-# Define Modal for Manual Game Entry
 class ManualGameModal(Modal, title="Enter Manual Game Details"):
-    manual_selection = TextInput(
-         label="Your Bet Selection",
-         placeholder="e.g., Team Name -3.5, Player Over 10.5 Pts",
-         required=True,
-         max_length=150
-    )
-    game_description = TextInput(
-         label="Game Description (Optional)",
-         placeholder="e.g., Team A vs Team B - 7:00 PM",
-         required=False,
-         style=discord.TextStyle.short,
-         max_length=100
-    )
+    # No changes needed - accesses parent view via self.view
+    manual_selection = TextInput(label="Your Bet Selection", placeholder="e.g., Team Name -3.5", required=True, max_length=150)
+    game_description = TextInput(label="Game Description (Optional)", placeholder="e.g., Team A vs Team B", required=False, style=discord.TextStyle.short, max_length=100)
 
     async def on_submit(self, interaction: Interaction):
-         # Store manual details; selection is the primary info here
          self.view.bet_details['selection'] = self.manual_selection.value
-         self.view.bet_details['game_description'] = self.game_description.value # Optional context
+         self.view.bet_details['game_description'] = self.game_description.value
          logger.debug(f"Manual game/selection entered: {self.manual_selection.value}")
-         await interaction.response.defer() # Defer response since view handles next step
-         # Tell the view to proceed
+         # Need to check if interaction is already responded to before deferring
+         if not interaction.response.is_done():
+             await interaction.response.defer()
          await self.view.go_next(interaction)
 
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
          logger.error(f"Error in ManualGameModal: {error}", exc_info=True)
-         # Use followup because original response was likely deferred
-         if not interaction.response.is_done():
-              await interaction.response.send_message('❌ An error occurred with the manual game modal.', ephemeral=True)
-         else:
-              await interaction.followup.send('❌ An error occurred with the manual game modal.', ephemeral=True)
+         # Use followup as interaction was likely deferred or responded to
+         try:
+             await interaction.followup.send('❌ An error occurred with the manual game modal.', ephemeral=True)
+         except discord.HTTPException: # Handle case where followup fails (e.g., interaction expired)
+             logger.warning("Could not send error followup for ManualGameModal.")
 
 
-# Define Modal for Bet Details (Line/Odds/Units)
 class BetDetailsModal(Modal, title="Enter Bet Details"):
-    line_or_selection = TextInput(
-        label="Selection / Line",
-        placeholder="e.g., -7.5, Over 220.5, Team Moneyline",
-        required=True,
-        max_length=100
-    )
-    odds = TextInput(
-        label="Odds (American)",
-        placeholder="e.g., -110, +150, 210",
-        required=True,
-        max_length=10
-    )
-    units = TextInput(
-        label="Units (e.g., 1, 1.5, 2, 2.5, 3)",
-        placeholder="Enter units to risk (usually 1-3)",
-        required=True,
-        max_length=5
-    )
+    # No changes needed - accesses parent view via self.view
+    line_or_selection = TextInput(label="Selection / Line", placeholder="e.g., -7.5, Over 220.5", required=True, max_length=100)
+    odds = TextInput(label="Odds (American)", placeholder="e.g., -110, +150", required=True, max_length=10)
+    units = TextInput(label="Units (e.g., 1, 1.5)", placeholder="Enter units to risk", required=True, max_length=5)
 
     async def on_submit(self, interaction: Interaction):
-        # Store details from modal
         self.view.bet_details['selection'] = self.line_or_selection.value
         self.view.bet_details['odds_str'] = self.odds.value
         self.view.bet_details['units_str'] = self.units.value
         logger.debug(f"Bet details entered: Line '{self.line_or_selection.value}', Odds '{self.odds.value}', Units '{self.units.value}'")
-        await interaction.response.defer() # Defer response, view handles next step
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         await self.view.go_next(interaction)
 
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
          logger.error(f"Error in BetDetailsModal: {error}", exc_info=True)
-         if not interaction.response.is_done():
-              await interaction.response.send_message('❌ An error occurred with the bet details modal.', ephemeral=True)
-         else:
-              await interaction.followup.send('❌ An error occurred with the bet details modal.', ephemeral=True)
+         try:
+             await interaction.followup.send('❌ An error occurred with the bet details modal.', ephemeral=True)
+         except discord.HTTPException:
+             logger.warning("Could not send error followup for BetDetailsModal.")
 
-
-# Define Channel Select
 class ChannelSelect(Select):
+    # No changes needed
     def __init__(self, parent_view, channels: List[TextChannel]):
         self.parent_view = parent_view
-        options = [
-            SelectOption(label=f"#{channel.name}", value=str(channel.id))
-            for channel in channels[:25] # Limit to 25 options
-        ]
-        if not options:
-             options.append(SelectOption(label="No Writable Channels Found", value="none", emoji="❌"))
-
-        super().__init__(
-             placeholder="Select Channel to Post Bet...",
-             options=options,
-             min_values=1,
-             max_values=1,
-             disabled=not options or options[0].value == "none"
-        )
+        options = [SelectOption(label=f"#{channel.name}", value=str(channel.id)) for channel in channels[:25]]
+        if not options: options.append(SelectOption(label="No Writable Channels Found", value="none", emoji="❌"))
+        super().__init__(placeholder="Select Channel to Post Bet...", options=options, min_values=1, max_values=1, disabled=not options or options[0].value == "none")
 
     async def callback(self, interaction: Interaction):
         selected_value = self.values[0]
         if selected_value == "none":
              await interaction.response.defer()
              return
-
         self.parent_view.bet_details['channel_id'] = int(selected_value)
         logger.debug(f"Channel selected: {selected_value}")
         self.disabled = True
@@ -198,490 +152,365 @@ class ChannelSelect(Select):
         await self.parent_view.go_next(interaction)
 
 
-# Define the main View managing the betting flow
 class BetWorkflowView(View):
-    def __init__(self, interaction: Interaction, bot: discord.Client):
-        super().__init__(timeout=600) # 10 minute timeout for the whole flow
-        self.original_interaction = interaction # Original interaction
-        self.bot = bot
+    # Needs bot instance passed to it
+    # The bot instance will have the services attached (e.g., self.bot.game_service)
+    def __init__(self, interaction: Interaction, bot: commands.Bot): # Use commands.Bot type hint
+        super().__init__(timeout=600)
+        self.original_interaction = interaction
+        self.bot = bot # Store bot instance
         self.current_step = 0
-        self.bet_details = {} # Dictionary to store collected data
-        self.message: Optional[discord.WebhookMessage] = None # To store the message reference for editing
+        self.bet_details = {}
+        self.message: Optional[discord.WebhookMessage | discord.InteractionMessage] = None # Track the message for editing
 
     async def start_flow(self):
         """Sends the initial message and starts the workflow."""
-        # Send the initial ephemeral message (or edit if already deferred)
+        # Use followup from original interaction as the command likely deferred
         self.message = await self.original_interaction.followup.send(
              "Starting bet placement...", view=self, ephemeral=True
         )
-        await self.go_next(self.original_interaction) # Start step 1
+        await self.go_next(self.original_interaction)
 
     async def interaction_check(self, interaction: Interaction) -> bool:
-        # Ensure only the user who initiated the command can interact
+        # No changes needed
         if interaction.user.id != self.original_interaction.user.id:
             await interaction.response.send_message("You cannot interact with this bet placement.", ephemeral=True)
             return False
         return True
 
-    async def edit_message(self, interaction: Interaction, content: Optional[str] = None, view: Optional[View] = None, embed: Optional[discord.Embed] = None):
-         """Helper to edit the interaction's original response message."""
-         # Use the original interaction's followup webhook to edit the message
+    async def edit_message(self, interaction: Optional[Interaction] = None, content: Optional[str] = None, view: Optional[View] = None, embed: Optional[discord.Embed] = None):
+         """Helper to edit the interaction's message."""
+         # Use the stored message reference if available
+         target_message = self.message
          try:
-              # If interaction is passed from a component callback, use its message attribute if available
-              target_message = interaction.message or self.message
               if target_message:
-                    await target_message.edit(content=content, embed=embed, view=view)
-              else: # Fallback to editing original response if message ref is lost
+                   # Check if the message object is from Interaction or Webhook
+                   if isinstance(target_message, discord.InteractionMessage):
+                       await target_message.edit(content=content, embed=embed, view=view)
+                   elif isinstance(target_message, discord.WebhookMessage):
+                       await target_message.edit(content=content, embed=embed, view=view)
+                   else: # Fallback if type is unexpected
+                       await self.original_interaction.edit_original_response(content=content, embed=embed, view=view)
+              else: # Fallback if message ref is lost
                    await self.original_interaction.edit_original_response(content=content, embed=embed, view=view)
-         except discord.NotFound:
-              logger.warning(f"Failed to edit BetWorkflowView message (Interaction: {interaction.id}, Original: {self.original_interaction.id}). Message not found (deleted or timed out?).")
-              self.stop() # Stop the view if the message is gone
-         except discord.HTTPException as hte:
-              logger.error(f"HTTP Error editing BetWorkflowView message: {hte.status} - {hte.text}")
-              # Don't stop the view necessarily, maybe the next step can still work?
+         except (discord.NotFound, discord.HTTPException) as e:
+              logger.warning(f"Failed to edit BetWorkflowView message: {e}")
+              # Don't stop the view, maybe next step can recover or inform user
          except Exception as e:
               logger.exception(f"Unexpected error editing BetWorkflowView message: {e}")
-              # Don't stop the view
-
 
     async def go_next(self, interaction: Interaction):
         """Progress to the next step in the betting workflow."""
-        self.clear_items() # Clear previous components
+        # Logic for steps 1-5 remains the same, accessing services via self.bot
+        # Ensure GameService is accessed via self.bot.game_service
+        self.clear_items()
         self.current_step += 1
         step_content = f"**Step {self.current_step}**"
-        embed_to_send = None # Reset embed
+        embed_to_send = None
 
         try:
-            if self.current_step == 1: # Bet Type
+            if self.current_step == 1:
                 self.add_item(BetTypeSelect(self))
                 step_content += ": Select Bet Type"
-
-            elif self.current_step == 2: # League
-                # Fetch allowed leagues dynamically or from config
-                # Example static list:
+            elif self.current_step == 2:
                 allowed_leagues = ["NBA", "NFL", "MLB", "NHL", "NCAAB", "NCAAF", "Soccer", "Tennis", "UFC/MMA"]
                 self.add_item(LeagueSelect(self, allowed_leagues))
                 step_content += ": Select League"
-
-            elif self.current_step == 3: # Game
+            elif self.current_step == 3:
                 league = self.bet_details.get('league')
                 if league and league != "Other":
-                    # Use GameService (accessed via self.bot)
-                    # Determine sport based on league (needs mapping)
-                    # TODO: Implement a robust league -> sport mapping (e.g., in GameService or utils)
-                    sport = None # Placeholder
+                    sport = None
+                    # Simple mapping (consider moving to a helper or config)
                     if league in ["NFL", "NCAAF"]: sport = "american-football"
                     elif league in ["NBA", "NCAAB"]: sport = "basketball"
                     elif league == "MLB": sport = "baseball"
                     elif league == "NHL": sport = "hockey"
-                    elif league == "Soccer": sport = "soccer" # Or use specific league name like 'premier-league'
+                    elif league == "Soccer": sport = "soccer"
                     elif league == "Tennis": sport = "tennis"
-                    # Add more mappings
 
                     if sport and hasattr(self.bot, 'game_service'):
-                        # Assuming get_upcoming_games fetches from DB based on GameService logic
-                        # It might internally call API/cache if DB is empty or outdated
-                        upcoming_games = await self.bot.game_service.get_upcoming_games(interaction.guild_id, hours=72) # Fetch next 72h from DB
-                        # Filter games by the selected league name (case-insensitive) or ID
+                        # Access GameService via self.bot
+                        upcoming_games = await self.bot.game_service.get_upcoming_games(interaction.guild_id, hours=72)
                         league_games = [g for g in upcoming_games if str(g.get('league_id')) == league or g.get('league_name','').lower() == league.lower()]
 
                         if league_games:
                             self.add_item(GameSelect(self, league_games))
                             step_content += f": Select Game for {league} (or Other)"
                         else:
-                            logger.warning(f"No upcoming games found in DB for league {league}. Proceeding to manual entry.")
-                            await self.go_next(interaction) # Skip game select step
-                            return # Important: return to prevent editing message below for this skipped step
+                            logger.warning(f"No upcoming games found for league {league}. Skipping to manual entry.")
+                            self.current_step += 1 # Advance step
+                            await self.go_next(interaction)
+                            return
                     else:
-                         logger.warning(f"Sport not determined for league {league} or GameService unavailable. Proceeding to manual entry.")
-                         await self.go_next(interaction) # Skip game select step
+                         logger.warning(f"Sport/GameService unavailable for league {league}. Skipping to manual entry.")
+                         self.current_step += 1 # Advance step
+                         await self.go_next(interaction)
                          return
                 else:
-                    # If league is "Other" or not found, go straight to manual entry
-                    # Step 4 handles the modal logic
+                    self.current_step += 1 # Advance step
                     await self.go_next(interaction)
                     return
-
-            elif self.current_step == 4: # Bet Details (Selection/Line, Odds, Units) OR Manual Game Entry
+            elif self.current_step == 4:
                 game_id = self.bet_details.get('game_id')
-                if game_id == "Other" or 'game_id' not in self.bet_details:
-                     # Show manual game modal
-                     # Use interaction.response.send_modal for the *first* modal in an interaction
-                     # Subsequent modals might need followup? Test this.
-                     # Send modal needs the original interaction context usually.
+                is_manual = game_id == "Other" or 'game_id' not in self.bet_details
+
+                # Send the appropriate modal
+                # Modals need to be sent using interaction.response.send_modal
+                # We can't edit an existing message to show a modal.
+                # The interaction here *might* be the original one if previous steps were skipped,
+                # or it might be from a component callback.
+                # send_modal should work on component interactions too.
+                if is_manual:
                      modal = ManualGameModal()
-                     modal.view = self # Link modal back to the view
-                     await interaction.response.send_modal(modal)
-                     # We don't edit the message here; the modal callback will call go_next
-                     return # Stop processing this step until modal is submitted
+                     modal.view = self
+                     await interaction.response.send_modal(modal) # Send modal
                 else:
-                     # Show regular bet details modal
                      modal = BetDetailsModal()
                      modal.view = self
-                     await interaction.response.send_modal(modal)
-                     return # Stop processing this step until modal is submitted
+                     await interaction.response.send_modal(modal) # Send modal
+                # Don't edit the message here; modal submission calls go_next
+                return # Stop processing until modal submits
 
-            elif self.current_step == 5: # Channel Selection
-                 # Get valid text channels where user can send messages
-                 valid_channels = sorted(
-                      [ch for ch in interaction.guild.text_channels if ch.permissions_for(interaction.user).send_messages],
-                      key=lambda c: c.position
-                 )
+            elif self.current_step == 5:
+                 valid_channels = sorted([ch for ch in interaction.guild.text_channels if ch.permissions_for(interaction.user).send_messages and ch.permissions_for(interaction.guild.me).send_messages], key=lambda c: c.position)
                  if not valid_channels:
-                      await self.edit_message(interaction, content="Error: No text channels found where you can post.", view=None)
+                      await self.edit_message(interaction, content="Error: No text channels found where I can post.", view=None)
                       self.stop()
                       return
                  self.add_item(ChannelSelect(self, valid_channels))
                  step_content += ": Select Channel to Post Bet"
 
-            elif self.current_step == 6: # Confirmation
-                 # Validate inputs (odds, units) before showing confirmation
+            elif self.current_step == 6:
                  try:
-                      odds_str = self.bet_details.get('odds_str', '').replace('+','').strip() # Remove + sign, strip whitespace
-                      units_str = self.bet_details.get('units_str', '').lower().replace('u','').strip() # Remove 'u', strip whitespace
-
-                      # --- Odds Validation ---
-                      try:
-                           odds_val = int(odds_str) # American odds are usually integers
-                           # Add range check if needed (e.g., from config)
-                           MIN_ODDS, MAX_ODDS = -10000, 10000 # Example range
-                           if not (MIN_ODDS <= odds_val <= MAX_ODDS):
-                                raise ValueError(f"Odds ({odds_val}) out of range [{MIN_ODDS}, {MAX_ODDS}]")
-                           # Cannot be exactly 0, usually not between -100 and 100 (excl.)
-                           if -100 < odds_val < 100:
-                                raise ValueError("Odds cannot be between -99 and 99.")
-                           self.bet_details['odds'] = float(odds_val) # Store as float
-                      except ValueError as e:
-                           logger.warning(f"Invalid odds format '{odds_str}': {e}")
-                           raise ValueError(f"Invalid Odds format: '{odds_str}'. Use American odds (e.g., -110, +150).") from e
-
-                      # --- Units Validation ---
-                      try:
-                           units_val = float(units_str)
-                           # Add range check (e.g., from config)
-                           MIN_UNITS, MAX_UNITS = 0.1, 10.0 # Example range (allow fractional)
-                           if not (MIN_UNITS <= units_val <= MAX_UNITS):
-                               raise ValueError(f"Units ({units_val}) out of range [{MIN_UNITS}, {MAX_UNITS}]")
-                           self.bet_details['units'] = units_val # Store as float
-                      except ValueError as e:
-                           logger.warning(f"Invalid units format '{units_str}': {e}")
-                           raise ValueError(f"Invalid Units format: '{units_str}'. Use a number (e.g., 1, 1.5, 2).") from e
-
-                 except ValueError as ve: # Catch validation errors
+                      # Validation logic remains the same
+                      odds_str = self.bet_details.get('odds_str', '').replace('+','').strip()
+                      units_str = self.bet_details.get('units_str', '').lower().replace('u','').strip()
+                      odds_val = int(odds_str)
+                      if not (-10000 <= odds_val <= 10000): raise ValueError("Odds out of range")
+                      if -100 < odds_val < 100: raise ValueError("Odds cannot be between -99 and 99.")
+                      self.bet_details['odds'] = float(odds_val)
+                      units_val = float(units_str)
+                      if not (0.1 <= units_val <= 10.0): raise ValueError("Units out of range")
+                      self.bet_details['units'] = units_val
+                 except ValueError as ve:
                       logger.error(f"Bet input validation failed: {ve}")
                       await self.edit_message(interaction, content=f"❌ Error: {ve} Please start over.", view=None)
-                      self.stop()
-                      return
+                      self.stop(); return
 
-                 # Display confirmation embed
                  embed_to_send = self.create_confirmation_embed()
                  self.add_item(ConfirmButton(self))
                  self.add_item(CancelButton(self))
-                 step_content = f"**Step {self.current_step}**: Please Confirm Your Bet" # Override step content
-
-            else: # Should not happen
+                 step_content = f"**Step {self.current_step}**: Please Confirm Your Bet"
+            else:
                  logger.error(f"BetWorkflowView reached unexpected step: {self.current_step}")
-                 self.stop()
-                 return
+                 self.stop(); return
 
-            # Edit the message for the current step (unless handled by modal)
+            # Edit the message for the current step (only if not returned for modal)
             await self.edit_message(interaction, content=step_content, view=self, embed=embed_to_send)
 
         except Exception as e:
              logger.exception(f"Error in bet workflow step {self.current_step}: {e}")
-             try:
-                  await self.edit_message(interaction, content="An unexpected error occurred. Please try again.", view=None, embed=None)
-             except Exception: # Ignore errors during error reporting
-                  pass
+             try: await self.edit_message(interaction, content="An unexpected error occurred.", view=None, embed=None)
+             except Exception: pass
              self.stop()
 
     def create_confirmation_embed(self) -> discord.Embed:
-        """Creates the confirmation embed."""
+        # No changes needed, uses self.bet_details and self.bot
         details = self.bet_details
         embed = discord.Embed(title="📊 Bet Confirmation", color=discord.Color.blue())
         embed.add_field(name="Type", value=details.get('bet_type', 'N/A').title(), inline=True)
         embed.add_field(name="League", value=details.get('league', 'N/A'), inline=True)
-
-        game_info = "Manual Entry"
-        game_id = details.get('game_id')
-        if game_id and game_id != 'Other':
-             # Try to fetch game details from GameService for a better display
-             # This might require an async helper or making GameService accessible here
-             # For now, just show ID
-             game_info = f"Game ID: {game_id}"
-             # Example async fetch (would need modification):
-             # game_data = await self.game_service.get_game(int(game_id)) # Fetch from DB
-             # if game_data: game_info = f"{game_data.get('away_team_name')} @ {game_data.get('home_team_name')}"
-        elif details.get('game_description'):
-             game_info = details['game_description'][:100] # Limit length
+        game_info = "Manual Entry"; game_id = details.get('game_id')
+        if game_id and game_id != 'Other': game_info = f"Game ID: {game_id}"
+        elif details.get('game_description'): game_info = details['game_description'][:100]
         embed.add_field(name="Game", value=game_info, inline=True)
-
         selection = details.get('selection', 'N/A')
-        # Ensure selection fits in embed field value (1024 chars)
         embed.add_field(name="Selection", value=f"```{selection[:1000]}```", inline=False)
-        odds_value = details.get('odds', 0.0)
-        embed.add_field(name="Odds", value=f"{odds_value:+}", inline=True) # Show sign for odds
-        units_value = details.get('units', 0.0)
+        odds_value = details.get('odds', 0.0); units_value = details.get('units', 0.0)
+        embed.add_field(name="Odds", value=f"{odds_value:+}", inline=True)
         embed.add_field(name="Units", value=f"{units_value:.2f}u", inline=True)
-
-        channel_id = details.get('channel_id')
-        channel = self.bot.get_channel(channel_id) if channel_id else None
+        channel_id = details.get('channel_id'); channel = self.bot.get_channel(channel_id) if channel_id else None
         channel_mention = channel.mention if channel else "Invalid Channel"
         embed.add_field(name="Post Channel", value=channel_mention, inline=True)
-
-        # Potential payout calculation (ensure units/odds are floats)
-        units = float(details.get('units', 0.0))
-        odds = float(details.get('odds', 0.0))
         potential_profit = 0.0
-        if units > 0: # Only calculate if units are positive
-            if odds > 0:
-                potential_profit = units * (odds / 100.0)
-            elif odds < 0:
-                potential_profit = units * (100.0 / abs(odds))
-        potential_payout = units + potential_profit
+        if units_value > 0:
+            if odds_value > 0: potential_profit = units_value * (odds_value / 100.0)
+            elif odds_value < 0: potential_profit = units_value * (100.0 / abs(odds_value))
+        potential_payout = units_value + potential_profit
         embed.add_field(name="To Win", value=f"{potential_profit:.2f}u", inline=True)
         embed.add_field(name="Payout", value=f"{potential_payout:.2f}u", inline=True)
-
         embed.set_footer(text="Confirm to place and post the bet.")
         return embed
 
-
     async def submit_bet(self, interaction: Interaction):
-        """Submits the bet to the BetService."""
+        # Access BetService via self.bot.bet_service
         details = self.bet_details
-        # Edit message to show processing state
         await self.edit_message(interaction, content="Processing and posting bet...", view=None, embed=None)
-        sent_message = None # Define outside try block
+        sent_message = None
 
         try:
-            # Call BetService to create the bet
             bet_serial = await self.bot.bet_service.create_bet(
-                guild_id=interaction.guild_id,
-                user_id=interaction.user.id,
-                game_id=details.get('game_id'), # Already processed in validation step
-                bet_type=details.get('bet_type'),
-                selection=details.get('selection'),
-                units=details.get('units'), # Already validated float
-                odds=details.get('odds'), # Already validated float
+                guild_id=interaction.guild_id, user_id=interaction.user.id,
+                game_id=details.get('game_id') if details.get('game_id') != 'Other' else None,
+                bet_type=details.get('bet_type'), team_name=details.get('selection'),
+                units=details.get('units'), odds=details.get('odds'),
                 channel_id=details.get('channel_id'),
-                # message_id needs to be set *after* the message is sent
             )
 
-            # Post the bet embed to the selected channel
             post_channel_id = details.get('channel_id')
             post_channel = self.bot.get_channel(post_channel_id) if post_channel_id else None
 
             if post_channel and isinstance(post_channel, TextChannel):
                 final_embed = self.create_final_bet_embed(bet_serial)
-                # Add reaction buttons for resolution
-                # Custom IDs are now static
-                view = BetResolutionView(bet_serial) # Pass bet_serial if needed by view logic later
+                view = BetResolutionView(bet_serial)
                 sent_message = await post_channel.send(embed=final_embed, view=view)
 
-                # Store message_id -> bet_serial mapping for reaction tracking in BetService
-                if sent_message:
+                if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
                     self.bot.bet_service.pending_reactions[sent_message.id] = {
-                         'bet_serial': bet_serial,
-                         'user_id': interaction.user.id,
-                         'guild_id': interaction.guild_id,
-                         'channel_id': post_channel_id,
-                         'selection': details.get('selection'),
-                         'units': details.get('units'),
-                         'odds': details.get('odds'),
-                         'league': details.get('league'),
+                         'bet_serial': bet_serial, 'user_id': interaction.user.id,
+                         'guild_id': interaction.guild_id, 'channel_id': post_channel_id,
+                         'selection': details.get('selection'), 'units': details.get('units'),
+                         'odds': details.get('odds'), 'league': details.get('league'),
                          'bet_type': details.get('bet_type'),
                      }
-                    logger.debug(f"Tracking reactions for posted bet message {sent_message.id} (Bet Serial: {bet_serial})")
+                    logger.debug(f"Tracking reactions for msg {sent_message.id} (Bet: {bet_serial})")
 
-                # Confirm success to user (edit original ephemeral message)
                 success_message = f"✅ Bet placed successfully! (ID: `{bet_serial}`). Posted to {post_channel.mention}."
                 await self.edit_message(interaction, content=success_message, view=None, embed=None)
-
             else:
-                 logger.error(f"Could not find channel {post_channel_id} or not a TextChannel to post bet {bet_serial}.")
-                 # Bet was created but not posted
-                 failure_message = f"⚠️ Bet placed (ID: `{bet_serial}`), but **failed to post** to channel ID {post_channel_id}. Please check permissions or channel existence."
+                 logger.error(f"Could not find channel {post_channel_id} to post bet {bet_serial}.")
+                 failure_message = f"⚠️ Bet placed (ID: `{bet_serial}`), but failed to post."
                  await self.edit_message(interaction, content=failure_message, view=None, embed=None)
 
         except (ValidationError, BetServiceError) as e:
             logger.error(f"Error submitting bet: {e}")
-            error_message = f"❌ Error placing bet: {e}"
-            await self.edit_message(interaction, content=error_message, view=None, embed=None)
+            await self.edit_message(interaction, content=f"❌ Error placing bet: {e}", view=None, embed=None)
         except Exception as e:
             logger.exception(f"Unexpected error submitting bet: {e}")
-            await self.edit_message(interaction, content="❌ An unexpected error occurred while placing the bet.", view=None, embed=None)
+            await self.edit_message(interaction, content="❌ An unexpected error occurred.", view=None, embed=None)
         finally:
-            self.stop() # Stop the view after completion or error
-
+            self.stop()
 
     def create_final_bet_embed(self, bet_serial: int) -> discord.Embed:
-        """Creates the embed to be posted in the selected channel."""
-        details = self.bet_details
-        user = self.original_interaction.user # Use original interaction user
-
-        # Determine Embed Title based on Bet Type
+        # No changes needed, uses self.bet_details and self.original_interaction.user
+        details = self.bet_details; user = self.original_interaction.user
         bet_type_str = details.get('bet_type', 'Bet').title()
         selection_str = details.get('selection', 'N/A')
-        embed_title = f"{bet_type_str}: {selection_str}"
-        # Check for multi-team parlay based on user's guideline
-        # This assumes 'selection' contains multiple lines/teams for a parlay
-        # A more robust check might involve looking at bet_type == 'parlay' AND multiple legs stored elsewhere
-        is_multi_team_parlay = False
-        if bet_type_str == 'Parlay' and isinstance(selection_str, str) and '\n' in selection_str: # Simple check for multi-line selection
-            is_multi_team_parlay = True
-
-        # [2025-04-19] Apply user guideline for embed title
-        if is_multi_team_parlay:
-            embed_title = "Multi-Team Parlay Bet"
-            # Optionally include the legs in description or field if title is generic
-            # description=f"```{selection_str[:1000]}```" # Example description for legs
-
-        embed = discord.Embed(
-            title=embed_title,
-            color=discord.Color.gold(), # Default color
-            # description=description if is_multi_team_parlay else None # Add description if needed
-        )
-
-        # Add capper info
+        embed_title = f"{bet_type_str}: {selection_str}"; is_multi_team_parlay = False
+        if bet_type_str == 'Parlay' and isinstance(selection_str, str) and '\n' in selection_str: is_multi_team_parlay = True
+        if is_multi_team_parlay: embed_title = "Multi-Team Parlay Bet" # Apply user guideline
+        embed = discord.Embed(title=embed_title, color=discord.Color.gold())
         embed.set_author(name=f"{user.display_name}'s Pick", icon_url=user.display_avatar.url if user.display_avatar else None)
-        # Add thumbnail if you have a logo for the user/capper
-        # if user_logo_url: embed.set_thumbnail(url=user_logo_url)
-
-        # Add Game/League Info
-        game_info = "N/A" # Default
-        league_name = details.get('league', 'N/A')
-        game_id = details.get('game_id')
-
-        if game_id and game_id != 'Other':
-             # TODO: Ideally fetch game details here async if needed for names/time
-             # Example placeholder:
-             game_info = f"Game ID: {game_id}"
-        elif details.get('game_description'):
-             game_info = details['game_description'][:100] # Limit length
-        else: # If game_id is 'Other' and no description
-             game_info = "Manual/Other"
-
+        game_info = "N/A"; league_name = details.get('league', 'N/A'); game_id = details.get('game_id')
+        if game_id and game_id != 'Other': game_info = f"Game ID: {game_id}"
+        elif details.get('game_description'): game_info = details['game_description'][:100]
+        else: game_info = "Manual/Other"
         embed.add_field(name="League", value=league_name, inline=True)
         embed.add_field(name="Game", value=game_info, inline=True)
-        embed.add_field(name="\u200B", value="\u200B", inline=True) # Spacer field
-
-        # If it's a generic Parlay title, add the selection legs as a field
-        if is_multi_team_parlay:
-             embed.add_field(name="Legs", value=f"```{selection_str[:1000]}```", inline=False)
-
-        # Add Odds, Units, Payout
-        odds_value = details.get('odds', 0.0)
-        units_value = details.get('units', 0.0)
-        embed.add_field(name="Odds", value=f"{odds_value:+}", inline=True) # Show sign
-        embed.add_field(name="Units", value=f"{units_value:.2f}u", inline=True) # Format units
-
-        # Payout Calculation
+        embed.add_field(name="\u200B", value="\u200B", inline=True)
+        if is_multi_team_parlay: embed.add_field(name="Legs", value=f"```{selection_str[:1000]}```", inline=False)
+        odds_value = details.get('odds', 0.0); units_value = details.get('units', 0.0)
+        embed.add_field(name="Odds", value=f"{odds_value:+}", inline=True)
+        embed.add_field(name="Units", value=f"{units_value:.2f}u", inline=True)
         potential_profit = 0.0
         if units_value > 0:
             if odds_value > 0: potential_profit = units_value * (odds_value / 100.0)
             elif odds_value < 0: potential_profit = units_value * (100.0 / abs(odds_value))
-        # potential_payout = units_value + potential_profit # Payout isn't usually shown on the card
-
-        embed.add_field(name="To Win", value=f"{potential_profit:.2f}u", inline=True) # Format profit
-
+        embed.add_field(name="To Win", value=f"{potential_profit:.2f}u", inline=True)
         embed.set_footer(text=f"Bet Serial: {bet_serial} | Status: Pending")
         embed.timestamp = datetime.now(timezone.utc)
         return embed
 
 
-# Define Confirmation Buttons
 class ConfirmButton(Button):
+    # No changes needed, uses parent_view correctly
     def __init__(self, parent_view):
-        # Use custom_id tied to the interaction ID to prevent conflicts if multiple users run command
         super().__init__(style=ButtonStyle.green, label="Confirm & Post", custom_id=f"confirm_bet_{parent_view.original_interaction.id}")
         self.parent_view = parent_view
-
     async def callback(self, interaction: Interaction):
-        # Disable buttons immediately
         for item in self.parent_view.children:
-            if isinstance(item, Button):
-                item.disabled = True
-        # Edit the message to show disabled buttons *before* submitting
+            if isinstance(item, Button): item.disabled = True
+        # Defer response before editing message and submitting
         await interaction.response.edit_message(view=self.parent_view)
-        # Proceed to submit the bet
         await self.parent_view.submit_bet(interaction)
 
 class CancelButton(Button):
+    # No changes needed
     def __init__(self, parent_view):
         super().__init__(style=ButtonStyle.red, label="Cancel", custom_id=f"cancel_bet_{parent_view.original_interaction.id}")
         self.parent_view = parent_view
-
     async def callback(self, interaction: Interaction):
-        # Disable buttons and inform user
         for item in self.parent_view.children:
-            if isinstance(item, Button):
-                item.disabled = True
+            if isinstance(item, Button): item.disabled = True
         await interaction.response.edit_message(content="Bet cancelled.", embed=None, view=self.parent_view)
-        self.parent_view.stop() # Stop the view
+        self.parent_view.stop()
 
-
-# View with buttons to add reactions to the bet message
 class BetResolutionView(View):
-     def __init__(self, bet_serial: int): # bet_serial might not be needed here if not used
-          super().__init__(timeout=None) # Make view persistent
-          # No need to store bet_serial if buttons just add reactions
-
-     # Make custom_ids static and unique for persistent views
+    # No changes needed, just adds reactions
+     def __init__(self, bet_serial: int): super().__init__(timeout=None)
      @discord.ui.button(label="Win", style=discord.ButtonStyle.green, emoji="✅", custom_id="bet_resolve_win")
      async def win_button(self, interaction: Interaction, button: Button):
-         # Check permissions or original user if needed here
-         # For now, just add reaction
-         try:
-              await interaction.message.add_reaction("✅")
-              await interaction.response.send_message("Added Win reaction.", ephemeral=True)
-         except discord.Forbidden:
-              await interaction.response.send_message("I don't have permission to add reactions here.", ephemeral=True)
-         except Exception as e:
-             logger.error(f"Error adding win reaction: {e}")
-             await interaction.response.send_message("Could not add reaction.", ephemeral=True)
-
-
+         try: await interaction.message.add_reaction("✅"); await interaction.response.send_message("Added Win reaction.", ephemeral=True)
+         except Exception as e: logger.error(f"Error adding win reaction: {e}"); await interaction.response.send_message("Could not add reaction.", ephemeral=True)
      @discord.ui.button(label="Loss", style=discord.ButtonStyle.red, emoji="❌", custom_id="bet_resolve_loss")
      async def loss_button(self, interaction: Interaction, button: Button):
-         try:
-              await interaction.message.add_reaction("❌")
-              await interaction.response.send_message("Added Loss reaction.", ephemeral=True)
-         except discord.Forbidden:
-              await interaction.response.send_message("I don't have permission to add reactions here.", ephemeral=True)
-         except Exception as e:
-             logger.error(f"Error adding loss reaction: {e}")
-             await interaction.response.send_message("Could not add reaction.", ephemeral=True)
-
+         try: await interaction.message.add_reaction("❌"); await interaction.response.send_message("Added Loss reaction.", ephemeral=True)
+         except Exception as e: logger.error(f"Error adding loss reaction: {e}"); await interaction.response.send_message("Could not add reaction.", ephemeral=True)
      @discord.ui.button(label="Push", style=discord.ButtonStyle.grey, emoji="🅿️", custom_id="bet_resolve_push")
      async def push_button(self, interaction: Interaction, button: Button):
-         try:
-              await interaction.message.add_reaction("🅿️") # Use a distinct push emoji
-              await interaction.response.send_message("Added Push reaction.", ephemeral=True)
-         except discord.Forbidden:
-              await interaction.response.send_message("I don't have permission to add reactions here.", ephemeral=True)
-         except Exception as e:
-             logger.error(f"Error adding push reaction: {e}")
-             await interaction.response.send_message("Could not add reaction.", ephemeral=True)
+         try: await interaction.message.add_reaction("🅿️"); await interaction.response.send_message("Added Push reaction.", ephemeral=True)
+         except Exception as e: logger.error(f"Error adding push reaction: {e}"); await interaction.response.send_message("Could not add reaction.", ephemeral=True)
 
 
-# Define the bet command directly
-@app_commands.command(name="bet", description="Place a new bet through a guided workflow.")
-@app_commands.guilds(discord.Object(id=1328126227013439601))  # Test guild ID
-async def bet_command(interaction: Interaction):
-    """Starts the interactive betting workflow."""
-    try:
-        # Create and start the workflow view
-        view = BetWorkflowView(interaction, interaction.client)
-        await view.start_flow()
-    except Exception as e:
-        logger.error(f"Error in bet command: {e}", exc_info=True)
-        if not interaction.response.is_done():
-            await interaction.response.send_message(
-                "❌ An error occurred while starting the betting workflow. Please try again later.",
-                ephemeral=True
-            )
-        else:
-            await interaction.followup.send(
-                "❌ An error occurred while starting the betting workflow. Please try again later.",
-                ephemeral=True
-            )
+# --- Cog Definition ---
+class BettingCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        # Services are accessed via self.bot
+
+    # Decorator defines the slash command and attaches it to the Cog
+    @app_commands.command(name="bet", description="Place a new bet through a guided workflow.")
+    # Remove or keep the guild restriction based on your deployment plan
+    # @app_commands.guilds(discord.Object(id=YOUR_TEST_GUILD_ID)) # Replace with your ID or remove for global
+    async def bet_command(self, interaction: Interaction):
+        """Starts the interactive betting workflow."""
+        logger.info(f"Bet command initiated by {interaction.user} in guild {interaction.guild_id}")
+        try:
+            # Authorization Check (Example - Implement is_authorized_capper in UserService)
+            is_auth = True # Replace with actual check
+            # if hasattr(self.bot, 'user_service') and hasattr(self.bot.user_service, 'is_authorized_capper'):
+            #    is_auth = await self.bot.user_service.is_authorized_capper(interaction.guild_id, interaction.user.id)
+            # else:
+            #    logger.error("Cannot perform authorization check: UserService not found or missing required method.")
+            #    await interaction.response.send_message("Bot configuration error.", ephemeral=True)
+            #    return
+
+            if not is_auth:
+                await interaction.response.send_message("❌ You are not authorized to place bets.", ephemeral=True)
+                return
+
+            # Defer the initial response - important for workflows that take time
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
+            # Create and start the workflow view
+            # Pass the interaction and the bot instance (self.bot) to the view
+            view = BetWorkflowView(interaction, self.bot)
+            await view.start_flow() # start_flow now uses followup.send
+
+        except Exception as e:
+            logger.exception(f"Error initiating bet command: {e}")
+            # Use followup if deferred, otherwise use response (though defer should happen first)
+            error_message = "❌ An error occurred while starting the betting workflow."
+            if interaction.response.is_done():
+                 try: await interaction.followup.send(error_message, ephemeral=True)
+                 except discord.HTTPException: pass # Ignore if followup fails
+            else:
+                 # Less likely case if defer() is used reliably
+                 try: await interaction.response.send_message(error_message, ephemeral=True)
+                 except discord.HTTPException: pass # Ignore if response fails
+
+
+# Setup function for the Cog
+async def setup(bot: commands.Bot):
+    await bot.add_cog(BettingCog(bot))
+    logger.info("BettingCog loaded")
