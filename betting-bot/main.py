@@ -73,32 +73,10 @@ class BettingBot(commands.Bot):
             await self.db_manager.connect()
             logger.info("Database pool connected.")
 
-            # Load Command Cogs
-            main_file_dir = os.path.dirname(os.path.abspath(__file__))
-            commands_dir_path = os.path.join(main_file_dir, "commands")
-            logger.info(f"Attempting to load command cogs from: {commands_dir_path}")
-
-            if not os.path.isdir(commands_dir_path):
-                logger.error(f"Commands directory not found at: {commands_dir_path}")
-            else:
-                for filename in os.listdir(commands_dir_path):
-                    if filename.endswith('.py') and not filename.startswith('__'):
-                        extension_name = filename[:-3]
-                        try:
-                            await self.load_extension(f'commands.{extension_name}')
-                            logger.info(f'Loaded command cog: {extension_name}')
-                        except commands.ExtensionNotFound:
-                            logger.error(f'Extension not found: commands.{extension_name}')
-                        except commands.ExtensionAlreadyLoaded:
-                            logger.warning(f'Extension already loaded: commands.{extension_name}')
-                        except commands.NoEntryPointError:
-                            logger.error(f'Extension has no setup function: commands.{extension_name}')
-                        except commands.ExtensionFailed as ef:
-                            logger.error(f'Extension setup failed for commands.{extension_name}: {ef.original}', exc_info=True)
-                        except Exception as e:
-                            logger.error(f'Failed to load command cog commands.{extension_name}: {e}', exc_info=True)
-
-            logger.info("Command loading process completed.")
+            # Import and register commands directly
+            from commands.betting import bet_command
+            self.tree.add_command(bet_command)
+            logger.info("Registered betting command")
 
             # Start Services
             logger.info("Starting services...")

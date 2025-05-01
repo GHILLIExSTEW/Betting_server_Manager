@@ -4,7 +4,6 @@
 
 import discord
 from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel
-from discord.ext import commands # Import commands for Cog
 from discord.ui import View, Select, Modal, TextInput, Button
 import logging
 from typing import Optional, List, Dict, Union
@@ -13,19 +12,10 @@ from datetime import datetime, timezone
 # Use relative imports assuming commands/ is sibling to services/, utils/, etc.
 try:
     # Import necessary services and errors
-    # Services will be accessed via self.bot.<service_name>
-    from ..services.bet_service import BetService # Not needed if accessed via bot
-    from ..services.game_service import GameService # Not needed if accessed via bot
-    from ..utils.errors import BetServiceError, ValidationError, GameNotFoundError # Add GameNotFoundError
-    # Import config if needed for validation limits etc.
-    # from ..config.settings import ALLOWED_LEAGUES, MIN_ODDS, MAX_ODDS, MIN_UNITS, MAX_UNITS
+    from ..utils.errors import BetServiceError, ValidationError, GameNotFoundError
 except ImportError:
     # Fallbacks
-    from services.bet_service import BetService
-    from services.game_service import GameService
     from utils.errors import BetServiceError, ValidationError, GameNotFoundError
-    # from config.settings import ALLOWED_LEAGUES, MIN_ODDS, MAX_ODDS, MIN_UNITS, MAX_UNITS
-
 
 logger = logging.getLogger(__name__)
 
@@ -214,9 +204,6 @@ class BetWorkflowView(View):
         super().__init__(timeout=600) # 10 minute timeout for the whole flow
         self.original_interaction = interaction # Original interaction
         self.bot = bot
-        # Access services via bot instance
-        self.bet_service: BetService = bot.bet_service
-        self.game_service: GameService = bot.game_service
         self.current_step = 0
         self.bet_details = {} # Dictionary to store collected data
         self.message: Optional[discord.WebhookMessage] = None # To store the message reference for editing
@@ -291,10 +278,10 @@ class BetWorkflowView(View):
                     elif league == "Tennis": sport = "tennis"
                     # Add more mappings
 
-                    if sport and hasattr(self.game_service, 'get_upcoming_games'):
+                    if sport and hasattr(self.bot, 'game_service'):
                         # Assuming get_upcoming_games fetches from DB based on GameService logic
                         # It might internally call API/cache if DB is empty or outdated
-                        upcoming_games = await self.game_service.get_upcoming_games(interaction.guild_id, hours=72) # Fetch next 72h from DB
+                        upcoming_games = await self.bot.game_service.get_upcoming_games(interaction.guild_id, hours=72) # Fetch next 72h from DB
                         # Filter games by the selected league name (case-insensitive) or ID
                         league_games = [g for g in upcoming_games if str(g.get('league_id')) == league or g.get('league_name','').lower() == league.lower()]
 
@@ -468,7 +455,7 @@ class BetWorkflowView(View):
 
         try:
             # Call BetService to create the bet
-            bet_serial = await self.bet_service.create_bet(
+            bet_serial = await self.bot.bet_service.create_bet(
                 guild_id=interaction.guild_id,
                 user_id=interaction.user.id,
                 game_id=details.get('game_id'), # Already processed in validation step
@@ -493,7 +480,7 @@ class BetWorkflowView(View):
 
                 # Store message_id -> bet_serial mapping for reaction tracking in BetService
                 if sent_message:
-                    self.bet_service.pending_reactions[sent_message.id] = {
+                    self.bot.bet_service.pending_reactions[sent_message.id] = {
                          'bet_serial': bet_serial,
                          'user_id': interaction.user.id,
                          'guild_id': interaction.guild_id,
@@ -677,75 +664,24 @@ class BetResolutionView(View):
              await interaction.response.send_message("Could not add reaction.", ephemeral=True)
 
 
-# --- Cog Definition ---
-class BettingCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        # Access services via self.bot if they are attached in main.py
-        self.bet_service: BetService = bot.bet_service
-        self.game_service: GameService = bot.game_service
-
-    @app_commands.command(name="bet", description="Place a new bet through a guided workflow.")
-    @app_commands.guilds(discord.Object(id=1328126227013439601))  # Test guild ID
-    async def bet_command(self, interaction: Interaction):
-        """Starts the interactive betting workflow."""
-        logger.info(f"Bet command initiated by {interaction.user} in guild {interaction.guild_id}")
-        try:
-            # Ensure services are available
-            if not hasattr(self.bot, 'bet_service') or not hasattr(self.bot, 'game_service'):
-                logger.error("Betting services not found on bot instance.")
-                await interaction.response.send_message("❌ Bot is not properly configured (Service Error).", ephemeral=True)
-                return
-
-            # Check if user is authorized using BetService
-            # Make sure admin has run /setid for this user first
-            is_authorized = await self.bet_service.is_user_authorized(interaction.guild_id, interaction.user.id)
-            if not is_authorized:
-                await interaction.response.send_message(
-                    "❌ You are not authorized to place bets. Please contact an admin if you should be.",
-                    ephemeral=True
-                )
-                return
-
-            # Defer the response ephemerally before starting the view
-            await interaction.response.defer(ephemeral=True, thinking=True)
-
-            # Start the interactive workflow view
-            view = BetWorkflowView(interaction, self.bot)
-            await view.start_flow() # The view now sends/edits the followup message
-
-        except Exception as e:
-            logger.exception(f"Error initiating bet command for {interaction.user}: {e}")
-            # Use followup if initial response was deferred
-            await interaction.followup.send("❌ An error occurred while starting the bet command.", ephemeral=True)
-
-    # Listener for persistent views (needed for BetResolutionView)
-    @commands.Cog.listener()
-    async def on_ready(self):
-        # Re-register persistent views if necessary
-        logger.info("BettingCog ready, persistent views should re-register if needed.")
-        # Add dummy view instance to register buttons
-        self.bot.add_view(BetResolutionView(bet_serial=0))
-
-    # Optional: Cog specific error handler
-    async def cog_app_command_error(self, interaction: Interaction, error: app_commands.AppCommandError):
-        # Handle errors like MissingRole, CheckFailure, etc.
-        if isinstance(error, app_commands.CheckFailure):
-            await interaction.response.send_message("You do not have the required role/permissions for this command.", ephemeral=True)
+# Define the bet command directly
+@app_commands.command(name="bet", description="Place a new bet through a guided workflow.")
+@app_commands.guilds(discord.Object(id=1328126227013439601))  # Test guild ID
+async def bet_command(interaction: Interaction):
+    """Starts the interactive betting workflow."""
+    try:
+        # Create and start the workflow view
+        view = BetWorkflowView(interaction, interaction.client)
+        await view.start_flow()
+    except Exception as e:
+        logger.error(f"Error in bet command: {e}", exc_info=True)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "❌ An error occurred while starting the betting workflow. Please try again later.",
+                ephemeral=True
+            )
         else:
-            logger.error(f"Error in BettingCog command: {error}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("An internal error occurred with the betting command.", ephemeral=True)
-            else:
-                try: 
-                    await interaction.followup.send("An internal error occurred.", ephemeral=True)
-                except Exception: 
-                    pass # Ignore followup errors
-
-
-# The setup function for the extension
-async def setup(bot: commands.Bot):
-    """Register the betting command with the bot."""
-    # Add the cog to the bot - this will automatically register the command
-    await bot.add_cog(BettingCog(bot))
-    logger.info("BettingCog loaded and command registered")
+            await interaction.followup.send(
+                "❌ An error occurred while starting the betting workflow. Please try again later.",
+                ephemeral=True
+            )
