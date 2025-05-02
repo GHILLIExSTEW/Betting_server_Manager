@@ -215,9 +215,15 @@ class ManualEntryButton(Button):
             if isinstance(item, CancelButton):
                 item.disabled = True
         line_type = self.parent_view.bet_details.get('line_type')
+        bet_type = self.parent_view.bet_details.get('bet_type')
         try:
-            modal = BetDetailsModal(line_type=line_type, is_manual=True, is_first_leg=len(self.parent_view.bet_details.get('legs', [])) == 0)
-            modal.view = self.parent_view
+            modal = BetDetailsModal(
+                line_type=line_type,
+                is_manual=True,
+                is_first_leg=len(self.parent_view.bet_details.get('legs', [])) == 0,
+                bet_type=bet_type  # Pass bet_type directly
+            )
+            modal.view = self.parent_view  # Assign view after creation
             await interaction.response.send_modal(modal)
             logger.debug("Manual entry modal sent successfully")
             await self.parent_view.edit_message(
@@ -273,11 +279,12 @@ class CancelButton(Button):
 
 
 class BetDetailsModal(Modal, title="Enter Bet Details"):
-    def __init__(self, line_type: str, is_manual: bool = False, is_first_leg: bool = False):
+    def __init__(self, line_type: str, is_manual: bool = False, is_first_leg: bool = False, bet_type: str = None):
         super().__init__(title="Enter Bet Details")
         self.line_type = line_type
         self.is_manual = is_manual
-        self.is_first_leg = is_first_leg  # Flag to determine if this is the first leg of a parlay
+        self.is_first_leg = is_first_leg
+        self.bet_type = bet_type  # Directly pass bet_type instead of accessing via view
 
         if is_manual:
             self.team = TextInput(
@@ -309,7 +316,7 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
         )
 
         # Include units input for all legs after the first leg of a parlay
-        if not (self.is_first_leg and self.view.bet_details.get('bet_type') == "parlay"):
+        if not (self.is_first_leg and self.bet_type == "parlay"):
             self.units = TextInput(
                 label="Units (e.g., 1, 1.5)",
                 placeholder="Enter units to risk",
@@ -472,21 +479,6 @@ class ChannelSelect(Select):
         self.parent_view.bet_details['channel_id'] = int(selected_value)
         logger.debug(f"Channel selected: {selected_value}")
         self.disabled = True
-        await interaction.response.defer()
-        await self.parent_view.go_next(interaction)
-
-
-class AddLegButton(Button):
-    def __init__(self, parent_view):
-        super().__init__(
-            style=ButtonStyle.blurple,
-            label="Add Leg",
-            custom_id=f"add_leg_{parent_view.original_interaction.id}"
-        )
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: Interaction):
-        self.parent_view.current_step = 2  # Reset to league selection for new leg
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
 
@@ -762,7 +754,12 @@ class BetWorkflowView(View):
                             logger.warning(
                                 f"No players available for game {game_id}. Proceeding to manual player entry."
                             )
-                            modal = BetDetailsModal(line_type=line_type, is_manual=False, is_first_leg=len(self.bet_details.get('legs', [])) == 0)
+                            modal = BetDetailsModal(
+                                line_type=line_type,
+                                is_manual=False,
+                                is_first_leg=len(self.bet_details.get('legs', [])) == 0,
+                                bet_type=self.bet_details.get('bet_type')
+                            )
                             modal.view = self
                             logger.debug(f"Sending BetDetailsModal for player_prop, is_manual=False")
                             try:
@@ -842,7 +839,7 @@ class BetWorkflowView(View):
                         return
 
                     bet_type = self.bet_details.get('bet_type')
-                    league = self.bet_details.get('league')
+                    league = self.bet_details.get('league', 'NHL')
                     bet_serial = None
                     if bet_type == "straight":
                         leg = legs[0]
@@ -904,7 +901,7 @@ class BetWorkflowView(View):
                             home_team=home_team,
                             away_team=away_team,
                             league=league,
-                            line=legs[0].get('line', 'ML'),  # Fallback for straight bet compatibility
+                            line=legs[0].get('line', 'ML'),
                             odds=float(legs[0].get('odds_str', '-110')),
                             units=float(legs[0].get('units_str', '1.00')),
                             bet_id=str(bet_serial),
@@ -1032,7 +1029,7 @@ class BetWorkflowView(View):
                             file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
                             self.preview_image_bytes.seek(0)
 
-                        # Add buttons based on bet type and number of legs
+                        # Add buttons based on bet type
                         if self.bet_details.get('bet_type') == "parlay":
                             self.add_item(ConfirmButton(self))  # Always show "Confirm & Post"
                             self.add_item(NextLegButton(self))  # Always show "Next Leg" for parlays
