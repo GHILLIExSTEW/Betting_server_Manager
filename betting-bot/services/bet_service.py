@@ -178,7 +178,7 @@ class BetService:
             )
 
             self.logger.debug(f"Executing bet insertion with args: {args}")
-            rowcount = await self.db.execute(query, args)
+            rowcount = await self.db.execute(query, *args)  # Unpack args to ensure flat tuple
             self.logger.debug(f"Inserted bet, rows affected: {rowcount}")
 
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
@@ -241,7 +241,7 @@ class BetService:
 
             if not (MIN_UNITS <= units <= MAX_UNITS):
                 raise ValidationError(
-                    f"Units ({units}) must be between {MIN_UNITS:.2:f} and {MAX_UNITS:.2f} for this server."
+                    f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
                 )
             if not (MIN_ODDS <= odds <= MAX_ODDS):
                 raise ValidationError(f"Odds ({odds}) must be between {MIN_ODDS} and {MAX_ODDS}")
@@ -296,7 +296,7 @@ class BetService:
                 stake
             )
             self.logger.debug(f"Executing parlay bet insertion with args: {args}")
-            rowcount = await self.db.execute(query, args)
+            rowcount = await self.db.execute(query, *args)  # Unpack args to ensure flat tuple
             self.logger.debug(f"Inserted parlay bet, rows affected: {rowcount}")
 
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
