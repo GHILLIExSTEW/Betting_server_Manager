@@ -127,7 +127,7 @@ class BetService:
             MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
             MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
             MIN_ODDS, MAX_ODDS = -10000, 10000
-
+    
             if not (MIN_UNITS <= units <= MAX_UNITS):
                 raise ValidationError(
                     f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
@@ -144,14 +144,14 @@ class BetService:
                 raise ValidationError("Line cannot be empty.")
             if not league:
                 raise ValidationError("League cannot be empty.")
-
+    
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
-
+    
             query = """
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type, league, team, opponent, line,
-                    stake, odds, channel_id, message_id, created_at, status, updated_at,
+                    units, odds, channel_id, message_id, created_at, status, updated_at,
                     expiration_time, result_value, result_description
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
@@ -175,14 +175,14 @@ class BetService:
                 None,
                 None
             )
-
+    
             self.logger.debug(f"Executing bet insertion with args: {args}")
             await self.db.execute(query, *args)
-
+    
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
             result = await self.db.fetch_one(bet_serial_query)
             bet_serial = result['bet_serial'] if result and 'bet_serial' in result else None
-
+    
             if bet_serial:
                 self.logger.info(
                     f"Bet {bet_serial} created successfully for user {user_id} in guild {guild_id}."
@@ -193,7 +193,7 @@ class BetService:
                     "Failed to retrieve bet_serial after insertion. "
                     "Check DB schema (AUTO_INCREMENT on bet_serial)."
                 )
-
+    
         except ValidationError as ve:
             self.logger.warning(f"Bet creation validation failed for user {user_id}: {ve}")
             raise
@@ -206,7 +206,7 @@ class BetService:
         except Exception as e:
             self.logger.exception(f"Error creating bet for user {user_id}: {e}")
             raise BetServiceError("An internal error occurred while creating the bet.")
-
+    
     async def create_parlay_bet(
         self,
         guild_id: int,
@@ -219,7 +219,7 @@ class BetService:
         try:
             if len(legs) < 2:
                 raise ValidationError("Parlay bets must have at least two legs.")
-
+    
             leg = legs[0]
             units = float(leg['units'])
             odds = float(leg['odds'])
@@ -228,12 +228,12 @@ class BetService:
             team = leg.get('team', 'Unknown')
             opponent = leg.get('opponent')
             line = leg.get('line', 'Unknown')
-
+    
             guild_settings = await self.bot.admin_service.get_server_settings(guild_id)
             MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
             MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
             MIN_ODDS, MAX_ODDS = -10000, 10000
-
+    
             if not (MIN_UNITS <= units <= MAX_UNITS):
                 raise ValidationError(
                     f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
@@ -248,7 +248,7 @@ class BetService:
                 raise ValidationError("Team cannot be empty.")
             if not line:
                 raise ValidationError("Line cannot be empty.")
-
+    
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
             result_description = json.dumps([{
@@ -260,11 +260,11 @@ class BetService:
                 'units': leg['units'],
                 'odds': leg['odds']
             } for leg in legs])
-
+    
             query = """
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type, league, team, opponent, line,
-                    stake, odds, channel_id, message_id, created_at, status, updated_at,
+                    units, odds, channel_id, message_id, created_at, status, updated_at,
                     expiration_time, result_value, result_description
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
@@ -289,20 +289,20 @@ class BetService:
                 result_description
             )
             await self.db.execute(query, *args)
-
+    
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
             result = await self.db.fetch_one(bet_serial_query)
             bet_serial = result['bet_serial'] if result and 'bet_serial' in result else None
-
+    
             if not bet_serial:
                 raise BetServiceError(
                     "Failed to retrieve bet_serial after insertion. "
                     "Check DB schema (AUTO_INCREMENT on bet_serial)."
                 )
-
+    
             self.logger.info(f"Created parlay bet with serial {bet_serial} for user {user_id}")
             return bet_serial
-
+    
         except ValidationError as ve:
             self.logger.warning(f"Parlay bet creation validation failed for user {user_id}: {ve}")
             raise
