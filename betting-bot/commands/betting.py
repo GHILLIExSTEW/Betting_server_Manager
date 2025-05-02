@@ -736,34 +736,35 @@ class BetWorkflowView(View):
 
                     leg = legs[0]  # For straight bets, we only have one leg
                     # Temporarily set channel_id to None since we haven't selected it yet
-                    if self.bet_details.get('bet_type') == "straight":
-                    bet_serial = await self.bot.bet_service.create_bet(
-                        guild_id=interaction.guild_id,
-                        user_id=interaction.user.id,
-                        game_id=self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
-                        bet_type="player_prop" if leg.get('player') else "game_line",
-                        team_name=leg.get('team', leg.get('line')),
-                        units=float(leg.get('units_str', '1.00')),
-                        odds=float(leg.get('odds_str', '-110')),
-                        channel_id=None,  # Will update later in submit_bet
-                        league=self.bet_details.get('league')  # Pass the league
-                    )
+                    bet_type = self.bet_details.get('bet_type')
+                    if bet_type == "straight":
+                        bet_serial = await self.bot.bet_service.create_bet(
+                            guild_id=interaction.guild_id,
+                            user_id=interaction.user.id,
+                            game_id=self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
+                            bet_type="player_prop" if leg.get('player') else "game_line",
+                            team_name=leg.get('team', leg.get('line')),
+                            units=float(leg.get('units_str', '1.00')),
+                            odds=float(leg.get('odds_str', '-110')),
+                            channel_id=None,  # Will update later in submit_bet
+                            league=self.bet_details.get('league')  # Pass the league
+                        )
                     else:  # Parlay
-                    bet_serial = await self.bot.bet_service.create_parlay_bet(
-                        guild_id=interaction.guild_id,
-                        user_id=interaction.user.id,
-                        legs=[
-                            {
-                                'game_id': self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
-                                'bet_type': "player_prop" if leg.get('player') else "game_line",
-                                'team_name': leg.get('team', leg.get('line')),
-                                'units': float(leg.get('units_str', '1.00')),
-                                'odds': float(leg.get('odds_str', '-110')),
-                            } for leg in legs
-                        ],
-                        channel_id=None,
-                        league=self.bet_details.get('league')  # Pass the league
-                    )
+                        bet_serial = await self.bot.bet_service.create_parlay_bet(
+                            guild_id=interaction.guild_id,
+                            user_id=interaction.user.id,
+                            legs=[
+                                {
+                                    'game_id': self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
+                                    'bet_type': "player_prop" if leg.get('player') else "game_line",
+                                    'team_name': leg.get('team', leg.get('line')),
+                                    'units': float(leg.get('units_str', '1.00')),
+                                    'odds': float(leg.get('odds_str', '-110')),
+                                } for leg in legs
+                            ],
+                            channel_id=None,
+                            league=self.bet_details.get('league')  # Pass the league
+                        )
 
                     self.bet_details['bet_serial'] = bet_serial  # Store for use in submit_bet
 
