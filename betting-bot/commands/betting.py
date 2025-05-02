@@ -10,8 +10,12 @@ import logging
 from typing import Optional
 
 from utils.errors import BetServiceError, ValidationError
-from commands.straight_betting import StraightBetWorkflowView
-from commands.parlay_betting import ParlayBetWorkflowView
+try:
+    from commands.straight_betting import StraightBetWorkflowView
+    from commands.parlay_betting import ParlayBetWorkflowView
+except ImportError as e:
+    logging.error(f"Failed to import betting workflows: {e}")
+    raise
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +97,10 @@ class BetTypeView(View):
             else:  # parlay
                 view = ParlayBetWorkflowView(self.original_interaction, self.bot)
             await view.start_flow()
-        except discord.HTTPException as e:
-            logger.error(f"Failed to start {bet_type} bet workflow: {e}")
+        except Exception as e:
+            logger.error(f"Failed to start {bet_type} bet workflow: {e}", exc_info=True)
             await interaction.followup.send(
-                f"❌ Failed to start {bet_type} bet workflow. Please try again.",
+                f"❌ Failed to start {bet_type} bet workflow: {str(e)}. Please try again.",
                 ephemeral=True
             )
         finally:
@@ -125,7 +129,7 @@ class BettingCog(commands.Cog):
             )
         except Exception as e:
             logger.exception(f"Error initiating bet command: {e}")
-            error_message = "❌ An error occurred while starting the betting workflow."
+            error_message = f"❌ An error occurred while starting the betting workflow: {str(e)}"
             if interaction.response.is_done():
                 await interaction.followup.send(error_message, ephemeral=True)
             else:
