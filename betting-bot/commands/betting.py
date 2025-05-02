@@ -216,7 +216,7 @@ class ManualEntryButton(Button):
                 item.disabled = True
         line_type = self.parent_view.bet_details.get('line_type')
         try:
-            modal = BetDetailsModal(line_type=line_type, is_manual=True)
+            modal = BetDetailsModal(line_type=line_type, is_manual=True, is_first_leg=len(self.parent_view.bet_details.get('legs', [])) == 0)
             modal.view = self.parent_view
             await interaction.response.send_modal(modal)
             logger.debug("Manual entry modal sent successfully")
@@ -273,10 +273,12 @@ class CancelButton(Button):
 
 
 class BetDetailsModal(Modal, title="Enter Bet Details"):
-    def __init__(self, line_type: str, is_manual: bool = False):
+    def __init__(self, line_type: str, is_manual: bool = False, is_first_leg: bool = False):
         super().__init__(title="Enter Bet Details")
         self.line_type = line_type
         self.is_manual = is_manual
+        self.is_first_leg = is_first_leg  # Flag to determine if this is the first leg of a parlay
+
         if is_manual:
             self.team = TextInput(
                 label="Team",
@@ -292,6 +294,7 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
             )
             self.add_item(self.team)
             self.add_item(self.opponent)
+
         self.line = TextInput(
             label="Line",
             placeholder="e.g., -7.5, Over 220.5",
@@ -304,12 +307,17 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
             required=True,
             max_length=10
         )
-        self.units = TextInput(
-            label="Units (e.g., 1, 1.5)",
-            placeholder="Enter units to risk",
-            required=True,
-            max_length=5
-        )
+
+        # Include units input for all legs after the first leg of a parlay
+        if not (self.is_first_leg and self.view.bet_details.get('bet_type') == "parlay"):
+            self.units = TextInput(
+                label="Units (e.g., 1, 1.5)",
+                placeholder="Enter units to risk",
+                required=True,
+                max_length=5
+            )
+            self.add_item(self.units)
+
         if line_type == "player_prop" and not is_manual:
             self.player = TextInput(
                 label="Player",
@@ -318,17 +326,16 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
                 max_length=100
             )
             self.add_item(self.player)
+
         self.add_item(self.line)
         self.add_item(self.odds)
-        self.add_item(self.units)
 
     async def on_submit(self, interaction: Interaction):
-        logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}")
+        logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, is_first_leg={self.is_first_leg}")
         line = self.line.value.strip()
         odds = self.odds.value.strip()
-        units = self.units.value.strip()
 
-        if not all([line, odds, units]):
+        if not all([line, odds]):
             logger.warning("Modal submission failed: Missing required fields")
             await interaction.response.send_message("Please fill in all required fields.", ephemeral=True)
             return
@@ -336,8 +343,17 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
         leg = {
             'line': line,
             'odds_str': odds,
-            'units_str': units
         }
+
+        # Set units if the field was present (not the first leg of a parlay)
+        if hasattr(self, 'units'):
+            units = self.units.value.strip()
+            if not units:
+                logger.warning("Modal submission failed: Missing units")
+                await interaction.response.send_message("Please provide valid units.", ephemeral=True)
+                return
+            leg['units_str'] = units
+
         if self.is_manual:
             team = self.team.value.strip()
             opponent = self.opponent.value.strip()
@@ -367,7 +383,18 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
         logger.debug(f"Bet details entered: {leg}")
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
-        self.view.current_step = 5
+
+        # If this is a parlay, redirect to add another leg or proceed to confirmation
+        if self.view.bet_details.get('bet_type') == "parlay":
+            # After adding the first leg, redirect to league selection for the next leg
+            if len(self.view.bet_details['legs']) < 2:
+                self.view.current_step = 2  # Redirect to league selection for the next leg
+            else:
+                # After adding the second or subsequent leg, proceed to confirmation
+                self.view.current_step = 5  # Proceed to confirmation (step 7)
+        else:
+            self.view.current_step = 5  # Proceed to channel selection for straight bets
+
         await self.view.go_next(interaction)
 
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
@@ -379,6 +406,48 @@ class BetDetailsModal(Modal, title="Enter Bet Details"):
             )
         except discord.HTTPException:
             logger.warning("Could not send error followup for BetDetailsModal.")
+
+
+class UnitsModal(Modal, title="Enter Parlay Units"):
+    def __init__(self):
+        super().__init__(title="Enter Parlay Units")
+        self.units = TextInput(
+            label="Units (e.g., 1, 1.5)",
+            placeholder="Enter units to risk for the parlay",
+            required=True,
+            max_length=5
+        )
+        self.add_item(self.units)
+
+    async def on_submit(self, interaction: Interaction):
+        logger.debug("UnitsModal submitted")
+        units = self.units.value.strip()
+
+        if not units:
+            logger.warning("UnitsModal submission failed: Missing units")
+            await interaction.response.send_message("Please provide valid units.", ephemeral=True)
+            return
+
+        # Apply the units to all legs in the parlay
+        for leg in self.view.bet_details['legs']:
+            leg['units_str'] = units
+
+        logger.debug(f"Parlay units set: {units}")
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+        self.view.current_step = 5  # Proceed to channel selection
+        await self.view.go_next(interaction)
+
+    async def on_error(self, interaction: Interaction, error: Exception) -> None:
+        logger.error(f"Error in UnitsModal: {error}", exc_info=True)
+        try:
+            await interaction.followup.send(
+                '❌ An error occurred with the units modal.',
+                ephemeral=True
+            )
+        except discord.HTTPException:
+            logger.warning("Could not send error followup for UnitsModal.")
 
 
 class ChannelSelect(Select):
@@ -419,6 +488,21 @@ class AddLegButton(Button):
     async def callback(self, interaction: Interaction):
         self.parent_view.current_step = 2  # Reset to league selection for new leg
         await interaction.response.defer()
+        await self.parent_view.go_next(interaction)
+
+
+class NextLegButton(Button):
+    def __init__(self, parent_view):
+        super().__init__(
+            style=ButtonStyle.green,
+            label="Next Leg",
+            custom_id=f"next_leg_{parent_view.original_interaction.id}"
+        )
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: Interaction):
+        self.parent_view.current_step = 2  # Redirect to league selection for the next leg
+        await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.go_next(interaction)
 
 
@@ -678,7 +762,7 @@ class BetWorkflowView(View):
                             logger.warning(
                                 f"No players available for game {game_id}. Proceeding to manual player entry."
                             )
-                            modal = BetDetailsModal(line_type=line_type, is_manual=False)
+                            modal = BetDetailsModal(line_type=line_type, is_manual=False, is_first_leg=len(self.bet_details.get('legs', [])) == 0)
                             modal.view = self
                             logger.debug(f"Sending BetDetailsModal for player_prop, is_manual=False")
                             try:
@@ -861,7 +945,7 @@ class BetWorkflowView(View):
                         legs = self.bet_details.get('legs', [])
                         if self.bet_details.get('bet_type') == "parlay" and len(legs) < 2:
                             raise ValueError("Parlay bets require at least two legs")
-                        
+
                         for leg in legs:
                             odds_str = leg.get('odds_str', '').replace('+','').strip()
                             units_str = leg.get('units_str', '').lower().replace('u','').strip()
@@ -894,12 +978,69 @@ class BetWorkflowView(View):
                             file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
                             self.preview_image_bytes.seek(0)  # Reset pointer for reuse
                         else:
-                            raise ValueError("Preview image not found. Please start over.")
+                            # Generate the image if it doesn't exist (e.g., after adding more legs)
+                            bet_type = self.bet_details.get('bet_type')
+                            league = self.bet_details.get('league', 'NHL')
+                            timestamp = datetime.now(timezone.utc)
+                            legs = self.bet_details.get('legs', [])
+                            leg = legs[0]
+                            home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
+                            away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
+                            bet_serial = self.bet_details.get('bet_serial', 'Unknown')
 
-                        self.add_item(ConfirmButton(self))
-                        self.add_item(CancelButton(self))
+                            if bet_type == "parlay":
+                                game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
+                                is_same_game = len(game_ids) == 1
+                                parlay_legs = [
+                                    {
+                                        'home_team': leg.get('team', 'Unknown'),
+                                        'away_team': leg.get('opponent', 'Unknown'),
+                                        'line': leg.get('line', 'ML'),
+                                        'odds': float(leg.get('odds_str', '-110')),
+                                        'units': float(leg.get('units_str', '1.00'))
+                                    } for leg in legs
+                                ]
+                                bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                                    home_team=home_team,
+                                    away_team=away_team,
+                                    league=league,
+                                    line=legs[0].get('line', 'ML'),
+                                    odds=float(legs[0].get('odds_str', '-110')),
+                                    units=float(legs[0].get('units_str', '1.00')),
+                                    bet_id=str(bet_serial),
+                                    timestamp=timestamp,
+                                    bet_type="parlay",
+                                    parlay_legs=parlay_legs,
+                                    is_same_game=is_same_game
+                                )
+                            else:
+                                bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                                    home_team=home_team,
+                                    away_team=away_team,
+                                    league=league,
+                                    line=leg.get('line', 'ML'),
+                                    odds=float(leg.get('odds_str', '-110')),
+                                    units=float(leg.get('units_str', '1.00')),
+                                    bet_id=str(bet_serial),
+                                    timestamp=timestamp,
+                                    bet_type="straight"
+                                )
+
+                            self.preview_image_bytes = io.BytesIO()
+                            bet_slip_image.save(self.preview_image_bytes, 'PNG')
+                            self.preview_image_bytes.seek(0)
+                            file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
+                            self.preview_image_bytes.seek(0)
+
+                        # Add buttons based on bet type and number of legs
                         if self.bet_details.get('bet_type') == "parlay":
-                            self.add_item(AddLegButton(self))
+                            self.add_item(ConfirmButton(self))  # Always show "Confirm & Post"
+                            self.add_item(NextLegButton(self))  # Always show "Next Leg" for parlays
+                            self.add_item(CancelButton(self))
+                        else:
+                            self.add_item(ConfirmButton(self))  # Straight bet: only "Confirm & Post"
+                            self.add_item(CancelButton(self))
+
                         step_content = f"**Step {self.current_step}**: Please Confirm Your Bet"
                         logger.debug(f"Showing confirmation for step 7")
                         await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
