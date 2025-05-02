@@ -569,7 +569,7 @@ class StraightBetWorkflowView(View):
                         except discord.HTTPException as e:
                             logger.error(f"Failed to send BetDetailsModal: {e}")
                             await interaction.followup.send(
-                                "❌ Failed to send bet details modal. Please try again.",
+                                    "❌ Failed to send bet details modal. Please try again.",
                                     ephemeral=True
                                 )
                                 self.stop()
