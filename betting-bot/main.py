@@ -55,7 +55,6 @@ logger = logging.getLogger(__name__)
 
 # --- Environment Variable Access ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
-COOKIN_BOOKS_GUILD_ID = 1328126227013439601
 
 # --- Bot Token Check ---
 if not BOT_TOKEN:
@@ -140,7 +139,8 @@ class BettingBot(commands.Bot):
                 synced = await self.tree.sync()
                 logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
 
-                # Sync to each guild the bot is in
+                # Wait until guilds are available
+                await self.wait_until_ready()
                 for guild in self.guilds:
                     logger.debug(f"Syncing commands to guild: {guild.name} ({guild.id})")
                     guild_obj = discord.Object(id=guild.id)
