@@ -25,12 +25,7 @@ class LeagueSelect(Select):
         self.parent_view = parent_view
         options = [SelectOption(label=league, value=league) for league in leagues[:24]]
         options.append(SelectOption(label="Other", value="Other"))
-        super().__init__(
-            placeholder="Select League...",
-            options=options,
-            min_values=1,
-            max_values=1
-        )
+        super().__init__(placeholder="Select League...", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: Interaction):
         self.parent_view.bet_details['league'] = self.values[0]
@@ -46,12 +41,7 @@ class LineTypeSelect(Select):
             SelectOption(label="Game Line", value="game_line", description="Moneyline or game over/under"),
             SelectOption(label="Player Prop", value="player_prop", description="Bet on player performance")
         ]
-        super().__init__(
-            placeholder="Select Line Type...",
-            options=options,
-            min_values=1,
-            max_values=1
-        )
+        super().__init__(placeholder="Select Line Type...", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: Interaction):
         self.parent_view.bet_details['line_type'] = self.values[0]
@@ -68,22 +58,14 @@ class GameSelect(Select):
             home = game.get('home_team_name', 'Unknown')
             away = game.get('away_team_name', 'Unknown')
             start_dt = game.get('start_time')
-            if isinstance(start_dt, datetime):
-                time_str = start_dt.strftime('%m/%d %H:%M %Z')
-            else:
-                time_str = 'Time N/A'
+            time_str = start_dt.strftime('%m/%d %H:%M %Z') if isinstance(start_dt, datetime) else 'Time N/A'
             label = f"{away} @ {home} ({time_str})"
             game_api_id = game.get('id')
             if game_api_id is None:
                 continue
             options.append(SelectOption(label=label[:100], value=str(game_api_id)))
         options.append(SelectOption(label="Other (Manual Entry)", value="Other"))
-        super().__init__(
-            placeholder="Select Game (or Other)...",
-            options=options,
-            min_values=1,
-            max_values=1
-        )
+        super().__init__(placeholder="Select Game (or Other)...", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: Interaction):
         self.parent_view.bet_details['game_id'] = self.values[0]
@@ -104,12 +86,7 @@ class HomePlayerSelect(Select):
         options = [SelectOption(label=player, value=f"home_{player}") for player in players[:24]]
         if not options:
             options.append(SelectOption(label="No Players Available", value="none", emoji="❌"))
-        super().__init__(
-            placeholder=f"{team_name} Players...",
-            options=options,
-            min_values=0,
-            max_values=1
-        )
+        super().__init__(placeholder=f"{team_name} Players...", options=options, min_values=0, max_values=1)
 
     async def callback(self, interaction: Interaction):
         if self.values and self.values[0] != "none":
@@ -131,12 +108,7 @@ class AwayPlayerSelect(Select):
         options = [SelectOption(label=player, value=f"away_{player}") for player in players[:24]]
         if not options:
             options.append(SelectOption(label="No Players Available", value="none", emoji="❌"))
-        super().__init__(
-            placeholder=f"{team_name} Players...",
-            options=options,
-            min_values=0,
-            max_values=1
-        )
+        super().__init__(placeholder=f"{team_name} Players...", options=options, min_values=0, max_values=1)
 
     async def callback(self, interaction: Interaction):
         if self.values and self.values[0] != "none":
@@ -236,11 +208,7 @@ class BetDetailsModal(Modal):
         self.leg_number = leg_number
 
         if is_manual:
-            self.team = TextInput(
-                label="Team",
-                required=True,
-                max_length=100
-            )
+            self.team = TextInput(label="Team", required=True, max_length=100)
             self.opponent = TextInput(
                 label="Opponent" if line_type == "game_line" else "Player",
                 required=True,
@@ -250,18 +218,10 @@ class BetDetailsModal(Modal):
             self.add_item(self.opponent)
 
         if line_type == "player_prop" and not is_manual:
-            self.player = TextInput(
-                label="Player",
-                required=True,
-                max_length=100
-            )
+            self.player = TextInput(label="Player", required=True, max_length=100)
             self.add_item(self.player)
 
-        self.line = TextInput(
-            label="Line",
-            required=True,
-            max_length=100
-        )
+        self.line = TextInput(label="Line", required=True, max_length=100)
         self.add_item(self.line)
 
     async def on_submit(self, interaction: Interaction):
@@ -281,8 +241,7 @@ class BetDetailsModal(Modal):
             if not all([team, opponent]):
                 logger.warning("Modal submission failed: Missing team or opponent/player")
                 await interaction.response.send_message(
-                    "Please provide valid team and opponent/player.",
-                    ephemeral=True
+                    "Please provide valid team and opponent/player.", ephemeral=True
                 )
                 return
             leg['team'] = team
@@ -306,7 +265,6 @@ class BetDetailsModal(Modal):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
 
-        # Proceed to leg decision step
         self.view.current_step = 4  # Leg decision step
         self.view.bet_details.pop('game_id', None)
         self.view.bet_details.pop('home_team_name', None)
@@ -318,10 +276,7 @@ class BetDetailsModal(Modal):
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
         logger.error(f"Error in BetDetailsModal: {error}", exc_info=True)
         try:
-            await interaction.followup.send(
-                '❌ An error occurred with the bet details modal.',
-                ephemeral=True
-            )
+            await interaction.followup.send('❌ An error occurred with the bet details modal.', ephemeral=True)
         except discord.HTTPException:
             logger.warning("Could not send error followup for BetDetailsModal.")
 
@@ -333,12 +288,7 @@ class UnitsSelect(Select):
             SelectOption(label="2 Units", value="2.0"),
             SelectOption(label="3 Units", value="3.0")
         ]
-        super().__init__(
-            placeholder="Select Units for Parlay...",
-            options=options,
-            min_values=1,
-            max_values=1
-        )
+        super().__init__(placeholder="Select Units for Parlay...", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: Interaction):
         units = self.values[0]
@@ -467,8 +417,7 @@ class ParlayBetWorkflowView(View):
         except discord.HTTPException as e:
             logger.error(f"Failed to send initial message for parlay workflow: {e}")
             await self.original_interaction.followup.send(
-                "❌ Failed to start bet workflow. Please try again.",
-                ephemeral=True
+                "❌ Failed to start bet workflow. Please try again.", ephemeral=True
             )
             self.stop()
 
@@ -476,8 +425,7 @@ class ParlayBetWorkflowView(View):
         if interaction.user.id != self.original_interaction.user.id:
             logger.debug(f"Unauthorized interaction attempt by {interaction.user} (ID: {interaction.user.id})")
             await interaction.response.send_message(
-                "You cannot interact with this bet placement.",
-                ephemeral=True
+                "You cannot interact with this bet placement.", ephemeral=True
             )
             return False
         self.latest_interaction = interaction
@@ -530,15 +478,13 @@ class ParlayBetWorkflowView(View):
             logger.warning(f"Failed to edit ParlayBetWorkflowView message: {e}")
             if interaction:
                 await interaction.followup.send(
-                    "❌ Failed to update bet workflow. Please try again.",
-                    ephemeral=True
+                    "❌ Failed to update bet workflow. Please try again.", ephemeral=True
                 )
         except Exception as e:
             logger.exception(f"Unexpected error editing ParlayBetWorkflowView message: {e}")
             if interaction:
                 await interaction.followup.send(
-                    "❌ An unexpected error occurred. Please try again.",
-                    ephemeral=True
+                    "❌ An unexpected error occurred. Please try again.", ephemeral=True
                 )
 
     async def go_next(self, interaction: Interaction):
@@ -591,7 +537,7 @@ class ParlayBetWorkflowView(View):
                     if league_games:
                         self.add_item(GameSelect(self, league_games))
                         self.add_item(CancelButton(self))
-                        step_content += f": Select Game for {league} (or Other)"
+                        step_content += f": Select Game for { league} (or Other)"
                         logger.debug(f"Showing game selection for {league}")
                         await self.edit_message(interaction, content=step_content, view=self)
                     else:
@@ -659,7 +605,6 @@ class ParlayBetWorkflowView(View):
                             self.stop()
                         return
                 elif self.current_step == 5:
-                    # Leg decision step: Add Leg? or Finalize
                     leg_count = len(self.bet_details.get('legs', []))
                     step_content = f"Leg {leg_count} added successfully. Add another leg or finalize the parlay?"
                     self.add_item(AddLegButton(self))
@@ -667,12 +612,10 @@ class ParlayBetWorkflowView(View):
                     self.add_item(CancelButton(self))
                     await self.edit_message(interaction, content=step_content, view=self)
                 elif self.current_step == 6:
-                    # Units selection step
                     step_content = "Select units for the parlay"
                     view = UnitsView(self)
                     await self.edit_message(interaction, content=step_content, view=view)
                 elif self.current_step == 7:
-                    # Channel selection and preview
                     channels = []
                     try:
                         if hasattr(self.bot, 'db_manager'):
@@ -794,7 +737,6 @@ class ParlayBetWorkflowView(View):
                     step_content = "Select Channel to Post Bet"
                     await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
                 elif self.current_step == 8:
-                    # Confirmation step
                     try:
                         legs = self.bet_details.get('legs', [])
                         if len(legs) < 2:
