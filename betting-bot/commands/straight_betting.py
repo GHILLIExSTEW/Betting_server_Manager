@@ -841,3 +841,7 @@ class StraightBetWorkflowView(View):
         finally:
             self.preview_image_bytes = None
             self.stop()
+
+async def setup(bot):
+    """Setup function to register the StraightBetWorkflowView as a cog."""
+    logger.info("StraightBetWorkflowView setup completed")
