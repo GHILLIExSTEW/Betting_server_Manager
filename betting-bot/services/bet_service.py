@@ -11,7 +11,7 @@ from discord import Embed, Color, ButtonStyle
 from discord.ui import View, Select, Modal, TextInput, Button
 from discord.ext import commands
 import json
-import pymysql  # Add pymysql import
+import pymysql
 
 try:
     from ..utils.errors import BetServiceError, ValidationError, InsufficientUnitsError
@@ -121,14 +121,12 @@ class BetService:
         expiration_time: Optional[datetime] = None
     ) -> int:
         """Create a new bet in the database. Returns the bet_serial."""
-        bet_serial = None
-        connection = None
         try:
             guild_settings = await self.bot.admin_service.get_server_settings(guild_id)
             MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
             MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
             MIN_ODDS, MAX_ODDS = -10000, 10000
-    
+
             if not (MIN_UNITS <= units <= MAX_UNITS):
                 raise ValidationError(
                     f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
@@ -145,11 +143,11 @@ class BetService:
                 raise ValidationError("Line cannot be empty.")
             if not league:
                 raise ValidationError("League cannot be empty.")
-    
+
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
             stake = round(units)  # Round units to nearest integer for stake (DECIMAL(4,0))
-    
+
             query = """
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type, league, team, opponent, line,
@@ -178,35 +176,29 @@ class BetService:
                 None,
                 stake
             )
-    
+
             self.logger.debug(f"Executing bet insertion with args: {args}")
-            connection = await self.db.pool.acquire()
-            async with connection.cursor() as cursor:
-                rowcount = await cursor.execute(query, args)
-                await connection.commit()
+            rowcount = await self.db.execute(query, args)
             self.logger.debug(f"Inserted bet, rows affected: {rowcount}")
-    
-            async with connection.cursor() as cursor:
-                await cursor.execute("SELECT LAST_INSERT_ID() as bet_serial")
-                result = await cursor.fetchone()
+
+            bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
+            result = await self.db.fetch_one(bet_serial_query)
             self.logger.debug(f"LAST_INSERT_ID result: {result}")
-            bet_serial = result[0] if result and isinstance(result, tuple) and result[0] else None
-    
+            bet_serial = result['bet_serial'] if result and 'bet_serial' in result and result['bet_serial'] else None
+
             if bet_serial and bet_serial > 0:
                 self.logger.info(
                     f"Bet {bet_serial} created successfully for user {user_id} in guild {guild_id}."
                 )
-                async with connection.cursor() as cursor:
-                    await cursor.execute("SELECT bet_serial FROM bets WHERE bet_serial = %s", (bet_serial,))
-                    verify_result = await cursor.fetchone()
-                    self.logger.debug(f"Verification query result: {verify_result}")
+                verify_result = await self.db.fetch_one("SELECT bet_serial FROM bets WHERE bet_serial = %s", (bet_serial,))
+                self.logger.debug(f"Verification query result: {verify_result}")
                 return bet_serial
             else:
                 raise BetServiceError(
                     f"Failed to retrieve bet_serial after insertion. Result: {result}, Rows affected: {rowcount}. "
                     "Check DB schema (AUTO_INCREMENT on bet_serial) and transaction state."
                 )
-    
+
         except ValidationError as ve:
             self.logger.warning(f"Bet creation validation failed for user {user_id}: {ve}")
             raise
@@ -219,10 +211,7 @@ class BetService:
         except Exception as e:
             self.logger.exception(f"Error creating bet for user {user_id}: {e}")
             raise BetServiceError("An internal error occurred while creating the bet.")
-        finally:
-            if connection:
-                await self.db.pool.release(connection)
-    
+
     async def create_parlay_bet(
         self,
         guild_id: int,
@@ -232,11 +221,10 @@ class BetService:
         league: Optional[str] = None
     ) -> int:
         """Create a new parlay bet and return the bet serial."""
-        connection = None
         try:
             if len(legs) < 2:
                 raise ValidationError("Parlay bets must have at least two legs.")
-    
+
             leg = legs[0]
             units = float(leg['units'])
             odds = float(leg['odds'])
@@ -245,15 +233,15 @@ class BetService:
             team = leg.get('team', 'Unknown')
             opponent = leg.get('opponent')
             line = leg.get('line', 'Unknown')
-    
+
             guild_settings = await self.bot.admin_service.get_server_settings(guild_id)
             MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
             MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
             MIN_ODDS, MAX_ODDS = -10000, 10000
-    
+
             if not (MIN_UNITS <= units <= MAX_UNITS):
                 raise ValidationError(
-                    f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
+                    f"Units ({units}) must be between {MIN_UNITS:.2:f} and {MAX_UNITS:.2f} for this server."
                 )
             if not (MIN_ODDS <= odds <= MAX_ODDS):
                 raise ValidationError(f"Odds ({odds}) must be between {MIN_ODDS} and {MAX_ODDS}")
@@ -265,10 +253,10 @@ class BetService:
                 raise ValidationError("Team cannot be empty.")
             if not line:
                 raise ValidationError("Line cannot be empty.")
-    
+
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
-            stake = round(units)  # Round units to nearest integer for stake
+            stake = round(units)  # Round units to nearest integer for stake (DECIMAL(4,0))
             result_description = json.dumps([{
                 'game_id': leg['game_id'],
                 'bet_type': leg['bet_type'],
@@ -278,7 +266,7 @@ class BetService:
                 'units': leg['units'],
                 'odds': leg['odds']
             } for leg in legs])
-    
+
             query = """
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type, league, team, opponent, line,
@@ -308,31 +296,25 @@ class BetService:
                 stake
             )
             self.logger.debug(f"Executing parlay bet insertion with args: {args}")
-            connection = await self.db.pool.acquire()
-            async with connection.cursor() as cursor:
-                rowcount = await cursor.execute(query, args)
-                await connection.commit()
+            rowcount = await self.db.execute(query, args)
             self.logger.debug(f"Inserted parlay bet, rows affected: {rowcount}")
-    
-            async with connection.cursor() as cursor:
-                await cursor.execute("SELECT LAST_INSERT_ID() as bet_serial")
-                result = await cursor.fetchone()
+
+            bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
+            result = await self.db.fetch_one(bet_serial_query)
             self.logger.debug(f"LAST_INSERT_ID result: {result}")
-            bet_serial = result[0] if result and isinstance(result, tuple) and result[0] else None
-    
+            bet_serial = result['bet_serial'] if result and 'bet_serial' in result and result['bet_serial'] else None
+
             if bet_serial and bet_serial > 0:
                 self.logger.info(f"Created parlay bet with serial {bet_serial} for user {user_id}")
-                async with connection.cursor() as cursor:
-                    await cursor.execute("SELECT bet_serial FROM bets WHERE bet_serial = %s", (bet_serial,))
-                    verify_result = await cursor.fetchone()
-                    self.logger.debug(f"Verification query result: {verify_result}")
+                verify_result = await self.db.fetch_one("SELECT bet_serial FROM bets WHERE bet_serial = %s", (bet_serial,))
+                self.logger.debug(f"Verification query result: {verify_result}")
                 return bet_serial
             else:
                 raise BetServiceError(
                     f"Failed to retrieve bet_serial after parlay insertion. Result: {result}, Rows affected: {rowcount}. "
                     "Check DB schema (AUTO_INCREMENT on bet_serial) and transaction state."
                 )
-    
+
         except ValidationError as ve:
             self.logger.warning(f"Parlay bet creation validation failed for user {user_id}: {ve}")
             raise
@@ -345,9 +327,6 @@ class BetService:
         except Exception as e:
             self.logger.exception(f"Error creating parlay bet for user {user_id}: {e}")
             raise BetServiceError("An internal error occurred while creating the parlay bet.")
-        finally:
-            if connection:
-                await self.db.pool.release(connection)
 
     async def update_bet_status(
         self,
@@ -551,7 +530,7 @@ class BetService:
             return
 
         emoji = str(payload.emoji)
-        units = float(original_bet['stake'])
+        units = float(original_bet['units'])
         odds = float(original_bet['odds'])
         result_value = 0.0
         new_status = None
@@ -688,7 +667,7 @@ class BetService:
             if bet.get('opponent'):
                 embed.add_field(name="Opponent", value=f"`{bet['opponent']}`", inline=True)
             embed.add_field(name="Line", value=f"`{bet['line']}`", inline=True)
-            embed.add_field(name="Units", value=f"{float(bet['stake']):.2f}u", inline=True)
+            embed.add_field(name="Units", value=f"{float(bet['units']):.2f}u", inline=True)
             embed.add_field(name="Odds", value=f"{float(bet['odds']):+}", inline=True)
 
             if status in ['won', 'lost', 'push']:
