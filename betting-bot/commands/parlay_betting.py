@@ -369,11 +369,11 @@ class AddLegButton(Button):
     async def callback(self, interaction: Interaction):
         logger.debug("Add Leg button clicked")
         self.parent_view.current_step = 0  # Return to League selection
-        self.parent_view.bet_details.pop('game_id', None)
-        self.parent_view.bet_details.pop('home_team_name', None)
-        self.parent_view.bet_details.pop('away_team_name', None)
-        self.parent_view.bet_details.pop('line_type', None)
-        self.parent_view.bet_details.pop('player', None)
+        self.view.bet_details.pop('game_id', None)
+        self.view.bet_details.pop('home_team_name', None)
+        self.view.bet_details.pop('away_team_name', None)
+        self.view.bet_details.pop('line_type', None)
+        self.view.bet_details.pop('player', None)
         await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.go_next(interaction)
 
