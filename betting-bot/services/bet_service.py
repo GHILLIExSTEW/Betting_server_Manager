@@ -176,7 +176,6 @@ class BetService:
             )
 
             self.logger.debug(f"Executing bet insertion with args: {args}")
-            # Use a single connection for INSERT and LAST_INSERT_ID
             async with self.db._pool.acquire() as conn:
                 async with conn.cursor() as cursor:
                     rowcount = await cursor.execute(query, args)
@@ -294,7 +293,6 @@ class BetService:
                 result_description
             )
             self.logger.debug(f"Executing parlay bet insertion with args: {args}")
-            # Use a single connection for INSERT and LAST_INSERT_ID
             async with self.db._pool.acquire() as conn:
                 async with conn.cursor() as cursor:
                     rowcount = await cursor.execute(query, args)
@@ -335,18 +333,26 @@ class BetService:
         result_description: Optional[str] = None,
         result_value: Optional[float] = None
     ) -> bool:
-        """Update the status, result description, and result value of a bet."""
+        """Update the status, result description, and result value of a bet. Delete records if canceled."""
         try:
             allowed_statuses = ['won', 'lost', 'push', 'canceled', 'expired', 'pending']
             if status not in allowed_statuses:
                 self.logger.error(f"Invalid status '{status}' provided for bet {bet_serial}")
                 return False
 
-            rowcount = await self.db.execute("""
-                UPDATE bets
-                SET status = %s, result_value = %s, result_description = %s, updated_at = UTC_TIMESTAMP()
-                WHERE bet_serial = %s
-            """, status, result_value, result_description, bet_serial)
+            if status == 'canceled':
+                # Delete associated records from unit_records and bets
+                await self.db.execute("DELETE FROM unit_records WHERE bet_serial = %s", bet_serial)
+                self.logger.info(f"Deleted unit_records for canceled bet {bet_serial}")
+                rowcount = await self.db.execute("DELETE FROM bets WHERE bet_serial = %s", bet_serial)
+                self.logger.info(f"Deleted bet {bet_serial} from bets table")
+            else:
+                # Update bet status as usual
+                rowcount = await self.db.execute("""
+                    UPDATE bets
+                    SET status = %s, result_value = %s, result_description = %s, updated_at = UTC_TIMESTAMP()
+                    WHERE bet_serial = %s
+                """, status, result_value, result_description, bet_serial)
 
             success = rowcount is not None and rowcount > 0
             if success:
@@ -557,7 +563,7 @@ class BetService:
             try:
                 updated = await self.update_bet_status(bet_serial, new_status, result_desc, result_value)
 
-                if updated:
+                if updated or new_status == 'canceled':  # Handle cancellation even if bet is deleted
                     if new_status in ['won', 'lost', 'push']:
                         await self.record_bet_result(
                             bet_serial, guild_id, original_user_id, units, odds, result_value
@@ -667,11 +673,13 @@ class BetService:
             if bet.get('opponent'):
                 embed.add_field(name="Opponent", value=f"`{bet['opponent']}`", inline=True)
             embed.add_field(name="Line", value=f"`{bet['line']}`", inline=True)
-            embed.add_field(name="Units", value=f"{float(bet['units']):.2f}u", inline=True)
+            units_value = float(bet['units'])
+            units_label = "Unit" if units_value == 1.0 else "Units"
+            embed.add_field(name="Units", value=f"{units_value:.2f} {units_label}", inline=True)
             embed.add_field(name="Odds", value=f"{float(bet['odds']):+}", inline=True)
 
             if status in ['won', 'lost', 'push']:
-                embed.add_field(name="Result", value=f"**{result_value:+.2f} Units**", inline=True)
+                embed.add_field(name="Result", value=f"**{result_value:+.2f} {units_label}**", inline=True)
             else:
                 embed.add_field(name="Result", value=status.title(), inline=True)
 
