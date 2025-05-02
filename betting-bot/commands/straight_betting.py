@@ -405,7 +405,7 @@ class StraightBetWorkflowView(View):
     ):
         logger.debug(
             f"Editing message: content={content}, view={view is not None}, "
-            f"embed={embed is not None}, file={file is not None} by user {interaction.user.init if interaction else 'N/A'}"
+            f"embed={embed is not None}, file={file is not None} by user {interaction.user.id if interaction else 'N/A'}"
         )
         target_message = self.message
         try:
@@ -560,322 +560,322 @@ class StraightBetWorkflowView(View):
                                 return
                             await interaction.response.send_modal(modal)
                         except discord.HTTPException as e:
-            logger.error(f"Failed to send BetDetailsModal: {e}")
-            await interaction.followup.send(
-                "❌ Failed to send bet details modal. Please try again.",
-                ephemeral=True
-            )
-            self.stop()
-        return
-    elif self.current_step == 5:
-        self.add_item(UnitsSelect(self))
-        self.add_item(CancelButton(self))
-        step_content += ": Select Units for Bet"
-        await self.edit_message(interaction, content=step_content, view=self)
-    elif self.current_step == 6:
-        channels = []
+                            logger.error(f"Failed to send BetDetailsModal: {e}")
+                            await interaction.followup.send(
+                                "❌ Failed to send bet details modal. Please try again.",
+                                ephemeral=True
+                            )
+                            self.stop()
+                        return
+                elif self.current_step == 5:
+                    self.add_item(UnitsSelect(self))
+                    self.add_item(CancelButton(self))
+                    step_content += ": Select Units for Bet"
+                    await self.edit_message(interaction, content=step_content, view=self)
+                elif self.current_step == 6:
+                    channels = []
+                    try:
+                        if hasattr(self.bot, 'db_manager'):
+                            settings = await self.bot.db_manager.fetch_one(
+                                "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
+                                (interaction.guild_id,)
+                            )
+                            if settings:
+                                for channel_id in [settings['embed_channel_1'], settings['embed_channel_2']]:
+                                    if channel_id:
+                                        channel = interaction.guild.get_channel(int(channel_id))
+                                        if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
+                                            channels.append(channel)
+                        if not channels:
+                            channels = sorted(
+                                [ch for ch in interaction.guild.text_channels
+                                 if ch.permissions_for(interaction.user).send_messages and
+                                 ch.permissions_for(interaction.guild.me).send_messages],
+                                key=lambda c: c.position
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to fetch channels: {e}", exc_info=True)
+                        await self.edit_message(
+                            interaction,
+                            content="❌ Failed to fetch channels. Please try again.",
+                            view=None
+                        )
+                        self.stop()
+                        return
+
+                    if not channels:
+                        logger.error("No writable channels found")
+                        await self.edit_message(
+                            interaction,
+                            content="❌ No text channels found where I can post.",
+                            view=None
+                        )
+                        self.stop()
+                        return
+
+                    try:
+                        bet_serial = await self.bot.bet_service.create_straight_bet(
+                            guild_id=interaction.guild_id,
+                            user_id=interaction.user.id,
+                            game_id=self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
+                            bet_type="player_prop" if self.bet_details.get('player') else "game_line",
+                            team=self.bet_details.get('team', self.bet_details.get('line')),
+                            opponent=self.bet_details.get('opponent'),
+                            line=self.bet_details.get('line'),
+                            units=float(self.bet_details.get('units_str', '1.00')),
+                            odds=float(self.bet_details.get('odds_str', '-110')),
+                            channel_id=None,
+                            league=self.bet_details.get('league', 'NHL')
+                        )
+                        self.bet_details['bet_serial'] = bet_serial
+                    except Exception as e:
+                        logger.error(f"Failed to create straight bet: {e}", exc_info=True)
+                        await self.edit_message(
+                            interaction,
+                            content="❌ Failed to create bet. Please try again.",
+                            view=None
+                        )
+                        self.stop()
+                        return
+
+                    home_team = self.bet_details.get('home_team_name', self.bet_details.get('team', 'Unknown'))
+                    away_team = self.bet_details.get('away_team_name', self.bet_details.get('opponent', 'Unknown'))
+                    try:
+                        bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                            home_team=home_team,
+                            away_team=away_team,
+                            league=self.bet_details.get('league', 'NHL'),
+                            line=self.bet_details.get('line', 'ML'),
+                            odds=float(self.bet_details.get('odds_str', '-110')),
+                            units=float(self.bet_details.get('units_str', '1.00')),
+                            bet_id=str(bet_serial),
+                            timestamp=datetime.now(timezone.utc),
+                            bet_type="straight"
+                        )
+
+                        self.preview_image_bytes = io.BytesIO()
+                        bet_slip_image.save(self.preview_image_bytes, format='PNG')
+                        self.preview_image_bytes.seek(0)
+                        file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
+                        self.preview_image_bytes.seek(0)
+                    except Exception as e:
+                        logger.error(f"Failed to generate bet slip image: {e}", exc_info=True)
+                        await self.edit_message(
+                            interaction,
+                            content="❌ Failed to generate bet slip image. Please try again.",
+                            view=None
+                        )
+                        self.stop()
+                        return
+
+                    self.add_item(ChannelSelect(self, channels))
+                    self.add_item(CancelButton(self))
+                    step_content += ": Select Channel to Post Bet"
+                    await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
+                elif self.current_step == 7:
+                    try:
+                        odds_str = self.bet_details.get('odds_str', '').replace('+', '').strip()
+                        units_str = self.bet_details.get('units_str', '').lower().replace('u', '').strip()
+                        if not odds_str or not units_str:
+                            raise ValueError("Odds and units cannot be empty")
+                        odds_val = int(odds_str)
+                        if not (-10000 <= odds_val <= 10000):
+                            raise ValueError("Odds must be between -10000 and +10000")
+                        if -100 < odds_val < 100:
+                            raise ValueError("Odds cannot be between -99 and +99")
+                        self.bet_details['odds'] = float(odds_val)
+                        units_val = float(units_str)
+                        if not (0.1 <= units_val <= 10.0):
+                            raise ValueError("Units must be between 0.1 and 10.0")
+                        self.bet_details['units'] = units_val
+
+                        if self.preview_image_bytes:
+                            file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
+                            self.preview_image_bytes.seek(0)
+                        else:
+                            home_team = self.bet_details.get('home_team_name', self.bet_details.get('team', 'Unknown'))
+                            away_team = self.bet_details.get('away_team_name', self.bet_details.get('opponent', 'Unknown'))
+                            bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                                home_team=home_team,
+                                away_team=away_team,
+                                league=self.bet_details.get('league', 'NHL'),
+                                line=self.bet_details.get('line', 'ML'),
+                                odds=float(self.bet_details.get('odds_str', '-110')),
+                                units=float(self.bet_details.get('units_str', '1.00')),
+                                bet_id=str(self.bet_details.get('bet_serial', 'Unknown')),
+                                timestamp=datetime.now(timezone.utc),
+                                bet_type="straight"
+                            )
+                            self.preview_image_bytes = io.BytesIO()
+                            bet_slip_image.save(self.preview_image_bytes, format='PNG')
+                            self.preview_image_bytes.seek(0)
+                            file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
+                            self.preview_image_bytes.seek(0)
+
+                        self.add_item(ConfirmButton(self))
+                        self.add_item(CancelButton(self))
+                        step_content += ": Please Confirm Your Bet"
+                        await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
+                    except ValueError as ve:
+                        logger.error(f"Bet input validation failed: {ve}")
+                        await self.edit_message(interaction, content=f"❌ Error: {ve} Please start over.", view=None)
+                        self.stop()
+                        return
+                else:
+                    logger.error(f"StraightBetWorkflowView reached unexpected step: {self.current_step}")
+                    await self.edit_message(interaction, content="❌ Invalid step reached. Please start over.", view=None)
+                    self.stop()
+                    return
+
+            except Exception as e:
+                logger.exception(f"Error in straight bet workflow step {self.current_step}: {e}")
+                await self.edit_message(interaction, content="❌ An unexpected error occurred.", view=None)
+                self.stop()
+
+        finally:
+            self.is_processing = False
+
+    async def submit_bet(self, interaction: Interaction):
+        details = self.bet_details
+        logger.debug(f"Submitting straight bet for user {interaction.user} (ID: {interaction.user.id}), bet_serial={details.get('bet_serial')}")
+        await self.edit_message(interaction, content="Processing and posting bet...", view=None)
         try:
-            if hasattr(self.bot, 'db_manager'):
+            post_channel_id = details.get('channel_id')
+            post_channel = self.bot.get_channel(post_channel_id) if post_channel_id else None
+            if not post_channel or not isinstance(post_channel, TextChannel):
+                logger.error(f"Invalid or inaccessible channel {post_channel_id} for bet {details.get('bet_serial')}")
+                raise ValueError(f"Could not find text channel {post_channel_id} to post bet.")
+
+            bet_serial = details.get('bet_serial')
+            if not bet_serial:
+                logger.error("Bet serial not found in bet details")
+                raise ValueError("Bet serial not found. Please start over.")
+            await self.bot.bet_service.update_straight_bet_channel(bet_serial=bet_serial, channel_id=post_channel_id)
+
+            if not self.preview_image_bytes:
+                logger.error(f"Preview image bytes not found for bet {bet_serial}")
+                raise ValueError("Preview image not found. Please start over.")
+
+            # Step 1: Fetch the member_role from guild_settings
+            role_mention = ""
+            try:
                 settings = await self.bot.db_manager.fetch_one(
-                    "SELECT embed_channel_1, embed_channel_2 FROM server_settings WHERE guild_id = %s",
+                    "SELECT authorized_role FROM guild_settings WHERE guild_id = %s",
                     (interaction.guild_id,)
                 )
-                if settings:
-                    for channel_id in [settings['embed_channel_1'], settings['embed_channel_2']]:
-                        if channel_id:
-                            channel = interaction.guild.get_channel(int(channel_id))
-                            if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
-                                channels.append(channel)
-            if not channels:
-                channels = sorted(
-                    [ch for ch in interaction.guild.text_channels
-                     if ch.permissions_for(interaction.user).send_messages and
-                     ch.permissions_for(interaction.guild.me).send_messages],
-                    key=lambda c: c.position
+                if settings and settings.get('authorized_role'):
+                    role_id = int(settings['authorized_role'])
+                    role = interaction.guild.get_role(role_id)
+                    if role:
+                        role_mention = role.mention
+                    else:
+                        logger.warning(f"Role ID {role_id} not found in guild {interaction.guild_id}.")
+            except Exception as e:
+                logger.error(f"Error fetching authorized_role for guild {interaction.guild_id}: {e}")
+
+            # Step 2: Upload the image as an attachment to get its URL
+            logger.debug(f"Uploading temporary image for bet {bet_serial} to channel {post_channel_id}")
+            discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
+            try:
+                temp_message = await post_channel.send(file=discord_file)
+            except discord.Forbidden as e:
+                logger.error(f"Failed to send temporary image to channel {post_channel_id}: {e}")
+                raise ValueError("Bot lacks permission to send messages in the channel.")
+            except discord.HTTPException as e:
+                logger.error(f"HTTP error sending temporary image for bet {bet_serial}: {e}")
+                raise ValueError(f"Failed to send temporary image: {e}")
+
+            if not temp_message.attachments:
+                logger.error(f"Temporary message for bet {bet_serial} has no attachments")
+                raise ValueError("Temporary message has no attachments.")
+            image_url = temp_message.attachments[0].url
+            logger.debug(f"Retrieved image URL: {image_url}")
+
+            # Step 3: Create an embed with the image URL
+            embed = Embed()
+            embed.set_image(url=image_url)
+
+            # Step 4: Fetch capper info for display
+            capper_info = await self.bot.db_manager.fetch_one(
+                "SELECT display_name, image_path FROM cappers WHERE user_id = %s AND guild_id = %s",
+                (interaction.user.id, interaction.guild_id)
+            )
+            display_name = capper_info['display_name'] if capper_info else interaction.user.display_name
+            avatar_url = capper_info['image_path'] if capper_info else (interaction.user.avatar.url if interaction.user.avatar else None)
+
+            # Step 5: Create or fetch webhook and send the embed with role mention
+            webhook = None
+            try:
+                webhooks = await post_channel.webhooks()
+                for wh in webhooks:
+                    if wh.user.id == self.bot.user.id:
+                        webhook = wh
+                        break
+                if not webhook:
+                    webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
+                logger.debug(f"Using webhook: {webhook.name} (ID: {webhook.id})")
+            except discord.Forbidden as e:
+                logger.error(f"Failed to create or fetch webhook in channel {post_channel_id}: {e}")
+                raise ValueError("Bot lacks permission to manage webhooks.")
+            except discord.HTTPException as e:
+                logger.error(f"HTTP error creating webhook for channel {post_channel_id}: {e}")
+                raise ValueError(f"Failed to create webhook: {e}")
+
+            logger.debug(f"Sending webhook message for bet {bet_serial} with role_mention: {role_mention}")
+            content = role_mention if role_mention else ""
+            try:
+                sent_message = await webhook.send(
+                    content=content,
+                    embed=embed,
+                    username=display_name,
+                    avatar_url=avatar_url,
+                    wait=True
                 )
-        except Exception as e:
-            logger.error(f"Failed to fetch channels: {e}", exc_info=True)
+                logger.debug(f"Webhook message sent successfully for bet {bet_serial}, message ID: {sent_message.id}")
+            except discord.Forbidden as e:
+                logger.error(f"Webhook send failed due to permissions in channel {post_channel_id}: {e}")
+                raise ValueError("Bot lacks permission to send messages via webhook.")
+            except discord.HTTPException as e:
+                logger.error(f"Webhook send failed for bet {bet_serial}: {e}")
+                raise ValueError(f"Failed to send webhook message: {e}")
+
+            # Step 6: Delete the temporary message
+            try:
+                await temp_message.delete()
+                logger.debug(f"Temporary message deleted for bet {bet_serial}")
+            except discord.HTTPException as e:
+                logger.warning(f"Failed to delete temporary message for bet {bet_serial}: {e}")
+
+            # Step 7: Track the message for reaction monitoring
+            if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
+                self.bot.bet_service.pending_reactions[sent_message.id] = {
+                    'bet_serial': bet_serial,
+                    'user_id': interaction.user.id,
+                    'guild_id': interaction.guild_id,
+                    'channel_id': post_channel_id,
+                    'line': details.get('line'),
+                    'league': details.get('league'),
+                    'bet_type': 'straight'
+                }
+                logger.debug(f"Added message {sent_message.id} to pending_reactions for bet {bet_serial}")
+
             await self.edit_message(
                 interaction,
-                content="❌ Failed to fetch channels. Please try again.",
+                content=f"✅ Bet placed successfully! (ID: `{bet_serial}`). Posted to {post_channel.mention}.",
                 view=None
             )
-            self.stop()
-            return
-
-        if not channels:
-            logger.error("No writable channels found")
-            await self.edit_message(
-                interaction,
-                content="❌ No text channels found where I can post.",
-                view=None
-            )
-            self.stop()
-            return
-
-        try:
-            bet_serial = await self.bot.bet_service.create_straight_bet(
-                guild_id=interaction.guild_id,
-                user_id=interaction.user.id,
-                game_id=self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
-                bet_type="player_prop" if self.bet_details.get('player') else "game_line",
-                team=self.bet_details.get('team', self.bet_details.get('line')),
-                opponent=self.bet_details.get('opponent'),
-                line=self.bet_details.get('line'),
-                units=float(self.bet_details.get('units_str', '1.00')),
-                odds=float(self.bet_details.get('odds_str', '-110')),
-                channel_id=None,
-                league=self.bet_details.get('league', 'NHL')
-            )
-            self.bet_details['bet_serial'] = bet_serial
+        except (ValidationError, BetServiceError) as e:
+            logger.error(f"Error submitting bet {details.get('bet_serial')}: {e}")
+            await self.edit_message(interaction, content=f"❌ Error placing bet: {e}", view=None)
+        except ValueError as e:
+            logger.error(f"Error submitting bet {details.get('bet_serial')}: {e}")
+            await self.edit_message(interaction, content=f"❌ Error placing bet: {e}", view=None)
         except Exception as e:
-            logger.error(f"Failed to create straight bet: {e}", exc_info=True)
-            await self.edit_message(
-                interaction,
-                content="❌ Failed to create bet. Please try again.",
-                view=None
-            )
+            logger.exception(f"Unexpected error submitting bet {details.get('bet_serial')}: {e}")
+            await self.edit_message(interaction, content="❌ An unexpected error occurred while posting the bet.", view=None)
+        finally:
+            self.preview_image_bytes = None
             self.stop()
-            return
-
-        home_team = self.bet_details.get('home_team_name', self.bet_details.get('team', 'Unknown'))
-        away_team = self.bet_details.get('away_team_name', self.bet_details.get('opponent', 'Unknown'))
-        try:
-            bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                home_team=home_team,
-                away_team=away_team,
-                league=self.bet_details.get('league', 'NHL'),
-                line=self.bet_details.get('line', 'ML'),
-                odds=float(self.bet_details.get('odds_str', '-110')),
-                units=float(self.bet_details.get('units_str', '1.00')),
-                bet_id=str(bet_serial),
-                timestamp=datetime.now(timezone.utc),
-                bet_type="straight"
-            )
-
-            self.preview_image_bytes = io.BytesIO()
-            bet_slip_image.save(self.preview_image_bytes, format='PNG')
-            self.preview_image_bytes.seek(0)
-            file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
-            self.preview_image_bytes.seek(0)
-        except Exception as e:
-            logger.error(f"Failed to generate bet slip image: {e}", exc_info=True)
-            await self.edit_message(
-                interaction,
-                content="❌ Failed to generate bet slip image. Please try again.",
-                view=None
-            )
-            self.stop()
-            return
-
-        self.add_item(ChannelSelect(self, channels))
-        self.add_item(CancelButton(self))
-        step_content += ": Select Channel to Post Bet"
-        await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
-    elif self.current_step == 7:
-        try:
-            odds_str = self.bet_details.get('odds_str', '').replace('+', '').strip()
-            units_str = self.bet_details.get('units_str', '').lower().replace('u', '').strip()
-            if not odds_str or not units_str:
-                raise ValueError("Odds and units cannot be empty")
-            odds_val = int(odds_str)
-            if not (-10000 <= odds_val <= 10000):
-                raise ValueError("Odds must be between -10000 and +10000")
-            if -100 < odds_val < 100:
-                raise ValueError("Odds cannot be between -99 and +99")
-            self.bet_details['odds'] = float(odds_val)
-            units_val = float(units_str)
-            if not (0.1 <= units_val <= 10.0):
-                raise ValueError("Units must be between 0.1 and 10.0")
-            self.bet_details['units'] = units_val
-
-            if self.preview_image_bytes:
-                file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
-                self.preview_image_bytes.seek(0)
-            else:
-                home_team = self.bet_details.get('home_team_name', self.bet_details.get('team', 'Unknown'))
-                away_team = self.bet_details.get('away_team_name', self.bet_details.get('opponent', 'Unknown'))
-                bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                    home_team=home_team,
-                    away_team=away_team,
-                    league=self.bet_details.get('league', 'NHL'),
-                    line=self.bet_details.get('line', 'ML'),
-                    odds=float(self.bet_details.get('odds_str', '-110')),
-                    units=float(self.bet_details.get('units_str', '1.00')),
-                    bet_id=str(self.bet_details.get('bet_serial', 'Unknown')),
-                    timestamp=datetime.now(timezone.utc),
-                    bet_type="straight"
-                )
-                self.preview_image_bytes = io.BytesIO()
-                bet_slip_image.save(self.preview_image_bytes, format='PNG')
-                self.preview_image_bytes.seek(0)
-                file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
-                self.preview_image_bytes.seek(0)
-
-            self.add_item(ConfirmButton(self))
-            self.add_item(CancelButton(self))
-            step_content += ": Please Confirm Your Bet"
-            await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
-        except ValueError as ve:
-            logger.error(f"Bet input validation failed: {ve}")
-            await self.edit_message(interaction, content=f"❌ Error: {ve} Please start over.", view=None)
-            self.stop()
-            return
-    else:
-        logger.error(f"StraightBetWorkflowView reached unexpected step: {self.current_step}")
-        await self.edit_message(interaction, content="❌ Invalid step reached. Please start over.", view=None)
-        self.stop()
-        return
-
-except Exception as e:
-    logger.exception(f"Error in straight bet workflow step {self.current_step}: {e}")
-    await self.edit_message(interaction, content="❌ An unexpected error occurred.", view=None)
-    self.stop()
-
-finally:
-    self.is_processing = False
-
-async def submit_bet(self, interaction: Interaction):
-    details = self.bet_details
-    logger.debug(f"Submitting straight bet for user {interaction.user} (ID: {interaction.user.id}), bet_serial={details.get('bet_serial')}")
-    await self.edit_message(interaction, content="Processing and posting bet...", view=None)
-    try:
-        post_channel_id = details.get('channel_id')
-        post_channel = self.bot.get_channel(post_channel_id) if post_channel_id else None
-        if not post_channel or not isinstance(post_channel, TextChannel):
-            logger.error(f"Invalid or inaccessible channel {post_channel_id} for bet {details.get('bet_serial')}")
-            raise ValueError(f"Could not find text channel {post_channel_id} to post bet.")
-
-        bet_serial = details.get('bet_serial')
-        if not bet_serial:
-            logger.error("Bet serial not found in bet details")
-            raise ValueError("Bet serial not found. Please start over.")
-        await self.bot.bet_service.update_straight_bet_channel(bet_serial=bet_serial, channel_id=post_channel_id)
-
-        if not self.preview_image_bytes:
-            logger.error(f"Preview image bytes not found for bet {bet_serial}")
-            raise ValueError("Preview image not found. Please start over.")
-
-        # Step 1: Fetch the member_role from server_settings
-        role_mention = ""
-        try:
-            settings = await self.bot.db_manager.fetch_one(
-                "SELECT member_role FROM server_settings WHERE guild_id = %s",
-                (interaction.guild_id,)
-            )
-            if settings and settings.get('member_role'):
-                role_id = int(settings['member_role'])
-                role = interaction.guild.get_role(role_id)
-                if role:
-                    role_mention = role.mention
-                else:
-                    logger.warning(f"Role ID {role_id} not found in guild {interaction.guild_id}.")
-        except Exception as e:
-            logger.error(f"Error fetching member_role for guild {interaction.guild_id}: {e}")
-
-        # Step 2: Upload the image as an attachment to get its URL
-        logger.debug(f"Uploading temporary image for bet {bet_serial} to channel {post_channel_id}")
-        discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
-        try:
-            temp_message = await post_channel.send(file=discord_file)
-        except discord.Forbidden as e:
-            logger.error(f"Failed to send temporary image to channel {post_channel_id}: {e}")
-            raise ValueError("Bot lacks permission to send messages in the channel.")
-        except discord.HTTPException as e:
-            logger.error(f"HTTP error sending temporary image for bet {bet_serial}: {e}")
-            raise ValueError(f"Failed to send temporary image: {e}")
-
-        if not temp_message.attachments:
-            logger.error(f"Temporary message for bet {bet_serial} has no attachments")
-            raise ValueError("Temporary message has no attachments.")
-        image_url = temp_message.attachments[0].url
-        logger.debug(f"Retrieved image URL: {image_url}")
-
-        # Step 3: Create an embed with the image URL
-        embed = Embed()
-        embed.set_image(url=image_url)
-
-        # Step 4: Fetch capper info for display
-        capper_info = await self.bot.db_manager.fetch_one(
-            "SELECT display_name, image_path FROM cappers WHERE user_id = %s",
-            (interaction.user.id,)
-        )
-        display_name = capper_info['display_name'] if capper_info else interaction.user.display_name
-        avatar_url = capper_info['image_path'] if capper_info else (interaction.user.avatar.url if interaction.user.avatar else None)
-
-        # Step 5: Create or fetch webhook and send the embed with role mention
-        webhook = None
-        try:
-            webhooks = await post_channel.webhooks()
-            for wh in webhooks:
-                if wh.user.id == self.bot.user.id:
-                    webhook = wh
-                    break
-            if not webhook:
-                webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
-            logger.debug(f"Using webhook: {webhook.name} (ID: {webhook.id})")
-        except discord.Forbidden as e:
-            logger.error(f"Failed to create or fetch webhook in channel {post_channel_id}: {e}")
-            raise ValueError("Bot lacks permission to manage webhooks.")
-        except discord.HTTPException as e:
-            logger.error(f"HTTP error creating webhook for channel {post_channel_id}: {e}")
-            raise ValueError(f"Failed to create webhook: {e}")
-
-        logger.debug(f"Sending webhook message for bet {bet_serial} with role_mention: {role_mention}")
-        content = role_mention if role_mention else ""
-        try:
-            sent_message = await webhook.send(
-                content=content,
-                embed=embed,
-                username=display_name,
-                avatar_url=avatar_url,
-                wait=True
-            )
-            logger.debug(f"Webhook message sent successfully for bet {bet_serial}, message ID: {sent_message.id}")
-        except discord.Forbidden as e:
-            logger.error(f"Webhook send failed due to permissions in channel {post_channel_id}: {e}")
-            raise ValueError("Bot lacks permission to send messages via webhook.")
-        except discord.HTTPException as e:
-            logger.error(f"Webhook send failed for bet {bet_serial}: {e}")
-            raise ValueError(f"Failed to send webhook message: {e}")
-
-        # Step 6: Delete the temporary message
-        try:
-            await temp_message.delete()
-            logger.debug(f"Temporary message deleted for bet {bet_serial}")
-        except discord.HTTPException as e:
-            logger.warning(f"Failed to delete temporary message for bet {bet_serial}: {e}")
-
-        # Step 7: Track the message for reaction monitoring
-        if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
-            self.bot.bet_service.pending_reactions[sent_message.id] = {
-                'bet_serial': bet_serial,
-                'user_id': interaction.user.id,
-                'guild_id': interaction.guild_id,
-                'channel_id': post_channel_id,
-                'line': details.get('line'),
-                'league': details.get('league'),
-                'bet_type': 'straight'
-            }
-            logger.debug(f"Added message {sent_message.id} to pending_reactions for bet {bet_serial}")
-
-        await self.edit_message(
-            interaction,
-            content=f"✅ Bet placed successfully! (ID: `{bet_serial}`). Posted to {post_channel.mention}.",
-            view=None
-        )
-    except (ValidationError, BetServiceError) as e:
-        logger.error(f"Error submitting bet {details.get('bet_serial')}: {e}")
-        await self.edit_message(interaction, content=f"❌ Error placing bet: {e}", view=None)
-    except ValueError as e:
-        logger.error(f"Error submitting bet {details.get('bet_serial')}: {e}")
-        await self.edit_message(interaction, content=f"❌ Error placing bet: {e}", view=None)
-    except Exception as e:
-        logger.exception(f"Unexpected error submitting bet {details.get('bet_serial')}: {e}")
-        await self.edit_message(interaction, content="❌ An unexpected error occurred while posting the bet.", view=None)
-    finally:
-        self.preview_image_bytes = None
-        self.stop()
 
 async def setup(bot):
     """Setup function to register the StraightBetWorkflowView as a cog."""
