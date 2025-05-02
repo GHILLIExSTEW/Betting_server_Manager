@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
+import time
 
 # --- Path Setup ---
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -112,6 +113,27 @@ class BettingBot(commands.Bot):
         if failed_count > 0:
             logger.warning("Some command extensions failed to load. Check logs above.")
 
+    async def sync_commands_with_retry(self, guild: Optional[discord.Guild] = None, retries: int = 3, delay: int = 5):
+        """Syncs commands with retries to handle Discord rate limits or network issues."""
+        for attempt in range(1, retries + 1):
+            try:
+                if guild:
+                    guild_obj = discord.Object(id=guild.id)
+                    self.tree.copy_global_to(guild=guild_obj)
+                    synced = await self.tree.sync(guild=guild_obj)
+                    logger.info(f"Commands synced to guild {guild.id}: {[cmd.name for cmd in synced]}")
+                else:
+                    synced = await self.tree.sync()
+                    logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
+                return True
+            except Exception as e:
+                logger.error(f"Sync attempt {attempt}/{retries} failed: {e}", exc_info=True)
+                if attempt < retries:
+                    logger.info(f"Retrying sync in {delay} seconds...")
+                    await asyncio.sleep(delay)
+        logger.error(f"Failed to sync commands after {retries} attempts.")
+        return False
+
     async def setup_hook(self):
         """Connect DB, setup commands via extensions, start services."""
         logger.info("Starting setup_hook...")
@@ -133,23 +155,15 @@ class BettingBot(commands.Bot):
             logger.debug("Clearing command tree before syncing")
             self.tree.clear_commands(guild=None)
 
-            # Sync commands to all guilds
+            # Sync commands
             try:
-                logger.debug("Syncing global commands...")
-                synced = await self.tree.sync()
-                logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
-
-                # Wait until guilds are available
+                # Wait until bot is fully ready
                 await self.wait_until_ready()
+                # Sync globally
+                await self.sync_commands_with_retry()
+                # Sync to each guild
                 for guild in self.guilds:
-                    logger.debug(f"Syncing commands to guild: {guild.name} ({guild.id})")
-                    guild_obj = discord.Object(id=guild.id)
-                    self.tree.copy_global_to(guild=guild_obj)
-                    try:
-                        synced = await self.tree.sync(guild=guild_obj)
-                        logger.info(f"Commands synced to guild {guild.id}: {[cmd.name for cmd in synced]}")
-                    except Exception as e:
-                        logger.error(f"Failed to sync commands to guild {guild.id}: {e}", exc_info=True)
+                    await self.sync_commands_with_retry(guild=guild)
             except Exception as e:
                 logger.error(f"Failed to sync command tree: {e}", exc_info=True)
 
@@ -191,11 +205,7 @@ class BettingBot(commands.Bot):
     async def on_guild_join(self, guild: discord.Guild):
         """Called when the bot joins a new guild."""
         logger.info(f"Joined new guild: {guild.name} ({guild.id})")
-        try:
-            await self.tree.sync(guild=discord.Object(id=guild.id))
-            logger.info(f"Commands synced to new guild {guild.id}")
-        except Exception as e:
-            logger.error(f"Failed to sync commands to new guild {guild.id}: {e}", exc_info=True)
+        await self.sync_commands_with_retry(guild=guild)
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         """Pass raw reaction events to BetService for bot-generated messages only."""
@@ -263,7 +273,7 @@ class BettingBot(commands.Bot):
                         "❌ Bot lacks permission to send messages in this channel.", ephemeral=True
                     )
                     return
-            # Process the interaction (handled by discord.py's command tree)
+            # Process the interaction
             logger.debug(f"Processing interaction for command: {interaction.command.name if interaction.command else 'N/A'}")
         except Exception as e:
             logger.error(f"Error processing interaction for user {interaction.user}: {e}", exc_info=True)
@@ -280,7 +290,7 @@ class BettingBot(commands.Bot):
             logger.info("Stopping services...")
             stop_tasks = []
             if hasattr(self, 'data_sync_service') and hasattr(self.data_sync_service, 'stop'): stop_tasks.append(self.data_sync_service.stop())
-            if hasattr(self, 'voice_service') and hasattr(self.voice_service, 'stop'): stop_tasks.append(self.voice_service.stop())
+            if hasattr(self, 'voice_service') and hasattr(self.vice_service, 'stop'): stop_tasks.append(self.voice_service.stop())
             if hasattr(self, 'bet_service') and hasattr(self.bet_service, 'stop'): stop_tasks.append(self.bet_service.stop())
             if hasattr(self, 'game_service') and hasattr(self.game_service, 'stop'): stop_tasks.append(self.game_service.stop())
             if hasattr(self, 'user_service') and hasattr(self.user_service, 'stop'): stop_tasks.append(self.user_service.stop())
@@ -322,14 +332,10 @@ class SyncCog(commands.Cog):
             for guild in self.bot.guilds:
                 self.bot.tree.clear_commands(guild=discord.Object(id=guild.id))
             # Sync globally
-            synced = await self.bot.tree.sync()
-            logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
+            await self.bot.sync_commands_with_retry()
             # Sync to each guild
             for guild in self.bot.guilds:
-                guild_obj = discord.Object(id=guild.id)
-                self.bot.tree.copy_global_to(guild=guild_obj)
-                synced = await self.bot.tree.sync(guild=guild_obj)
-                logger.info(f"Commands synced to guild {guild.id}: {[cmd.name for cmd in synced]}")
+                await self.bot.sync_commands_with_retry(guild=guild)
             await interaction.response.send_message("Commands synced successfully!", ephemeral=True)
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}", exc_info=True)
