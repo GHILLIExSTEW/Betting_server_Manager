@@ -248,9 +248,27 @@ class CancelButton(Button):
         logger.debug("Cancel button clicked")
         self.disabled = True
         for item in self.parent_view.children:
-            if isinstance(item, ManualEntryButton):
-                item.disabled = True
-        await interaction.response.edit_message(content="Bet workflow cancelled.", view=None)
+            item.disabled = True
+        # Check if a bet was created and delete it
+        bet_serial = self.parent_view.bet_details.get('bet_serial')
+        if bet_serial:
+            try:
+                await self.parent_view.bot.bet_service.delete_bet(bet_serial)
+                await interaction.response.edit_message(
+                    content=f"Bet `{bet_serial}` canceled and records deleted.",
+                    view=None
+                )
+            except Exception as e:
+                logger.error(f"Failed to delete bet {bet_serial}: {e}")
+                await interaction.response.edit_message(
+                    content=f"Bet `{bet_serial}` cancellation failed: {e}",
+                    view=None
+                )
+        else:
+            await interaction.response.edit_message(
+                content="Bet workflow cancelled.",
+                view=None
+            )
         self.parent_view.stop()
 
 
@@ -538,6 +556,7 @@ class BetWorkflowView(View):
             try:
                 if self.current_step == 1:
                     self.add_item(BetTypeSelect(self))
+                    self.add_item(CancelButton(self))
                     step_content += ": Select Bet Type"
                     await self.edit_message(
                         interaction,
@@ -551,6 +570,7 @@ class BetWorkflowView(View):
                         "Soccer", "Tennis", "UFC/MMA"
                     ]
                     self.add_item(LeagueSelect(self, allowed_leagues))
+                    self.add_item(CancelButton(self))
                     step_content += ": Select League"
                     await self.edit_message(
                         interaction,
@@ -560,6 +580,7 @@ class BetWorkflowView(View):
                     )
                 elif self.current_step == 3:
                     self.add_item(LineTypeSelect(self))
+                    self.add_item(CancelButton(self))
                     step_content += ": Select Line Type"
                     await self.edit_message(
                         interaction,
@@ -598,6 +619,7 @@ class BetWorkflowView(View):
 
                     if league_games:
                         self.add_item(GameSelect(self, league_games))
+                        self.add_item(CancelButton(self))
                         step_content += f": Select Game for {league} (or Other)"
                         logger.debug(f"Showing game selection for {league}")
                         await self.edit_message(
@@ -643,6 +665,7 @@ class BetWorkflowView(View):
                         if home_players or away_players:
                             self.add_item(HomePlayerSelect(self, home_players, home_team))
                             self.add_item(AwayPlayerSelect(self, away_players, away_team))
+                            self.add_item(CancelButton(self))
                             step_content += f": Select a Player from {home_team} or {away_team}"
                             logger.debug(f"Showing player dropdowns for {home_team} and {away_team}")
                             await self.edit_message(
@@ -802,6 +825,7 @@ class BetWorkflowView(View):
                     self.preview_image_bytes.seek(0)  # Reset the pointer for reuse
 
                     self.add_item(ChannelSelect(self, channels))
+                    self.add_item(CancelButton(self))
                     step_content += ": Select Channel to Post Bet"
                     logger.debug(f"Showing channel selection for step 6")
                     await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
@@ -909,7 +933,7 @@ class BetWorkflowView(View):
                         channel_id=post_channel_id
                     )
 
-                # Reuse the preview image with the updated bet serial (already includes the serial)
+                # Reuse the preview image
                 if self.preview_image_bytes:
                     discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
                 else:
