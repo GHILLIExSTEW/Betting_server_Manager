@@ -14,15 +14,15 @@ logger = logging.getLogger(__name__)
 class BetSlipGenerator:
     def __init__(self):
         """Initialize the BetSlipGenerator with paths and default settings."""
-        self.assets_dir = Path("/home/container/betting-bot/assets")
-        self.logo_dir = self.assets_dir / "logos"
-        self.league_logo_dir = self.assets_dir / "league_logos"
+        self.assets_dir = Path("/home/container/betting-bot/static")
+        self.team_logo_base_dir = self.assets_dir / "logos" / "teams"
+        self.league_logo_base_dir = self.assets_dir / "logos" / "leagues"
         self.font_dir = self.assets_dir / "fonts"
         
         # Ensure directories exist
         self.assets_dir.mkdir(parents=True, exist_ok=True)
-        self.logo_dir.mkdir(parents=True, exist_ok=True)
-        self.league_logo_dir.mkdir(parents=True, exist_ok=True)
+        self.team_logo_base_dir.mkdir(parents=True, exist_ok=True)
+        self.league_logo_base_dir.mkdir(parents=True, exist_ok=True)
         self.font_dir.mkdir(parents=True, exist_ok=True)
 
         # Default font paths (adjust based on your server setup)
@@ -36,26 +36,36 @@ class BetSlipGenerator:
         self.text_color = (255, 255, 255)  # White text
         self.accent_color = (255, 215, 0)  # Yellow for odds and units
 
-        # Team name to logo filename mapping (adjust based on your logo filenames)
-        self.team_logo_mapping = {
-            "oilers": "edmonton_oilers.png",
-            "bruins": "boston_bruins.png",
-            "maple leafs": "toronto_maple_leafs.png",
-            "canucks": "vancouver_canucks.png",
-            "edmonton oilers": "edmonton_oilers.png",
-            "boston bruins": "boston_bruins.png",
-            "toronto maple leafs": "toronto_maple_leafs.png",
-            "vancouver canucks": "vancouver_canucks.png",
-            # Add more mappings for other teams as needed
+        # League to sport mapping for team logo paths
+        self.league_to_sport_mapping = {
+            "nhl": "HOCKEY",
+            "nba": "BASKETBALL",
+            "nfl": "FOOTBALL",
+            "mlb": "BASEBALL",
+            "ncaab": "BASKETBALL",
+            "ncaaf": "FOOTBALL",
+            "soccer": "SOCCER",
+            "tennis": "TENNIS",
+            "ufc/mma": "MMA",
+            # Add more mappings as needed
         }
 
-        # League name to logo filename mapping
+        # Team name to logo filename mapping (adjust if filenames differ from team names)
+        self.team_logo_mapping = {
+            "oilers": "Oilers.png",
+            "bruins": "Bruins.png",
+            "edmonton oilers": "Oilers.png",
+            "boston bruins": "Bruins.png",
+            # Add more mappings if needed
+        }
+
+        # League logo filename mapping
         self.league_logo_mapping = {
             "nhl": "NHL.png",
             "nba": "NBA.png",
             "nfl": "NFL.png",
             "mlb": "MLB.png",
-            # Add more mappings for other leagues as needed
+            # Add more mappings as needed
         }
 
     def _load_font(self, font_path: Path, size: int) -> ImageFont.ImageFont:
@@ -66,17 +76,21 @@ class BetSlipGenerator:
             logger.warning(f"Failed to load font {font_path}: {e}. Using default font.")
             return ImageFont.load_default()
 
-    def _load_team_logo(self, team_name: str) -> Optional[Image.Image]:
-        """Load a team logo image based on the team name."""
+    def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
+        """Load a team logo image based on the team name and league."""
         # Normalize team name: lowercase, remove extra spaces
         normalized_team = team_name.lower().strip()
         
-        # Check if there's a mapped logo filename
-        logo_filename = self.team_logo_mapping.get(normalized_team, f"{normalized_team.replace(' ', '_')}.png")
-        logo_path = self.logo_dir / logo_filename
+        # Map league to sport
+        normalized_league = league.lower().strip()
+        sport = self.league_to_sport_mapping.get(normalized_league, normalized_league.upper())
+        
+        # Construct the team logo path: betting-bot/static/logos/teams/SPORT/LEAGUE/Team.png
+        logo_filename = self.team_logo_mapping.get(normalized_team, f"{team_name}.png")
+        logo_path = self.team_logo_base_dir / sport / league.upper() / logo_filename
 
         try:
-            logger.debug(f"Attempting to load team logo for {team_name} from {logo_path}")
+            logger.debug(f"Attempting to load team logo for {team_name} (league: {league}) from {logo_path}")
             logo = Image.open(logo_path).convert("RGBA")
             # Resize logo to fit (e.g., 80x80 pixels)
             logo = logo.resize((80, 80), Image.Resampling.LANCZOS)
@@ -94,9 +108,9 @@ class BetSlipGenerator:
         # Normalize league name: uppercase
         normalized_league = league.upper().strip()
         
-        # Check if there's a mapped logo filename
+        # Construct the league logo path: betting-bot/static/logos/leagues/LEAGUE/LEAGUE.png
         logo_filename = self.league_logo_mapping.get(normalized_league.lower(), f"{normalized_league}.png")
-        logo_path = self.league_logo_dir / logo_filename
+        logo_path = self.league_logo_base_dir / normalized_league / logo_filename
 
         try:
             logger.debug(f"Attempting to load league logo for {league} from {logo_path}")
@@ -175,8 +189,8 @@ class BetSlipGenerator:
             )
 
             # Load team logos
-            home_logo = self._load_team_logo(home_team)
-            away_logo = self._load_team_logo(away_team)
+            home_logo = self._load_team_logo(home_team, league)
+            away_logo = self._load_team_logo(away_team, league)
 
             # Positions for logos
             logo_y = header_y + 30
