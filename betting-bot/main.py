@@ -57,6 +57,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
 TEST_GUILD_ID_STR = os.getenv('TEST_GUILD_ID')
 TEST_GUILD_ID = int(TEST_GUILD_ID_STR) if TEST_GUILD_ID_STR and TEST_GUILD_ID_STR.isdigit() else None
+logger.info(f"TEST_GUILD_ID from .env: {TEST_GUILD_ID}")
 
 # --- Bot Token Check ---
 if not BOT_TOKEN:
@@ -72,6 +73,7 @@ class BettingBot(commands.Bot):
         intents.reactions = True
 
         super().__init__(command_prefix=commands.when_mentioned_or("/"), intents=intents)
+        logger.debug(f"Bot initialized with intents: {intents}")
 
         self.db_manager = DatabaseManager()
         self.admin_service = AdminService(self, self.db_manager)
@@ -130,6 +132,13 @@ class BettingBot(commands.Bot):
             commands = [cmd.name for cmd in self.tree.get_commands()]
             logger.info(f"Registered commands: {commands}")
 
+            # Clear command tree to prevent duplicates
+            logger.debug("Clearing command tree before syncing")
+            self.tree.clear_commands(guild=None)
+            if TEST_GUILD_ID:
+                self.tree.clear_commands(guild=discord.Object(id=TEST_GUILD_ID))
+            self.tree.clear_commands(guild=discord.Object(id=1328126227013439601))
+
             # Sync commands
             try:
                 if TEST_GUILD_ID:
@@ -138,7 +147,7 @@ class BettingBot(commands.Bot):
                     self.tree.copy_global_to(guild=guild_obj)
                     synced = await self.tree.sync(guild=guild_obj)
                     logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced]}")
-                # Always sync to Cookin' Books guild
+                # Sync to Cookin' Books guild
                 logger.debug("Syncing commands to Cookin' Books guild: 1328126227013439601")
                 guild_obj = discord.Object(id=1328126227013439601)
                 self.tree.copy_global_to(guild=guild_obj)
@@ -197,6 +206,7 @@ class BettingBot(commands.Bot):
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         """Pass raw reaction events to BetService for bot-generated messages only."""
+        logger.debug(f"Received raw reaction add: message_id={payload.message_id}, user_id={payload.user_id}")
         if payload.user_id == self.user.id:
             return
         if not hasattr(self, 'bet_service') or not hasattr(self.bet_service, 'pending_reactions'):
@@ -214,6 +224,7 @@ class BettingBot(commands.Bot):
 
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
         """Pass raw reaction removal events to BetService for bot-generated messages only."""
+        logger.debug(f"Received raw reaction remove: message_id={payload.message_id}, user_id={payload.user_id}")
         if payload.user_id == self.user.id:
             return
         if not hasattr(self, 'bet_service') or not hasattr(self.bet_service, 'pending_reactions'):
@@ -233,12 +244,31 @@ class BettingBot(commands.Bot):
         """Log all interactions for debugging."""
         logger.debug(
             f"Interaction received: type={interaction.type}, command={interaction.command.name if interaction.command else 'N/A'}, "
-            f"user={interaction.user}, guild={interaction.guild_id}"
+            f"user={interaction.user} (ID: {interaction.user.id}), guild={interaction.guild_id}, channel={interaction.channel_id}"
         )
         try:
+            # Check permissions
+            if interaction.guild:
+                guild = interaction.guild
+                bot_member = guild.get_member(self.user.id)
+                if not bot_member:
+                    logger.error(f"Bot not found in guild {guild.id}")
+                    return
+                perms = interaction.channel.permissions_for(bot_member)
+                if not perms.use_application_commands:
+                    logger.warning(f"Bot lacks Use Application Commands permission in channel {interaction.channel_id}")
+                    await interaction.response.send_message(
+                        "❌ Bot lacks permission to use application commands in this channel.", ephemeral=True
+                    )
+                    return
             await super().on_interaction(interaction)
         except Exception as e:
-            logger.error(f"Error processing interaction: {e}", exc_info=True)
+            logger.error(f"Error processing interaction for user {interaction.user}: {e}", exc_info=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    f"❌ An error occurred while processing the interaction: {str(e)}",
+                    ephemeral=True
+                )
 
     async def close(self):
         """Gracefully close services and connections before shutdown."""
@@ -283,6 +313,12 @@ class SyncCog(commands.Cog):
         try:
             commands = [cmd.name for cmd in self.bot.tree.get_commands()]
             logger.debug(f"Commands to sync: {commands}")
+            # Clear command tree
+            logger.debug("Clearing command tree for sync")
+            self.bot.tree.clear_commands(guild=None)
+            if TEST_GUILD_ID:
+                self.bot.tree.clear_commands(guild=discord.Object(id=TEST_GUILD_ID))
+            self.bot.tree.clear_commands(guild=discord.Object(id=1328126227013439601))
             # Sync globally
             synced = await self.bot.tree.sync()
             logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
