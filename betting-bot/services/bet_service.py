@@ -146,14 +146,13 @@ class BetService:
 
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
-            stake = round(units)  # Round units to nearest integer for stake (DECIMAL(4,0))
 
             query = """
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type, league, team, opponent, line,
                     units, odds, channel_id, message_id, created_at, status, updated_at,
-                    expiration_time, result_value, result_description, stake
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    expiration_time, result_value, result_description
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             args = (
                 guild_id,
@@ -173,12 +172,11 @@ class BetService:
                 now_utc_for_db,
                 expiration_time,
                 None,
-                None,
-                stake
+                None
             )
 
             self.logger.debug(f"Executing bet insertion with args: {args}")
-            rowcount = await self.db.execute(query, *args)  # Unpack args to ensure flat tuple
+            rowcount = await self.db.execute(query, *args)
             self.logger.debug(f"Inserted bet, rows affected: {rowcount}")
 
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
@@ -256,7 +254,6 @@ class BetService:
 
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
-            stake = round(units)  # Round units to nearest integer for stake (DECIMAL(4,0))
             result_description = json.dumps([{
                 'game_id': leg['game_id'],
                 'bet_type': leg['bet_type'],
@@ -271,8 +268,8 @@ class BetService:
                 INSERT INTO bets (
                     guild_id, user_id, game_id, bet_type, league, team, opponent, line,
                     units, odds, channel_id, message_id, created_at, status, updated_at,
-                    expiration_time, result_value, result_description, stake
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    expiration_time, result_value, result_description
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             args = (
                 guild_id,
@@ -292,11 +289,10 @@ class BetService:
                 now_utc_for_db,
                 None,
                 None,
-                result_description,
-                stake
+                result_description
             )
             self.logger.debug(f"Executing parlay bet insertion with args: {args}")
-            rowcount = await self.db.execute(query, *args)  # Unpack args to ensure flat tuple
+            rowcount = await self.db.execute(query, *args)
             self.logger.debug(f"Inserted parlay bet, rows affected: {rowcount}")
 
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
