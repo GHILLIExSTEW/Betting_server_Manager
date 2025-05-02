@@ -19,7 +19,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-
 class BetService:
     def __init__(self, bot: commands.Bot, db_manager):
         self.bot = bot
@@ -151,7 +150,7 @@ class BetService:
                     result_value, result_description
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            # Ensure args is a flat tuple with 14 elements
+            # Define args as a flat tuple with 14 elements
             args = (
                 guild_id,
                 user_id,
@@ -250,7 +249,7 @@ class BetService:
                     result_value, result_description
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            # Ensure args is a flat tuple with 14 elements
+            # Define args as a flat tuple with 14 elements
             args = (
                 guild_id,
                 user_id,
