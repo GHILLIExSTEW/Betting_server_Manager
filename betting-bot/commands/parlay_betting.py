@@ -268,7 +268,7 @@ class BetDetailsModal(Modal):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number}")
         line = self.line.value.strip()
 
-        if not/line:
+        if not line:
             logger.warning("Modal submission failed: Missing required fields")
             await interaction.response.send_message("Please fill in all required fields.", ephemeral=True)
             return
