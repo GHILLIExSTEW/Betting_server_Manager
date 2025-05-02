@@ -133,19 +133,19 @@ class BettingBot(commands.Bot):
             # Sync commands
             try:
                 if TEST_GUILD_ID:
-                    logger.info(f"Syncing commands to test guild: {TEST_GUILD_ID}")
+                    logger.debug(f"Syncing commands to test guild: {TEST_GUILD_ID}")
                     guild_obj = discord.Object(id=TEST_GUILD_ID)
                     self.tree.copy_global_to(guild=guild_obj)
                     synced = await self.tree.sync(guild=guild_obj)
                     logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced]}")
                 # Always sync to Cookin' Books guild
-                logger.info("Syncing commands to Cookin' Books guild: 1328126227013439601")
+                logger.debug("Syncing commands to Cookin' Books guild: 1328126227013439601")
                 guild_obj = discord.Object(id=1328126227013439601)
                 self.tree.copy_global_to(guild=guild_obj)
                 synced = await self.tree.sync(guild=guild_obj)
                 logger.info(f"Commands synced to Cookin' Books guild: {[cmd.name for cmd in synced]}")
                 # Sync globally as fallback
-                logger.info("Syncing global commands...")
+                logger.debug("Syncing global commands...")
                 synced = await self.tree.sync()
                 logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
             except Exception as e:
@@ -196,30 +196,49 @@ class BettingBot(commands.Bot):
             logger.error(f"Failed to sync commands to new guild {guild.id}: {e}", exc_info=True)
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
-        """Pass raw reaction events to BetService."""
-        logger.debug(
-            f"Reaction added: {payload.emoji} by user {payload.user_id} on message {payload.message_id} "
-            f"in channel {payload.channel_id} (guild {payload.guild_id})"
-        )
+        """Pass raw reaction events to BetService for bot-generated messages only."""
         if payload.user_id == self.user.id:
             return
-        if hasattr(self, 'bet_service') and hasattr(self.bet_service, 'on_raw_reaction_add'):
+        if not hasattr(self, 'bet_service') or not hasattr(self.bet_service, 'pending_reactions'):
+            logger.debug("BetService or pending_reactions not ready during raw_reaction_add")
+            return
+        if payload.message_id not in self.bet_service.pending_reactions:
+            logger.debug(f"Ignoring reaction on non-bot message {payload.message_id}")
+            return
+        logger.debug(
+            f"Processing reaction added: {payload.emoji} by user {payload.user_id} on bot message {payload.message_id} "
+            f"in channel {payload.channel_id} (guild {payload.guild_id})"
+        )
+        if hasattr(self.bet_service, 'on_raw_reaction_add'):
             asyncio.create_task(self.bet_service.on_raw_reaction_add(payload))
-        else:
-            logger.debug("BetService or reaction handler not ready during raw_reaction_add.")
 
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
-        """Pass raw reaction removal events to BetService."""
-        logger.debug(
-            f"Reaction removed: {payload.emoji} by user {payload.user_id} on message {payload.message_id} "
-            f"in channel {payload.channel_id} (guild {payload.guild_id})"
-        )
+        """Pass raw reaction removal events to BetService for bot-generated messages only."""
         if payload.user_id == self.user.id:
             return
-        if hasattr(self, 'bet_service') and hasattr(self.bet_service, 'on_raw_reaction_remove'):
+        if not hasattr(self, 'bet_service') or not hasattr(self.bet_service, 'pending_reactions'):
+            logger.debug("BetService or pending_reactions not ready during raw_reaction_remove")
+            return
+        if payload.message_id not in self.bet_service.pending_reactions:
+            logger.debug(f"Ignoring reaction removal on non-bot message {payload.message_id}")
+            return
+        logger.debug(
+            f"Processing reaction removed: {payload.emoji} by user {payload.user_id} on bot message {payload.message_id} "
+            f"in channel {payload.channel_id} (guild {payload.guild_id})"
+        )
+        if hasattr(self.bet_service, 'on_raw_reaction_remove'):
             asyncio.create_task(self.bet_service.on_raw_reaction_remove(payload))
-        else:
-            logger.debug("BetService or reaction handler not ready during raw_reaction_remove.")
+
+    async def on_interaction(self, interaction: discord.Interaction):
+        """Log all interactions for debugging."""
+        logger.debug(
+            f"Interaction received: type={interaction.type}, command={interaction.command.name if interaction.command else 'N/A'}, "
+            f"user={interaction.user}, guild={interaction.guild_id}"
+        )
+        try:
+            await super().on_interaction(interaction)
+        except Exception as e:
+            logger.error(f"Error processing interaction: {e}", exc_info=True)
 
     async def close(self):
         """Gracefully close services and connections before shutdown."""
@@ -260,10 +279,10 @@ class SyncCog(commands.Cog):
     @app_commands.command(name="sync", description="Manually sync bot commands (admin only)")
     @app_commands.checks.has_permissions(administrator=True)
     async def sync_command(self, interaction: discord.Interaction):
+        logger.info(f"Manual sync initiated by {interaction.user} in guild {interaction.guild_id}")
         try:
-            logger.info(f"Manual sync initiated by {interaction.user} in guild {interaction.guild_id}")
             commands = [cmd.name for cmd in self.bot.tree.get_commands()]
-            logger.info(f"Commands to sync: {commands}")
+            logger.debug(f"Commands to sync: {commands}")
             # Sync globally
             synced = await self.bot.tree.sync()
             logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
