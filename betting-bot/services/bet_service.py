@@ -104,99 +104,99 @@ class BetService:
             await asyncio.sleep(3600)
 
     async def create_bet(
-    self,
-    guild_id: int,
-    user_id: int,
-    game_id: Optional[Union[str, int]],
-    bet_type: str,
-    team_name: str,
-    units: float,
-    odds: float,
-    channel_id: int,
-    message_id: Optional[int] = None,
-    expiration_time: Optional[datetime] = None
-) -> int:
-    """Create a new bet in the database. Returns the bet_serial."""
-    bet_serial = None
-    try:
-        guild_settings = await self.bot.admin_service.get_server_settings(guild_id)
-        MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
-        MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
-        MIN_ODDS, MAX_ODDS = -10000, 10000
-
-        if not (MIN_UNITS <= units <= MAX_UNITS):
-            raise ValidationError(
-                f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
+        self,
+        guild_id: int,
+        user_id: int,
+        game_id: Optional[Union[str, int]],
+        bet_type: str,
+        team_name: str,
+        units: float,
+        odds: float,
+        channel_id: int,
+        message_id: Optional[int] = None,
+        expiration_time: Optional[datetime] = None
+    ) -> int:
+        """Create a new bet in the database. Returns the bet_serial."""
+        bet_serial = None
+        try:
+            guild_settings = await self.bot.admin_service.get_server_settings(guild_id)
+            MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
+            MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
+            MIN_ODDS, MAX_ODDS = -10000, 10000
+    
+            if not (MIN_UNITS <= units <= MAX_UNITS):
+                raise ValidationError(
+                    f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
+                )
+            if not (MIN_ODDS <= odds <= MAX_ODDS):
+                raise ValidationError(f"Odds ({odds}) must be between {MIN_ODDS} and {MAX_ODDS}")
+            if -100 < odds < 100:
+                raise ValidationError("Odds cannot be between -99 and 99.")
+            if not bet_type:
+                raise ValidationError("Bet Type cannot be empty.")
+            if not team_name:
+                raise ValidationError("Team name/Selection cannot be empty.")
+    
+            db_game_id = str(game_id) if game_id else None
+            now_utc_for_db = datetime.now(timezone.utc)
+    
+            # Store team_name in result_description since the column doesn't exist
+            result_description = f"Team: {team_name}"
+            query = """
+                INSERT INTO bets (
+                    guild_id, user_id, game_id, bet_type,
+                    stake, odds, channel_id, message_id,
+                    created_at, status, updated_at, expiration_time,
+                    result_value, result_description
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            # Define args as a flat tuple with 14 elements
+            args = (
+                guild_id,
+                user_id,
+                db_game_id,
+                bet_type,
+                units,
+                odds,
+                channel_id,
+                message_id,
+                now_utc_for_db,
+                'pending',
+                now_utc_for_db,
+                expiration_time,
+                None,
+                result_description
             )
-        if not (MIN_ODDS <= odds <= MAX_ODDS):
-            raise ValidationError(f"Odds ({odds}) must be between {MIN_ODDS} and {MAX_ODDS}")
-        if -100 < odds < 100:
-            raise ValidationError("Odds cannot be between -99 and 99.")
-        if not bet_type:
-            raise ValidationError("Bet Type cannot be empty.")
-        if not team_name:
-            raise ValidationError("Team name/Selection cannot be empty.")
-
-        db_game_id = str(game_id) if game_id else None
-        now_utc_for_db = datetime.now(timezone.utc)
-
-        # Store team_name in result_description since the column doesn't exist
-        result_description = f"Team: {team_name}"
-        query = """
-            INSERT INTO bets (
-                guild_id, user_id, game_id, bet_type,
-                stake, odds, channel_id, message_id,
-                created_at, status, updated_at, expiration_time,
-                result_value, result_description
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        # Define args as a flat tuple with 14 elements
-        args = (
-            guild_id,
-            user_id,
-            db_game_id,
-            bet_type,
-            units,
-            odds,
-            channel_id,
-            message_id,
-            now_utc_for_db,
-            'pending',
-            now_utc_for_db,
-            expiration_time,
-            None,
-            result_description
-        )
-
-        # Log args to verify structure
-        self.logger.debug(f"Executing bet insertion with args: {args}")
-        await self.db.execute(query, *args)  # Unpack args to ensure flat structure
-
-        # Retrieve the bet_serial
-        bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
-        result = await self.db.fetch_one(bet_serial_query)
-        bet_serial = result['bet_serial'] if result and 'bet_serial' in result else None
-
-        if bet_serial:
-            self.logger.info(
-                f"Bet {bet_serial} created successfully for user {user_id} in guild {guild_id}."
-            )
-            return bet_serial
-        else:
-            raise BetServiceError(
-                "Failed to retrieve bet_serial after insertion. "
-                "Check DB schema (AUTO_INCREMENT on bet_serial)."
-            )
-
-    except ValidationError as ve:
-        self.logger.warning(f"Bet creation validation failed for user {user_id}: {ve}")
-        raise
-    except ConnectionError as ce:
-        self.logger.error(f"Database connection error during bet creation for user {user_id}: {ce}")
-        raise BetServiceError("Database connection error. Please try again later.") from ce
-    except Exception as e:
-        self.logger.exception(f"Error creating bet for user {user_id}: {e}")
-        raise BetServiceError("An internal error occurred while creating the bet.")
+    
+            # Log args to verify structure
+            self.logger.debug(f"Executing bet insertion with args: {args}")
+            await self.db.execute(query, *args)  # Unpack args to ensure flat structure
+    
+            # Retrieve the bet_serial
+            bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
+            result = await self.db.fetch_one(bet_serial_query)
+            bet_serial = result['bet_serial'] if result and 'bet_serial' in result else None
+    
+            if bet_serial:
+                self.logger.info(
+                    f"Bet {bet_serial} created successfully for user {user_id} in guild {guild_id}."
+                )
+                return bet_serial
+            else:
+                raise BetServiceError(
+                    "Failed to retrieve bet_serial after insertion. "
+                    "Check DB schema (AUTO_INCREMENT on bet_serial)."
+                )
+    
+        except ValidationError as ve:
+            self.logger.warning(f"Bet creation validation failed for user {user_id}: {ve}")
+            raise
+        except ConnectionError as ce:
+            self.logger.error(f"Database connection error during bet creation for user {user_id}: {ce}")
+            raise BetServiceError("Database connection error. Please try again later.") from ce
+        except Exception as e:
+            self.logger.exception(f"Error creating bet for user {user_id}: {e}")
+            raise BetServiceError("An internal error occurred while creating the bet.")
 
     async def create_parlay_bet(
         self,
