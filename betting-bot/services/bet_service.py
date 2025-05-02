@@ -176,13 +176,15 @@ class BetService:
             )
 
             self.logger.debug(f"Executing bet insertion with args: {args}")
-            rowcount = await self.db.execute(query, *args)
-            self.logger.debug(f"Inserted bet, rows affected: {rowcount}")
-
-            bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
-            result = await self.db.fetch_one(bet_serial_query)
-            self.logger.debug(f"LAST_INSERT_ID result: {result}")
-            bet_serial = result['bet_serial'] if result and 'bet_serial' in result and result['bet_serial'] else None
+            # Use a single connection for INSERT and LAST_INSERT_ID
+            async with self.db._pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    rowcount = await cursor.execute(query, args)
+                    self.logger.debug(f"Inserted bet, rows affected: {rowcount}")
+                    await cursor.execute("SELECT LAST_INSERT_ID() as bet_serial")
+                    result = await cursor.fetchone()
+                    self.logger.debug(f"LAST_INSERT_ID result: {result}")
+                    bet_serial = result[0] if result and result[0] else None
 
             if bet_serial and bet_serial > 0:
                 self.logger.info(
@@ -292,13 +294,15 @@ class BetService:
                 result_description
             )
             self.logger.debug(f"Executing parlay bet insertion with args: {args}")
-            rowcount = await self.db.execute(query, *args)
-            self.logger.debug(f"Inserted parlay bet, rows affected: {rowcount}")
-
-            bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
-            result = await self.db.fetch_one(bet_serial_query)
-            self.logger.debug(f"LAST_INSERT_ID result: {result}")
-            bet_serial = result['bet_serial'] if result and 'bet_serial' in result and result['bet_serial'] else None
+            # Use a single connection for INSERT and LAST_INSERT_ID
+            async with self.db._pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    rowcount = await cursor.execute(query, args)
+                    self.logger.debug(f"Inserted parlay bet, rows affected: {rowcount}")
+                    await cursor.execute("SELECT LAST_INSERT_ID() as bet_serial")
+                    result = await cursor.fetchone()
+                    self.logger.debug(f"LAST_INSERT_ID result: {result}")
+                    bet_serial = result[0] if result and result[0] else None
 
             if bet_serial and bet_serial > 0:
                 self.logger.info(f"Created parlay bet with serial {bet_serial} for user {user_id}")
