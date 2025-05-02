@@ -1,10 +1,9 @@
 # betting-bot/commands/straight_betting.py
 
-"""Straight betting command for placing single-leg bets."""
+"""Straight betting workflow for placing single-leg bets."""
 
 import discord
-from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel, File
-from discord.ext import commands
+from discord import ButtonStyle, Interaction, SelectOption, TextChannel, File
 from discord.ui import View, Select, Modal, TextInput, Button
 import logging
 from typing import Optional, List, Dict, Union
@@ -185,7 +184,7 @@ class ManualEntryButton(Button):
             try:
                 await self.parent_view.edit_message(
                     interaction,
-                    content="❌ Failed to open manual entry form. Please restart the /straight_bet command.",
+                    content="❌ Failed to open manual entry form. Please restart the /bet command.",
                     view=None
                 )
             except discord.HTTPException as e2:
@@ -379,7 +378,7 @@ class ConfirmButton(Button):
         await self.parent_view.submit_bet(interaction)
 
 class StraightBetWorkflowView(View):
-    def __init__(self, interaction: Interaction, bot: commands.Bot):
+    def __init__(self, interaction: Interaction, bot):
         super().__init__(timeout=600)
         self.original_interaction = interaction
         self.bot = bot
@@ -547,7 +546,7 @@ class StraightBetWorkflowView(View):
                             try:
                                 if interaction.response.is_done():
                                     await interaction.followup.send(
-                                        "❌ Please restart the /straight_bet command to enter details.",
+                                        "❌ Please restart the /bet command to enter details.",
                                         ephemeral=True
                                     )
                                     self.stop()
@@ -567,7 +566,7 @@ class StraightBetWorkflowView(View):
                         try:
                             if interaction.response.is_done():
                                 await interaction.followup.send(
-                                    "❌ Please restart the /straight_bet command to enter details.",
+                                    "❌ Please restart the /bet command to enter details.",
                                     ephemeral=True
                                 )
                                 self.stop()
@@ -734,7 +733,7 @@ class StraightBetWorkflowView(View):
                 await self.bot.bet_service.update_bet_channel(bet_serial=bet_serial, channel_id=post_channel_id)
                 if not self.preview_image_bytes:
                     raise ValueError("Preview image not found. Please start over.")
-                discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
+                discord file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
                 capper_info = await self.bot.db_manager.fetch_one(
                     "SELECT display_name, image_path FROM cappers WHERE user_id = %s",
                     (interaction.user.id,)
@@ -819,33 +818,3 @@ class BetResolutionView(View):
         except Exception as e:
             logger.error(f"Error adding push reaction: {e}")
             await interaction.response.send_message("Could not add reaction.", ephemeral=True)
-
-class StraightBettingCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-
-    @app_commands.command(name="straight_bet", description="Place a new straight bet through a guided workflow.")
-    async def straight_bet_command(self, interaction: Interaction):
-        logger.info(f"Straight bet command initiated by {interaction.user} in guild {interaction.guild_id}")
-        try:
-            is_auth = True  # Replace with actual authorization check if needed
-            if not is_auth:
-                await interaction.response.send_message(
-                    "❌ You are not authorized to place bets.",
-                    ephemeral=True
-                )
-                return
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            view = StraightBetWorkflowView(interaction, self.bot)
-            await view.start_flow()
-        except Exception as e:
-            logger.exception(f"Error initiating straight bet command: {e}")
-            error_message = "❌ An error occurred while starting the betting workflow."
-            if interaction.response.is_done():
-                await interaction.followup.send(error_message, ephemeral=True)
-            else:
-                await interaction.response.send_message(error_message, ephemeral=True)
-
-async def setup(bot: commands.Bot):
-    await bot.add_cog(StraightBettingCog(bot))
-    logger.info("StraightBettingCog loaded")
