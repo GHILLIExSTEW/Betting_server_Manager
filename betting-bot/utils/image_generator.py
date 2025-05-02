@@ -274,11 +274,12 @@ class BetSlipGenerator:
                 draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
                 current_y = team_y + 50
 
-            # Draw bet details
+            # Draw bet details and track the last y-coordinate
+            last_detail_y = current_y
             if bet_type == "parlay" and parlay_legs:
                 for leg in parlay_legs:
-                    current_y = self._draw_leg(
-                        image, draw, leg, league, width, current_y,
+                    last_detail_y = self._draw_leg(
+                        image, draw, leg, league, width, last_detail_y,
                         team_font, odds_font, units_font, emoji_font,
                         draw_logos=not is_same_game
                     )
@@ -291,18 +292,57 @@ class BetSlipGenerator:
                     'odds': odds,
                     'units': units
                 }
-                self._draw_leg(
-                    image, draw, leg, league, width, current_y,
+                last_detail_y = self._draw_leg(
+                    image, draw, leg, league, width, last_detail_y,
                     team_font, odds_font, units_font, emoji_font,
                     draw_logos=False  # Logos already drawn above
                 )
 
-            # Separator line before footer
-            separator_y = height - 50
+            # Separator line above units and footer
+            separator_y = last_detail_y - 60  # Position above the units text (last_detail_y is after units)
             draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
 
-            # Footer: Bet ID and Timestamp
-            footer_y = height - 30
+            # Units text below the separator
+            units_y = separator_y + 30  # Space after separator
+            units_label = "Unit" if units == 1.0 else "Units"
+            units_text = f"To Win {units:.2f} {units_label}"
+            units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
+            units_width = units_bbox[2] - units_bbox[0]
+            lock_icon = self._load_lock_icon()
+            lock_spacing = 10
+            if lock_icon:
+                lock_x_left = (width - units_width - 2 * lock_icon.width - 2 * lock_spacing) // 2
+                image.paste(lock_icon, (lock_x_left, units_y - lock_icon.height // 2), lock_icon)
+                lock_x_right = lock_x_left + units_width + lock_icon.width + 2 * lock_spacing
+                image.paste(lock_icon, (lock_x_right, units_y - lock_icon.height // 2), lock_icon)
+                draw.text(
+                    (lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y),
+                    units_text,
+                    fill=(255, 215, 0),
+                    font=units_font,
+                    anchor='mm'
+                )
+            else:
+                try:
+                    draw.text(
+                        (width // 2, units_y),
+                        f"🔒 {units_text} 🔒",
+                        fill=(255, 215, 0),
+                        font=emoji_font,
+                        anchor='mm'
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to render emoji with emoji font: {str(e)}. Falling back to text-based lock symbol.")
+                    draw.text(
+                        (width // 2, units_y),
+                        f"[L] {units_text} [L]",
+                        fill=(255, 215, 0),
+                        font=units_font,
+                        anchor='mm'
+                    )
+
+            # Footer: Bet ID and Timestamp below units
+            footer_y = units_y + 30  # Space after units text
             draw.text((padding + 10, footer_y), f"Bet #{bet_id}", fill=(150, 150, 150), font=small_font, anchor='lm')
             timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M')
             draw.text((width - padding - 10, footer_y), timestamp_text, fill=(150, 150, 150), font=small_font, anchor='rm')
@@ -356,46 +396,9 @@ class BetSlipGenerator:
         odds_y = current_y + 40
         odds_text = f"{odds:+.0f}"
         draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
-        units_y = odds_y + 40
-        units_label = "Unit" if units == 1.0 else "Units"
-        units_text = f"To Win {units:.2f} {units_label}"
-        units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
-        units_width = units_bbox[2] - units_bbox[0]
-        lock_icon = self._load_lock_icon()
-        lock_spacing = 10
-        if lock_icon:
-            lock_x_left = (width - units_width - 2 * lock_icon.width - 2 * lock_spacing) // 2
-            image.paste(lock_icon, (lock_x_left, units_y - lock_icon.height // 2), lock_icon)
-            lock_x_right = lock_x_left + units_width + lock_icon.width + 2 * lock_spacing
-            image.paste(lock_icon, (lock_x_right, units_y - lock_icon.height // 2), lock_icon)
-            draw.text(
-                (lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y),
-                units_text,
-                fill=(255, 215, 0),
-                font=units_font,
-                anchor='mm'
-            )
-        else:
-            try:
-                draw.text(
-                    (width // 2, units_y),
-                    f"🔒 {units_text} 🔒",
-                    fill=(255, 215, 0),
-                    font=emoji_font,
-                    anchor='mm'
-                )
-            except Exception as e:
-                logger.error(f"Failed to render emoji with emoji font: {str(e)}. Falling back to text-based lock symbol.")
-                draw.text(
-                    (width // 2, units_y),
-                    f"[L] {units_text} [L]",
-                    fill=(255, 215, 0),
-                    font=units_font,
-                    anchor='mm'
-                )
 
-        # Return the y-coordinate after this leg for the next leg
-        return units_y + 40
+        # Return the y-coordinate after the odds (units drawn in generate_bet_slip)
+        return odds_y + 40
 
     def save_bet_slip(self, image: Image.Image, output_path: str) -> None:
         """Save the bet slip image to a file."""
