@@ -733,7 +733,7 @@ class StraightBetWorkflowView(View):
                 await self.bot.bet_service.update_bet_channel(bet_serial=bet_serial, channel_id=post_channel_id)
                 if not self.preview_image_bytes:
                     raise ValueError("Preview image not found. Please start over.")
-                discord file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
+                discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
                 capper_info = await self.bot.db_manager.fetch_one(
                     "SELECT display_name, image_path FROM cappers WHERE user_id = %s",
                     (interaction.user.id,)
