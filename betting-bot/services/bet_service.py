@@ -7,8 +7,7 @@ import logging
 from typing import Dict, List, Optional, Tuple, Any, Union
 from datetime import datetime, timedelta, timezone
 import discord
-from discord import Embed, Color, ButtonStyle
-from discord.ui import View, Select, Modal, TextInput, Button
+from discord import Embed, Color
 from discord.ext import commands
 import json
 import pymysql
@@ -354,7 +353,7 @@ class BetService:
     ) -> bool:
         """Update the status, result description, and result value of a bet. Delete records if canceled."""
         try:
-            allowed_statuses = ['won', 'lost', 'push', 'canceled', 'expired', 'pending']
+            allowed_statuses = ['win', 'loss', 'push', 'canceled', 'expired', 'pending']
             if status not in allowed_statuses:
                 self.logger.error(f"Invalid status '{status}' provided for bet {bet_serial}")
                 return False
@@ -367,7 +366,7 @@ class BetService:
                 rowcount = await self.db.execute("""
                     UPDATE bets
                     SET status = %s, result_value = %s, result_description = %s, updated_at = UTC_TIMESTAMP()
-                    WHERE bet_serial = %s
+                    WHERE bet_serial = %s AND status = 'pending'
                 """, status, result_value, result_description, bet_serial)
 
             success = rowcount is not None and rowcount > 0
@@ -387,7 +386,7 @@ class BetService:
             else:
                 self.logger.warning(
                     f"Failed to update status for bet {bet_serial} "
-                    f"(Maybe not found or status unchanged?). Rows affected: {rowcount}"
+                    f"(Maybe not found, not pending, or status unchanged?). Rows affected: {rowcount}"
                 )
             return success
         except ConnectionError as ce:
@@ -472,14 +471,14 @@ class BetService:
 
     def _calculate_result_value(self, units: float, odds: float, outcome: str) -> float:
         """Calculate profit/loss based on American odds. Returns the net gain/loss."""
-        if outcome == 'won':
+        if outcome == 'win':
             if odds > 0:
                 return units * (odds / 100.0)
             elif odds < 0:
                 return units * (100.0 / abs(odds))
             else:
                 return 0.0
-        elif outcome == 'lost':
+        elif outcome == 'loss':
             return -abs(units)
         elif outcome == 'push':
             return 0.0
@@ -507,6 +506,7 @@ class BetService:
             f"(Bet: {bet_serial}) by user {payload.user_id}"
         )
 
+        # Fetch the reactor member
         reactor_member = payload.member
         if not reactor_member:
             try:
@@ -521,15 +521,23 @@ class BetService:
                 self.logger.error(f"Error fetching reactor member {payload.user_id}: {e}")
                 return
 
-        is_original_user = reactor_member.id == original_user_id
-        has_admin_permissions = reactor_member.guild_permissions.administrator
-
-        if not (is_original_user or has_admin_permissions):
-            self.logger.info(
-                f"Ignoring reaction on bet {bet_serial} msg {payload.message_id} by unauthorized user {reactor_member.id}."
-            )
+        # Only allow the bet submitter to resolve the bet
+        if reactor_member.id != original_user_id:
+            try:
+                channel = self.bot.get_channel(payload.channel_id)
+                if channel and isinstance(channel, discord.TextChannel):
+                    await channel.send(
+                        f"{reactor_member.mention}, only the bet submitter can resolve this bet.",
+                        delete_after=5
+                    )
+                await reaction.message.remove_reaction(payload.emoji, reactor_member)
+            except discord.Forbidden:
+                self.logger.warning(f"Missing permissions to remove reaction or send message in channel {payload.channel_id}.")
+            except Exception as e:
+                self.logger.error(f"Error handling unauthorized reaction for bet {bet_serial}: {e}")
             return
 
+        # Fetch the bet details
         try:
             original_bet = await self.get_bet(bet_serial)
         except Exception as e:
@@ -551,94 +559,88 @@ class BetService:
                 del self.pending_reactions[payload.message_id]
             return
 
+        # Map emoji to bet status
         emoji = str(payload.emoji)
+        emoji_to_status = {
+            "✅": "win",
+            "❌": "loss",
+            "🅿️": "push"
+        }
+        new_status = emoji_to_status.get(emoji)
+        if not new_status:
+            try:
+                channel = self.bot.get_channel(payload.channel_id)
+                if channel and isinstance(channel, discord.TextChannel):
+                    await channel.send(
+                        f"{reactor_member.mention}, invalid reaction. Use ✅ for Win, ❌ for Loss, or 🅿️ for Push.",
+                        delete_after=5
+                    )
+                reaction = discord.utils.get(reaction.message.reactions, emoji=payload.emoji)
+                if reaction:
+                    await reaction.remove(reactor_member)
+            except discord.Forbidden:
+                self.logger.warning(f"Missing permissions to remove reaction or send message in channel {payload.channel_id}.")
+            except Exception as e:
+                self.logger.error(f"Error handling invalid reaction for bet {bet_serial}: {e}")
+            return
+
+        # Calculate result value
         units = float(original_bet['units'])
         odds = float(original_bet['odds'])
-        result_value = 0.0
-        new_status = None
+        result_value = self._calculate_result_value(units, odds, new_status)
         result_desc = f'Reacted by {reactor_member.display_name}'
 
-        if emoji in ['✅', '☑️', '✔️']:
-            new_status = 'won'
-        elif emoji in ['❌', '✖️', '❎']:
-            new_status = 'lost'
-        elif emoji in ['🅿️', '🤷', '🤷‍♂️', '🤷‍♀️']:
-            new_status = 'push'
-        elif emoji in ['🚫', '🗑️']:
-            new_status = 'canceled'
+        self.logger.info(
+            f"Processing resolution for Bet {bet_serial}: Status -> {new_status}, Value -> {result_value:.2f}"
+        )
+        try:
+            updated = await self.update_bet_status(bet_serial, new_status, result_desc, result_value)
 
-        if new_status:
-            result_value = self._calculate_result_value(
-                units, odds, new_status if new_status != 'canceled' else 'push'
-            )
-            result_desc = f'{new_status.title()} ({result_desc})'
+            if updated:
+                # Record the result in unit_records
+                await self.record_bet_result(
+                    bet_serial, guild_id, original_user_id, units, odds, result_value
+                )
 
-            self.logger.info(
-                f"Processing resolution for Bet {bet_serial}: Status -> {new_status}, Value -> {result_value:.2f}"
-            )
-            try:
-                updated = await self.update_bet_status(bet_serial, new_status, result_desc, result_value)
-
-                if updated or new_status == 'canceled':
-                    if new_status in ['won', 'lost', 'push']:
-                        await self.record_bet_result(
-                            bet_serial, guild_id, original_user_id, units, odds, result_value
-                        )
-
-                    if new_status in ['won', 'lost'] and hasattr(self.bot, 'user_service'):
-                        transaction_type = 'bet_win' if new_status == 'won' else 'bet_loss'
-                        await self.bot.user_service.update_user_balance(
-                            original_user_id, result_value, transaction_type
-                        )
-
-                    if payload.message_id in self.pending_reactions:
-                        del self.pending_reactions[payload.message_id]
-                        self.logger.debug(
-                            f"Removed message {payload.message_id} from pending reactions after resolution."
-                        )
-
-                    await self._send_bet_status_notification(bet_info, new_status, result_value)
-
-                    if hasattr(self.bot, 'voice_service') and hasattr(self.bot.voice_service, 'update_on_bet_resolve'):
-                        asyncio.create_task(self.bot.voice_service.update_on_bet_resolve(guild_id))
-
-                    try:
-                        channel = self.bot.get_channel(payload.channel_id)
-                        if channel and isinstance(channel, discord.TextChannel):
-                            message = await channel.fetch_message(payload.message_id)
-                            await message.edit(view=None)
-                            self.logger.debug(f"Removed resolution view from message {payload.message_id}")
-                        else:
-                            self.logger.warning(
-                                f"Could not find channel {payload.channel_id} to remove view from message {payload.message_id}"
-                            )
-                    except discord.NotFound:
-                        self.logger.warning(f"Message {payload.message_id} not found, could not remove view.")
-                    except discord.Forbidden:
-                        self.logger.warning(
-                            f"Missing permissions to edit message {payload.message_id} or remove reactions."
-                        )
-                    except Exception as e:
-                        self.logger.warning(f"Could not remove view/reactions from message {payload.message_id}: {e}")
-
-                else:
-                    self.logger.warning(
-                        f"Database update failed when trying to resolve bet {bet_serial} via reaction."
+                # Update user balance if applicable
+                if new_status in ['win', 'loss'] and hasattr(self.bot, 'user_service'):
+                    transaction_type = 'bet_win' if new_status == 'win' else 'bet_loss'
+                    await self.bot.user_service.update_user_balance(
+                        original_user_id, result_value, transaction_type
                     )
 
-            except InsufficientUnitsError as iu_error:
-                self.logger.error(f"Insufficient units error processing bet {bet_serial} result: {iu_error}")
-                try:
-                    channel = self.bot.get_channel(payload.channel_id)
-                    if channel:
-                        await channel.send(
-                            f"⚠️ Error resolving bet `{bet_serial}`: {iu_error}. Bet status not updated.",
-                            delete_after=60
-                        )
-                except Exception:
-                    pass
-            except Exception as e:
-                self.logger.exception(f"Error handling reaction add resolution for bet {bet_serial}: {e}")
+                # Remove from pending reactions
+                if payload.message_id in self.pending_reactions:
+                    del self.pending_reactions[payload.message_id]
+                    self.logger.debug(
+                        f"Removed message {payload.message_id} from pending reactions after resolution."
+                    )
+
+                # Send notification
+                await self._send_bet_status_notification(bet_info, new_status, result_value)
+
+                # Update voice channels if applicable
+                if hasattr(self.bot, 'voice_service') and hasattr(self.bot.voice_service, 'update_on_bet_resolve'):
+                    asyncio.create_task(self.bot.voice_service.update_on_bet_resolve(guild_id))
+
+            else:
+                self.logger.warning(
+                    f"Database update failed when trying to resolve bet {bet_serial} via reaction."
+                )
+
+        except InsufficientUnitsError as iu_error:
+            self.logger.error(f"Insufficient units error processing bet {bet_serial} result: {iu_error}")
+            try:
+                channel = self.bot.get_channel(payload.channel_id)
+                if channel:
+                    await channel.send(
+                        f"⚠️ Error resolving bet `{bet_serial}`: {iu_error}. Bet status not updated.",
+                        delete_after=60
+                    )
+            except Exception:
+                pass
+        except Exception as e:
+            self.logger.exception(f"Error handling reaction add resolution for bet {bet_serial}: {e}")
 
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent) -> None:
         """Handle reaction removes if reverting bet status is desired."""
@@ -654,10 +656,10 @@ class BetService:
 
             color = discord.Color.greyple()
             status_emoji = "ℹ️"
-            if status == 'won':
+            if status == 'win':
                 color = discord.Color.green()
                 status_emoji = "✅"
-            elif status == 'lost':
+            elif status == 'loss':
                 color = discord.Color.red()
                 status_emoji = "❌"
             elif status == 'push':
@@ -694,7 +696,7 @@ class BetService:
             embed.add_field(name="Units", value=f"{units_value:.2f} {units_label}", inline=True)
             embed.add_field(name="Odds", value=f"{float(bet['odds']):+}", inline=True)
 
-            if status in ['won', 'lost', 'push']:
+            if status in ['win', 'loss', 'push']:
                 embed.add_field(name="Result", value=f"**{result_value:+.2f} {units_label}**", inline=True)
             else:
                 embed.add_field(name="Result", value=status.title(), inline=True)
