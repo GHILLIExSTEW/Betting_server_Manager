@@ -537,7 +537,7 @@ class ParlayBetWorkflowView(View):
                     if league_games:
                         self.add_item(GameSelect(self, league_games))
                         self.add_item(CancelButton(self))
-                        step_content += f": Select Game for { league} (or Other)"
+                        step_content += f": Select Game for {league} (or Other)"
                         logger.debug(f"Showing game selection for {league}")
                         await self.edit_message(interaction, content=step_content, view=self)
                     else:
@@ -619,16 +619,16 @@ class ParlayBetWorkflowView(View):
                     channels = []
                     try:
                         if hasattr(self.bot, 'db_manager'):
+                            # Query only embed_channel_1 to avoid missing column error
                             settings = await self.bot.db_manager.fetch_one(
-                                "SELECT embed_channel_1, embed_channel_2 FROM server_settings WHERE guild_id = %s",
+                                "SELECT embed_channel_1 FROM guild_settings WHERE guild_id = %s",
                                 (interaction.guild_id,)
                             )
-                            if settings:
-                                for channel_id in [settings['embed_channel_1'], settings['embed_channel_2']]:
-                                    if channel_id:
-                                        channel = interaction.guild.get_channel(int(channel_id))
-                                        if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
-                                            channels.append(channel)
+                            if settings and settings.get('embed_channel_1'):
+                                channel = interaction.guild.get_channel(int(settings['embed_channel_1']))
+                                if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
+                                    channels.append(channel)
+                                    logger.debug(f"Found embed_channel_1: {channel.id} ({channel.name})")
                         if not channels:
                             channels = sorted(
                                 [ch for ch in interaction.guild.text_channels
@@ -636,6 +636,7 @@ class ParlayBetWorkflowView(View):
                                  ch.permissions_for(interaction.guild.me).send_messages],
                                 key=lambda c: c.position
                             )
+                            logger.debug(f"Fallback to guild text channels: {[ch.name for ch in channels]}")
                     except Exception as e:
                         logger.error(f"Failed to fetch channels: {e}", exc_info=True)
                         await self.edit_message(
@@ -790,7 +791,7 @@ class ParlayBetWorkflowView(View):
                                 parlay_legs=parlay_legs,
                                 is_same_game=is_same_game
                             )
-                            self.preview_image_bytes = io.BytesIO()
+                            self b_preview_image_bytes = io.BytesIO()
                             bet_slip_image.save(self.preview_image_bytes, format='PNG')
                             self.preview_image_bytes.seek(0)
                             file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
@@ -840,11 +841,11 @@ class ParlayBetWorkflowView(View):
                 logger.error(f"Preview image bytes not found for bet {bet_serial}")
                 raise ValueError("Preview image not found. Please start over.")
 
-            # Step 1: Fetch the member_role from server_settings
+            # Step 1: Fetch the member_role from guild_settings
             role_mention = ""
             try:
                 settings = await self.bot.db_manager.fetch_one(
-                    "SELECT member_role FROM server_settings WHERE guild_id = %s",
+                    "SELECT member_role FROM guild_settings WHERE guild_id = %s",
                     (interaction.guild_id,)
                 )
                 if settings and settings.get('member_role'):
