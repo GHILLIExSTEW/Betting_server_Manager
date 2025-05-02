@@ -159,4 +159,4 @@ class BettingCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(BettingCog(bot))
-    logger.info("BettingCog setup completed")
+    logger.info("BettingCog setup completed and added to bot")
