@@ -54,13 +54,14 @@ class BetService:
         """Remove expired pending bets from the database."""
         logger.debug("Checking for expired pending bets")
         try:
-            # Example query to clean up bets older than a certain time
+            # Convert timestamp to MySQL DATETIME最好的格式
+            expiration_time = datetime.now(timezone.utc).timestamp() - (24 * 3600)  # 24 hours ago
+            expiration_datetime = datetime.fromtimestamp(expiration_time, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             query = """
                 DELETE FROM bets
                 WHERE status = 'pending' AND created_at < %s
             """
-            expiration_time = datetime.now(timezone.utc).timestamp() - (24 * 3600)  # 24 hours ago
-            await self.db_manager.execute(query, (expiration_time,))
+            await self.db_manager.execute(query, (expiration_datetime,))
             logger.debug("Expired pending bets cleaned up")
         except Exception as e:
             logger.error(f"Failed to clean up expired bets: {e}", exc_info=True)
@@ -128,7 +129,7 @@ class BetService:
             params = (
                 bet_serial, guild_id, user_id, game_id, bet_type, team, opponent,
                 line, units, odds, channel_id, league, 'pending',
-                datetime.now(timezone.utc).timestamp()
+                datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             )
             await self.db_manager.execute(query, params)
 
@@ -195,7 +196,7 @@ class BetService:
             """
             params = (
                 bet_serial, guild_id, user_id, 'parlay', channel_id, league, 'pending',
-                datetime.now(timezone.utc).timestamp()
+                datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             )
             await self.db_manager.execute(query, params)
 
@@ -334,7 +335,7 @@ class BetService:
             """
             params = (
                 bet_serial, payload.user_id, str(payload.emoji), channel_id,
-                payload.message_id, datetime.now(timezone.utc).timestamp()
+                payload.message_id, datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             )
             await self.db_manager.execute(query, params)
 
