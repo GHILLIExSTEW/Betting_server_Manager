@@ -210,13 +210,14 @@ class BetService:
         guild_id: int,
         user_id: int,
         legs: List[Dict],
-        channel_id: Optional[int] = None
+        channel_id: Optional[int] = None,
+        league: Optional[str] = None  # Add league parameter
     ) -> int:
         """Create a new parlay bet and return the bet serial."""
         try:
             if len(legs) < 2:
                 raise ValidationError("Parlay bets must have at least two legs.")
-
+    
             # For simplicity, we'll store the first leg's details in the main bet
             # and include all legs in the result_description as JSON
             leg = legs[0]
@@ -224,12 +225,12 @@ class BetService:
             odds = float(leg['odds'])
             game_id = leg['game_id']
             bet_type = 'parlay'
-
+    
             guild_settings = await self.bot.admin_service.get_server_settings(guild_id)
             MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
             MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
             MIN_ODDS, MAX_ODDS = -10000, 10000
-
+    
             if not (MIN_UNITS <= units <= MAX_UNITS):
                 raise ValidationError(
                     f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
@@ -238,7 +239,9 @@ class BetService:
                 raise ValidationError(f"Odds ({odds}) must be between {MIN_ODDS} and {MAX_ODDS}")
             if -100 < odds < 100:
                 raise ValidationError("Odds cannot be between -99 and 99.")
-
+            if not league:
+                raise ValidationError("League cannot be empty.")  # Validate league
+    
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
             # Serialize legs as JSON in result_description
@@ -249,21 +252,22 @@ class BetService:
                 'units': leg['units'],
                 'odds': leg['odds']
             } for leg in legs])
-
+    
             query = """
                 INSERT INTO bets (
-                    guild_id, user_id, game_id, bet_type,
+                    guild_id, user_id, game_id, bet_type, league,
                     stake, odds, channel_id, message_id,
                     created_at, status, updated_at, expiration_time,
                     result_value, result_description
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            # Define args as a flat tuple with 14 elements
+            # Define args as a flat tuple with 15 elements
             args = (
                 guild_id,
                 user_id,
                 db_game_id,
                 bet_type,
+                league,
                 units,
                 odds,
                 channel_id,
@@ -275,27 +279,30 @@ class BetService:
                 None,
                 result_description
             )
-            await self.db.execute(query, args)
-
+            await self.db.execute(query, *args)
+    
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
             result = await self.db.fetch_one(bet_serial_query)
             bet_serial = result['bet_serial'] if result and 'bet_serial' in result else None
-
+    
             if not bet_serial:
                 raise BetServiceError(
                     "Failed to retrieve bet_serial after insertion. "
                     "Check DB schema (AUTO_INCREMENT on bet_serial)."
                 )
-
+    
             self.logger.info(f"Created parlay bet with serial {bet_serial} for user {user_id}")
             return bet_serial
-
+    
         except ValidationError as ve:
             self.logger.warning(f"Parlay bet creation validation failed for user {user_id}: {ve}")
             raise
         except ConnectionError as ce:
             self.logger.error(f"Database connection error during parlay bet creation for user {user_id}: {ce}")
             raise BetServiceError("Database connection error. Please try again later.") from ce
+        except pymysql.err.OperationalError as oe:
+            self.logger.error(f"Database operational error during parlay bet creation for user {user_id}: {oe}")
+            raise BetServiceError(f"Database error: {oe}") from oe
         except Exception as e:
             self.logger.exception(f"Error creating parlay bet for user {user_id}: {e}")
             raise BetServiceError("An internal error occurred while creating the parlay bet.")
