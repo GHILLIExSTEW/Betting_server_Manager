@@ -3,7 +3,7 @@
 """Parlay betting workflow for placing multi-leg bets."""
 
 import discord
-from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel, File
+from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel, File, Embed
 from discord.ui import View, Select, Modal, TextInput, Button
 import logging
 from typing import Optional, List, Dict, Union
@@ -888,13 +888,28 @@ class ParlayBetWorkflowView(View):
                 await self.bot.bet_service.update_parlay_bet_channel(bet_serial=bet_serial, channel_id=post_channel_id)
                 if not self.preview_image_bytes:
                     raise ValueError("Preview image not found. Please start over.")
+
+                # Step 1: Upload the image as an attachment to get its URL
                 discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
+                temp_message = await post_channel.send(file=discord_file)
+                image_url = temp_message.attachments[0].url if temp_message.attachments else None
+
+                if not image_url:
+                    raise ValueError("Failed to upload bet slip image and retrieve URL.")
+
+                # Step 2: Create an embed with the image URL
+                embed = Embed()
+                embed.set_image(url=image_url)
+
+                # Step 3: Fetch capper info for display
                 capper_info = await self.bot.db_manager.fetch_one(
                     "SELECT display_name, image_path FROM cappers WHERE user_id = %s",
                     (interaction.user.id,)
                 )
                 display_name = capper_info['display_name'] if capper_info else interaction.user.display_name
                 avatar_url = capper_info['image_path'] if capper_info else (interaction.user.avatar.url if interaction.user.avatar else None)
+
+                # Step 4: Create or fetch webhook and send the embed
                 webhook = None
                 for wh in await post_channel.webhooks():
                     if wh.user.id == self.bot.user.id:
@@ -902,13 +917,19 @@ class ParlayBetWorkflowView(View):
                         break
                 if not webhook:
                     webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
-                # Send the bet slip message without a view (no preloaded emoji buttons)
+
+                # Send the final message with the embed
                 sent_message = await webhook.send(
-                    file=discord_file,
+                    embed=embed,
                     username=display_name,
                     avatar_url=avatar_url,
                     wait=True
                 )
+
+                # Step 5: Delete the temporary message
+                await temp_message.delete()
+
+                # Step 6: Track the message for reaction monitoring
                 if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
                     self.bot.bet_service.pending_reactions[sent_message.id] = {
                         'bet_serial': bet_serial,
@@ -919,6 +940,7 @@ class ParlayBetWorkflowView(View):
                         'league': details.get('league'),
                         'bet_type': 'parlay'
                     }
+
                 await self.edit_message(
                     interaction,
                     content=f"✅ Bet placed successfully! (ID: `{bet_serial}`). Posted to {post_channel.mention}.",
