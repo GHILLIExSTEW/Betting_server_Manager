@@ -7,7 +7,6 @@ from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextCh
 from discord.ext import commands
 from discord.ui import View, Select, Modal, TextInput, Button
 import logging
-import pymysql
 from typing import Optional, List, Dict, Union
 from datetime import datetime, timezone
 import io
@@ -736,19 +735,21 @@ class BetWorkflowView(View):
                         return
 
                     leg = legs[0]  # For straight bets, we only have one leg
-                    # Temporarily set channel_id to None since we haven't selected it yet
                     bet_type = self.bet_details.get('bet_type')
+                    league = self.bet_details.get('league')
                     if bet_type == "straight":
                         bet_serial = await self.bot.bet_service.create_bet(
                             guild_id=interaction.guild_id,
                             user_id=interaction.user.id,
                             game_id=self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
                             bet_type="player_prop" if leg.get('player') else "game_line",
-                            team_name=leg.get('team', leg.get('line')),
+                            team=leg.get('team', leg.get('line')),
+                            opponent=leg.get('opponent'),
+                            line=leg.get('line'),
                             units=float(leg.get('units_str', '1.00')),
                             odds=float(leg.get('odds_str', '-110')),
                             channel_id=None,  # Will update later in submit_bet
-                            league=self.bet_details.get('league')  # Pass the league
+                            league=league
                         )
                     else:  # Parlay
                         bet_serial = await self.bot.bet_service.create_parlay_bet(
@@ -758,13 +759,15 @@ class BetWorkflowView(View):
                                 {
                                     'game_id': self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
                                     'bet_type': "player_prop" if leg.get('player') else "game_line",
-                                    'team_name': leg.get('team', leg.get('line')),
+                                    'team': leg.get('team', leg.get('line')),
+                                    'opponent': leg.get('opponent'),
+                                    'line': leg.get('line'),
                                     'units': float(leg.get('units_str', '1.00')),
                                     'odds': float(leg.get('odds_str', '-110')),
                                 } for leg in legs
                             ],
                             channel_id=None,
-                            league=self.bet_details.get('league')  # Pass the league
+                            league=league
                         )
 
                     self.bet_details['bet_serial'] = bet_serial  # Store for use in submit_bet
@@ -878,7 +881,6 @@ class BetWorkflowView(View):
 
         finally:
             self.is_processing = False
-
 
     async def submit_bet(self, interaction: Interaction):
         details = self.bet_details
