@@ -238,9 +238,10 @@ class BetSlipGenerator:
             league_logo = self._load_league_logo(league)
             header_y = 50
             if bet_type == "parlay":
-                header_text = f"{league.upper()} - {'Same-Game Parlay' if is_same_game else 'Multi-Team Parlay'}"
+                leg_count = len(parlay_legs) if parlay_legs else 1
+                header_text = f"{leg_count}-Leg Parlay"  # Removed league from heading
             else:
-                header_text = f"{league.upper()} - Straight Bet"
+                header_text = "Straight Bet"  # Removed league from heading
             if league_logo:
                 logo_x = (width - league_logo.width) // 2
                 image.paste(league_logo, (logo_x, 20), league_logo)
@@ -396,8 +397,6 @@ class BetSlipGenerator:
         odds_text = f"{odds:+.0f}"
         draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
 
-        # Return the y-coordinate after the odds (separator, units, and footer drawn in generate_bet_slip)
-        return odds_y
         # Return the y-coordinate after the odds (separator, units, and footer drawn in generate_bet_slip)
         return odds_y
 
