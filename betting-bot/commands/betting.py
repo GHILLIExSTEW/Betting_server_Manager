@@ -33,7 +33,7 @@ class BetTypeSelect(Select):
             SelectOption(
                 label="Parlay",
                 value="parlay",
-                description="Combine multiple bets"
+                description="UNDER CONSTRUCTION"
             )
         ]
         super().__init__(
@@ -302,13 +302,13 @@ class BetDetailsModal(Modal):
         if is_manual:
             self.team = TextInput(
                 label="Team",
-                placeholder="e.g., Lakers",
+                placeholder="Your Team's Name",
                 required=True,
                 max_length=100
             )
             self.opponent = TextInput(
                 label="Opponent" if line_type == "game_line" else "Player",
-                placeholder="e.g., Celtics or LeBron James",
+                placeholder="Your Team's Opponent",
                 required=True,
                 max_length=100
             )
@@ -322,7 +322,7 @@ class BetDetailsModal(Modal):
             max_length=100
         )
         self.odds = TextInput(
-            label="Odds (American)",
+            label="Odds",
             placeholder="e.g., -110, +150",
             required=True,
             max_length=10
@@ -331,17 +331,17 @@ class BetDetailsModal(Modal):
         # Include units input for all legs after the first leg of a parlay
         if not (self.leg_number == 1 and self.bet_type == "parlay"):
             self.units = TextInput(
-                label="Units (e.g., 1, 1.5)",
+                label="Units (1, 2, or 3)",
                 placeholder="Enter units to risk",
                 required=True,
-                max_length=5
+                max_length=1
             )
             self.add_item(self.units)
 
         if line_type == "player_prop" and not is_manual:
             self.player = TextInput(
                 label="Player",
-                placeholder="e.g., LeBron James",
+                placeholder="Your Player's Name",
                 required=True,
                 max_length=100
             )
@@ -437,10 +437,10 @@ class UnitsModal(Modal, title="Enter Parlay Units"):
     def __init__(self):
         super().__init__(title="Enter Parlay Units")
         self.units = TextInput(
-            label="Units (e.g., 1, 1.5)",
+            label="Units (1, 2, or 3)",
             placeholder="Enter units to risk for the parlay",
             required=True,
-            max_length=5
+            max_length=1
         )
         self.add_item(self.units)
 
