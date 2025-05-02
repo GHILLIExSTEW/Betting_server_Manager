@@ -239,13 +239,11 @@ class BetDetailsModal(Modal):
         if is_manual:
             self.team = TextInput(
                 label="Team",
-                placeholder="e.g., Lakers",
                 required=True,
                 max_length=100
             )
             self.opponent = TextInput(
                 label="Opponent" if line_type == "game_line" else "Player",
-                placeholder="e.g., Celtics or LeBron James",
                 required=True,
                 max_length=100
             )
@@ -255,7 +253,6 @@ class BetDetailsModal(Modal):
         if line_type == "player_prop" and not is_manual:
             self.player = TextInput(
                 label="Player",
-                placeholder="e.g., LeBron James",
                 required=True,
                 max_length=100
             )
@@ -263,30 +260,21 @@ class BetDetailsModal(Modal):
 
         self.line = TextInput(
             label="Line",
-            placeholder="e.g., -7.5, Over 220.5",
             required=True,
             max_length=100
         )
-        self.odds = TextInput(
-            label="Odds (American)",
-            placeholder="e.g., -110, +150",
-            required=True,
-            max_length=10
-        )
         self.add_item(self.line)
-        self.add_item(self.odds)
 
     async def on_submit(self, interaction: Interaction):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number}")
         line = self.line.value.strip()
-        odds = self.odds.value.strip()
 
-        if not all([line, odds]):
+        if not line:
             logger.warning("Modal submission failed: Missing required fields")
             await interaction.response.send_message("Please fill in all required fields.", ephemeral=True)
             return
 
-        leg = {'line': line, 'odds_str': odds}
+        leg = {'line': line, 'odds_str': '-110'}  # Default odds to -110 since odds field is removed
 
         if self.is_manual:
             team = self.team.value.strip()
