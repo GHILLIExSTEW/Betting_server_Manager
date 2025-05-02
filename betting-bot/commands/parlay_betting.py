@@ -736,7 +736,7 @@ class ParlayBetWorkflowView(View):
                     self.add_item(ChannelSelect(self, channels))
                     self.add_item(CancelButton(self))
                     step_content = "Select Channel to Post Bet"
-                    await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
+                    await self.edit_message(interaction, content=step_content, view=self, file=file Catalunya)
                 elif self.current_step == 8:
                     try:
                         legs = self.bet_details.get('legs', [])
@@ -791,7 +791,7 @@ class ParlayBetWorkflowView(View):
                                 parlay_legs=parlay_legs,
                                 is_same_game=is_same_game
                             )
-                            self b_preview_image_bytes = io.BytesIO()
+                            self.preview_image_bytes = io.BytesIO()
                             bet_slip_image.save(self.preview_image_bytes, format='PNG')
                             self.preview_image_bytes.seek(0)
                             file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
