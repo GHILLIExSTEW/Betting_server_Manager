@@ -221,9 +221,9 @@ class ManualEntryButton(Button):
                 line_type=line_type,
                 is_manual=True,
                 is_first_leg=len(self.parent_view.bet_details.get('legs', [])) == 0,
-                bet_type=bet_type  # Pass bet_type directly
+                bet_type=bet_type
             )
-            modal.view = self.parent_view  # Assign view after creation
+            modal.view = self.parent_view
             await interaction.response.send_modal(modal)
             logger.debug("Manual entry modal sent successfully")
             await self.parent_view.edit_message(
@@ -278,13 +278,20 @@ class CancelButton(Button):
         self.parent_view.stop()
 
 
-class BetDetailsModal(Modal, title="Enter Bet Details"):
+class BetDetailsModal(Modal):
     def __init__(self, line_type: str, is_manual: bool = False, is_first_leg: bool = False, bet_type: str = None):
-        super().__init__(title="Enter Bet Details")
+        # Customize the modal title based on whether it's the first leg of a parlay
+        if is_first_leg and bet_type == "parlay":
+            title = "Enter First Leg Details (Submit to Add Next Leg)"
+        elif bet_type == "parlay":
+            title = "Enter Leg Details (Submit to Add or Confirm)"
+        else:
+            title = "Enter Bet Details"
+        super().__init__(title=title)
         self.line_type = line_type
         self.is_manual = is_manual
         self.is_first_leg = is_first_leg
-        self.bet_type = bet_type  # Directly pass bet_type instead of accessing via view
+        self.bet_type = bet_type
 
         if is_manual:
             self.team = TextInput(
