@@ -71,7 +71,7 @@ class BettingBot(commands.Bot):
         intents.members = True
         intents.reactions = True
 
-        super().__init__(command_prefix=commands.when_mentioned_or("!"), intents=intents)
+        super().__init__(command_prefix=commands.when_mentioned_or("/"), intents=intents)
 
         self.db_manager = DatabaseManager()
         self.admin_service = AdminService(self, self.db_manager)
@@ -119,23 +119,37 @@ class BettingBot(commands.Bot):
         try:
             await self.db_manager.connect()
             if not self.db_manager._pool:
-                 logger.critical("Database connection pool failed to initialize. Bot cannot continue.")
-                 await self.close()
-                 sys.exit("Database connection failed.")
+                logger.critical("Database connection pool failed to initialize. Bot cannot continue.")
+                await self.close()
+                sys.exit("Database connection failed.")
             logger.info("Database pool connected and schema initialized/verified.")
 
             await self.load_extensions()
 
-            if TEST_GUILD_ID:
-                logger.info(f"Syncing commands ONLY to test guild: {TEST_GUILD_ID}...")
-                guild_obj = discord.Object(id=TEST_GUILD_ID)
+            # Log all commands before syncing
+            commands = [cmd.name for cmd in self.tree.get_commands()]
+            logger.info(f"Registered commands: {commands}")
+
+            # Sync commands
+            try:
+                if TEST_GUILD_ID:
+                    logger.info(f"Syncing commands to test guild: {TEST_GUILD_ID}")
+                    guild_obj = discord.Object(id=TEST_GUILD_ID)
+                    self.tree.copy_global_to(guild=guild_obj)
+                    synced = await self.tree.sync(guild=guild_obj)
+                    logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced]}")
+                # Always sync to Cookin' Books guild
+                logger.info("Syncing commands to Cookin' Books guild: 1328126227013439601")
+                guild_obj = discord.Object(id=1328126227013439601)
                 self.tree.copy_global_to(guild=guild_obj)
-                await self.tree.sync(guild=guild_obj)
-                logger.info(f"Commands synced to test guild {TEST_GUILD_ID}.")
-            else:
+                synced = await self.tree.sync(guild=guild_obj)
+                logger.info(f"Commands synced to Cookin' Books guild: {[cmd.name for cmd in synced]}")
+                # Sync globally as fallback
                 logger.info("Syncing global commands...")
-                await self.tree.sync()
-                logger.info("Global commands synced.")
+                synced = await self.tree.sync()
+                logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
+            except Exception as e:
+                logger.error(f"Failed to sync command tree: {e}", exc_info=True)
 
             logger.info("Starting services...")
             service_starts = []
@@ -146,10 +160,10 @@ class BettingBot(commands.Bot):
             if hasattr(self.data_sync_service, 'start'): service_starts.append(self.data_sync_service.start())
 
             if service_starts:
-                 results = await asyncio.gather(*service_starts, return_exceptions=True)
-                 for i, result in enumerate(results):
-                      if isinstance(result, Exception):
-                           logger.error(f"Error starting service {i}: {result}", exc_info=True)
+                results = await asyncio.gather(*service_starts, return_exceptions=True)
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Error starting service {i}: {result}", exc_info=True)
             logger.info("Services startup initiated.")
 
             logger.info("Bot setup_hook completed successfully.")
@@ -175,6 +189,11 @@ class BettingBot(commands.Bot):
     async def on_guild_join(self, guild: discord.Guild):
         """Called when the bot joins a new guild."""
         logger.info(f"Joined new guild: {guild.name} ({guild.id})")
+        try:
+            await self.tree.sync(guild=discord.Object(id=guild.id))
+            logger.info(f"Commands synced to new guild {guild.id}")
+        except Exception as e:
+            logger.error(f"Failed to sync commands to new guild {guild.id}: {e}", exc_info=True)
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         """Pass raw reaction events to BetService."""
@@ -233,14 +252,54 @@ class BettingBot(commands.Bot):
             await super().close()
             logger.info("Bot shutdown complete.")
 
+# --- Manual Sync Command ---
+class SyncCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @app_commands.command(name="sync", description="Manually sync bot commands (admin only)")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def sync_command(self, interaction: discord.Interaction):
+        try:
+            logger.info(f"Manual sync initiated by {interaction.user} in guild {interaction.guild_id}")
+            commands = [cmd.name for cmd in self.bot.tree.get_commands()]
+            logger.info(f"Commands to sync: {commands}")
+            # Sync globally
+            synced = await self.bot.tree.sync()
+            logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
+            # Sync to Cookin' Books
+            guild = discord.Object(id=1328126227013439601)
+            self.bot.tree.copy_global_to(guild=guild)
+            synced = await self.bot.tree.sync(guild=guild)
+            logger.info(f"Commands synced to Cookin' Books guild: {[cmd.name for cmd in synced]}")
+            # Sync to test guild if set
+            if TEST_GUILD_ID:
+                guild = discord.Object(id=TEST_GUILD_ID)
+                self.bot.tree.copy_global_to(guild=guild)
+                synced = await self.bot.tree.sync(guild=guild)
+                logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced]}")
+            await interaction.response.send_message("Commands synced successfully!", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Failed to sync commands: {e}", exc_info=True)
+            await interaction.response.send_message(f"Failed to sync commands: {e}", ephemeral=True)
+
+async def setup_sync(bot: commands.Bot):
+    await bot.add_cog(SyncCog(bot))
+    logger.info("SyncCog loaded")
+
 # --- Main Execution ---
 def main():
     """Main function to create and run the bot."""
     bot = BettingBot()
 
+    # Add SyncCog manually
+    async def setup_bot():
+        await setup_sync(bot)
+        await bot.start(BOT_TOKEN)
+
     try:
         logger.info("Starting bot...")
-        bot.run(BOT_TOKEN, log_handler=None)
+        asyncio.run(setup_bot())
     except discord.LoginFailure:
         logger.critical("Login failed: Invalid Discord token provided in .env file.")
     except discord.PrivilegedIntentsRequired as e:
