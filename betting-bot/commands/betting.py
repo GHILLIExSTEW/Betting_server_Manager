@@ -691,7 +691,7 @@ class BetWorkflowView(View):
                         )
                         self.stop()
                         return
-
+                
                     channels = []
                     if hasattr(self.bot, 'db_manager'):
                         settings = await self.bot.db_manager.fetch_one(
@@ -713,7 +713,7 @@ class BetWorkflowView(View):
                             ],
                             key=lambda c: c.position
                         )
-
+                
                     if not channels:
                         await self.edit_message(
                             interaction,
@@ -722,7 +722,7 @@ class BetWorkflowView(View):
                         )
                         self.stop()
                         return
-
+                
                     # Generate the bet serial number by creating the bet
                     legs = self.bet_details.get('legs', [])
                     if not legs:
@@ -733,7 +733,7 @@ class BetWorkflowView(View):
                         )
                         self.stop()
                         return
-
+                
                     leg = legs[0]  # For straight bets, we only have one leg
                     bet_type = self.bet_details.get('bet_type')
                     league = self.bet_details.get('league')
