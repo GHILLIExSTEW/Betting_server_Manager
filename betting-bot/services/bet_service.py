@@ -11,6 +11,7 @@ from discord import Embed, Color, ButtonStyle
 from discord.ui import View, Select, Modal, TextInput, Button
 from discord.ext import commands
 import json
+import pymysql  # Add pymysql import
 
 try:
     from ..utils.errors import BetServiceError, ValidationError, InsufficientUnitsError
@@ -109,11 +110,13 @@ class BetService:
         user_id: int,
         game_id: Optional[Union[str, int]],
         bet_type: str,
-        team_name: str,
+        team: str,
+        opponent: Optional[str],
+        line: str,
         units: float,
         odds: float,
         channel_id: int,
-        league: Optional[str] = None,  # Add league parameter
+        league: str,
         message_id: Optional[int] = None,
         expiration_time: Optional[datetime] = None
     ) -> int:
@@ -124,7 +127,7 @@ class BetService:
             MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
             MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
             MIN_ODDS, MAX_ODDS = -10000, 10000
-    
+
             if not (MIN_UNITS <= units <= MAX_UNITS):
                 raise ValidationError(
                     f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
@@ -135,31 +138,32 @@ class BetService:
                 raise ValidationError("Odds cannot be between -99 and 99.")
             if not bet_type:
                 raise ValidationError("Bet Type cannot be empty.")
-            if not team_name:
-                raise ValidationError("Team name/Selection cannot be empty.")
+            if not team:
+                raise ValidationError("Team cannot be empty.")
+            if not line:
+                raise ValidationError("Line cannot be empty.")
             if not league:
-                raise ValidationError("League cannot be empty.")  # Validate league
-    
+                raise ValidationError("League cannot be empty.")
+
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
-    
-            # Store team_name in result_description since the column doesn't exist
-            result_description = f"Team: {team_name}"
+
             query = """
                 INSERT INTO bets (
-                    guild_id, user_id, game_id, bet_type, league,
-                    stake, odds, channel_id, message_id,
-                    created_at, status, updated_at, expiration_time,
-                    result_value, result_description
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    guild_id, user_id, game_id, bet_type, league, team, opponent, line,
+                    stake, odds, channel_id, message_id, created_at, status, updated_at,
+                    expiration_time, result_value, result_description
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            # Define args as a flat tuple with 15 elements
             args = (
                 guild_id,
                 user_id,
                 db_game_id,
                 bet_type,
                 league,
+                team,
+                opponent,
+                line,
                 units,
                 odds,
                 channel_id,
@@ -169,18 +173,16 @@ class BetService:
                 now_utc_for_db,
                 expiration_time,
                 None,
-                result_description
+                None
             )
-    
-            # Log args to verify structure
+
             self.logger.debug(f"Executing bet insertion with args: {args}")
             await self.db.execute(query, *args)
-    
-            # Retrieve the bet_serial
+
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
             result = await self.db.fetch_one(bet_serial_query)
             bet_serial = result['bet_serial'] if result and 'bet_serial' in result else None
-    
+
             if bet_serial:
                 self.logger.info(
                     f"Bet {bet_serial} created successfully for user {user_id} in guild {guild_id}."
@@ -191,7 +193,7 @@ class BetService:
                     "Failed to retrieve bet_serial after insertion. "
                     "Check DB schema (AUTO_INCREMENT on bet_serial)."
                 )
-    
+
         except ValidationError as ve:
             self.logger.warning(f"Bet creation validation failed for user {user_id}: {ve}")
             raise
@@ -211,26 +213,27 @@ class BetService:
         user_id: int,
         legs: List[Dict],
         channel_id: Optional[int] = None,
-        league: Optional[str] = None  # Add league parameter
+        league: Optional[str] = None
     ) -> int:
         """Create a new parlay bet and return the bet serial."""
         try:
             if len(legs) < 2:
                 raise ValidationError("Parlay bets must have at least two legs.")
-    
-            # For simplicity, we'll store the first leg's details in the main bet
-            # and include all legs in the result_description as JSON
+
             leg = legs[0]
             units = float(leg['units'])
             odds = float(leg['odds'])
             game_id = leg['game_id']
             bet_type = 'parlay'
-    
+            team = leg.get('team', 'Unknown')
+            opponent = leg.get('opponent')
+            line = leg.get('line', 'Unknown')
+
             guild_settings = await self.bot.admin_service.get_server_settings(guild_id)
             MIN_UNITS = float(guild_settings.get('min_units', 0.1)) if guild_settings else 0.1
             MAX_UNITS = float(guild_settings.get('max_units', 10.0)) if guild_settings else 10.0
             MIN_ODDS, MAX_ODDS = -10000, 10000
-    
+
             if not (MIN_UNITS <= units <= MAX_UNITS):
                 raise ValidationError(
                     f"Units ({units}) must be between {MIN_UNITS:.2f} and {MAX_UNITS:.2f} for this server."
@@ -240,34 +243,40 @@ class BetService:
             if -100 < odds < 100:
                 raise ValidationError("Odds cannot be between -99 and 99.")
             if not league:
-                raise ValidationError("League cannot be empty.")  # Validate league
-    
+                raise ValidationError("League cannot be empty.")
+            if not team:
+                raise ValidationError("Team cannot be empty.")
+            if not line:
+                raise ValidationError("Line cannot be empty.")
+
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
-            # Serialize legs as JSON in result_description
             result_description = json.dumps([{
                 'game_id': leg['game_id'],
                 'bet_type': leg['bet_type'],
-                'team_name': leg.get('team_name', 'Unknown'),
+                'team': leg.get('team', 'Unknown'),
+                'opponent': leg.get('opponent'),
+                'line': leg.get('line', 'Unknown'),
                 'units': leg['units'],
                 'odds': leg['odds']
             } for leg in legs])
-    
+
             query = """
                 INSERT INTO bets (
-                    guild_id, user_id, game_id, bet_type, league,
-                    stake, odds, channel_id, message_id,
-                    created_at, status, updated_at, expiration_time,
-                    result_value, result_description
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    guild_id, user_id, game_id, bet_type, league, team, opponent, line,
+                    stake, odds, channel_id, message_id, created_at, status, updated_at,
+                    expiration_time, result_value, result_description
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            # Define args as a flat tuple with 15 elements
             args = (
                 guild_id,
                 user_id,
                 db_game_id,
                 bet_type,
                 league,
+                team,
+                opponent,
+                line,
                 units,
                 odds,
                 channel_id,
@@ -280,20 +289,20 @@ class BetService:
                 result_description
             )
             await self.db.execute(query, *args)
-    
+
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
             result = await self.db.fetch_one(bet_serial_query)
             bet_serial = result['bet_serial'] if result and 'bet_serial' in result else None
-    
+
             if not bet_serial:
                 raise BetServiceError(
                     "Failed to retrieve bet_serial after insertion. "
                     "Check DB schema (AUTO_INCREMENT on bet_serial)."
                 )
-    
+
             self.logger.info(f"Created parlay bet with serial {bet_serial} for user {user_id}")
             return bet_serial
-    
+
         except ValidationError as ve:
             self.logger.warning(f"Parlay bet creation validation failed for user {user_id}: {ve}")
             raise
@@ -641,12 +650,11 @@ class BetService:
                 timestamp=datetime.now(timezone.utc)
             )
             embed.set_author(name=f"{capper_name}'s Bet Result", icon_url=avatar_url)
-            # Since team_name isn't in the schema, extract it from result_description
-            team_name = "Unknown"
-            result_desc = bet.get('result_description', '')
-            if result_desc and result_desc.startswith("Team: "):
-                team_name = result_desc.replace("Team: ", "")
-            embed.add_field(name="Selection", value=f"`{team_name}`", inline=False)
+            embed.add_field(name="League", value=f"`{bet['league']}`", inline=True)
+            embed.add_field(name="Team", value=f"`{bet['team']}`", inline=True)
+            if bet.get('opponent'):
+                embed.add_field(name="Opponent", value=f"`{bet['opponent']}`", inline=True)
+            embed.add_field(name="Line", value=f"`{bet['line']}`", inline=True)
             embed.add_field(name="Units", value=f"{float(bet['stake']):.2f}u", inline=True)
             embed.add_field(name="Odds", value=f"{float(bet['odds']):+}", inline=True)
 
@@ -655,7 +663,7 @@ class BetService:
             else:
                 embed.add_field(name="Result", value=status.title(), inline=True)
 
-            if bet.get('result_description') and not bet['result_description'].startswith("Team: "):
+            if bet.get('result_description'):
                 embed.set_footer(text=f"{bet['result_description']}")
             else:
                 embed.set_footer(text="Resolved at")
