@@ -133,20 +133,23 @@ class BettingBot(commands.Bot):
             # Clear command tree to prevent duplicates
             logger.debug("Clearing command tree before syncing")
             self.tree.clear_commands(guild=None)
-            self.tree.clear_commands(guild=discord.Object(id=COOKIN_BOOKS_GUILD_ID))
 
-            # Sync commands
+            # Sync commands to all guilds
             try:
-                # Sync to Cookin' Books guild
-                logger.debug(f"Syncing commands to Cookin' Books guild: {COOKIN_BOOKS_GUILD_ID}")
-                guild_obj = discord.Object(id=COOKIN_BOOKS_GUILD_ID)
-                self.tree.copy_global_to(guild=guild_obj)
-                synced = await self.tree.sync(guild=guild_obj)
-                logger.info(f"Commands synced to Cookin' Books guild: {[cmd.name for cmd in synced]}")
-                # Sync globally as fallback
                 logger.debug("Syncing global commands...")
                 synced = await self.tree.sync()
                 logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
+
+                # Sync to each guild the bot is in
+                for guild in self.guilds:
+                    logger.debug(f"Syncing commands to guild: {guild.name} ({guild.id})")
+                    guild_obj = discord.Object(id=guild.id)
+                    self.tree.copy_global_to(guild=guild_obj)
+                    try:
+                        synced = await self.tree.sync(guild=guild_obj)
+                        logger.info(f"Commands synced to guild {guild.id}: {[cmd.name for cmd in synced]}")
+                    except Exception as e:
+                        logger.error(f"Failed to sync commands to guild {guild.id}: {e}", exc_info=True)
             except Exception as e:
                 logger.error(f"Failed to sync command tree: {e}", exc_info=True)
 
@@ -243,6 +246,9 @@ class BettingBot(commands.Bot):
                 bot_member = guild.get_member(self.user.id)
                 if not bot_member:
                     logger.error(f"Bot not found in guild {guild.id}")
+                    await interaction.response.send_message(
+                        "❌ Bot is not a member of this guild.", ephemeral=True
+                    )
                     return
                 perms = interaction.channel.permissions_for(bot_member)
                 if not perms.use_application_commands:
@@ -251,7 +257,14 @@ class BettingBot(commands.Bot):
                         "❌ Bot lacks permission to use application commands in this channel.", ephemeral=True
                     )
                     return
-            await super().on_interaction(interaction)
+                if not perms.send_messages:
+                    logger.warning(f"Bot lacks Send Messages permission in channel {interaction.channel_id}")
+                    await interaction.response.send_message(
+                        "❌ Bot lacks permission to send messages in this channel.", ephemeral=True
+                    )
+                    return
+            # Process the interaction (handled by discord.py's command tree)
+            logger.debug(f"Processing interaction for command: {interaction.command.name if interaction.command else 'N/A'}")
         except Exception as e:
             logger.error(f"Error processing interaction for user {interaction.user}: {e}", exc_info=True)
             if not interaction.response.is_done():
@@ -306,15 +319,17 @@ class SyncCog(commands.Cog):
             # Clear command tree
             logger.debug("Clearing command tree for sync")
             self.bot.tree.clear_commands(guild=None)
-            self.bot.tree.clear_commands(guild=discord.Object(id=COOKIN_BOOKS_GUILD_ID))
+            for guild in self.bot.guilds:
+                self.bot.tree.clear_commands(guild=discord.Object(id=guild.id))
             # Sync globally
             synced = await self.bot.tree.sync()
             logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
-            # Sync to Cookin' Books
-            guild = discord.Object(id=COOKIN_BOOKS_GUILD_ID)
-            self.bot.tree.copy_global_to(guild=guild)
-            synced = await self.bot.tree.sync(guild=guild)
-            logger.info(f"Commands synced to Cookin' Books guild: {[cmd.name for cmd in synced]}")
+            # Sync to each guild
+            for guild in self.bot.guilds:
+                guild_obj = discord.Object(id=guild.id)
+                self.bot.tree.copy_global_to(guild=guild_obj)
+                synced = await self.bot.tree.sync(guild=guild_obj)
+                logger.info(f"Commands synced to guild {guild.id}: {[cmd.name for cmd in synced]}")
             await interaction.response.send_message("Commands synced successfully!", ephemeral=True)
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}", exc_info=True)
