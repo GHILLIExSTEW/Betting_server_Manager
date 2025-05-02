@@ -576,16 +576,16 @@ class StraightBetWorkflowView(View):
                     channels = []
                     try:
                         if hasattr(self.bot, 'db_manager'):
+                            # Query only embed_channel_1 to avoid missing column error
                             settings = await self.bot.db_manager.fetch_one(
-                                "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
+                                "SELECT embed_channel_1 FROM guild_settings WHERE guild_id = %s",
                                 (interaction.guild_id,)
                             )
-                            if settings:
-                                for channel_id in [settings['embed_channel_1'], settings['embed_channel_2']]:
-                                    if channel_id:
-                                        channel = interaction.guild.get_channel(int(channel_id))
-                                        if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
-                                            channels.append(channel)
+                            if settings and settings.get('embed_channel_1'):
+                                channel = interaction.guild.get_channel(int(settings['embed_channel_1']))
+                                if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
+                                    channels.append(channel)
+                                    logger.debug(f"Found embed_channel_1: {channel.id} ({channel.name})")
                         if not channels:
                             channels = sorted(
                                 [ch for ch in interaction.guild.text_channels
@@ -593,6 +593,7 @@ class StraightBetWorkflowView(View):
                                  ch.permissions_for(interaction.guild.me).send_messages],
                                 key=lambda c: c.position
                             )
+                            logger.debug(f"Fallback to guild text channels: {[ch.name for ch in channels]}")
                     except Exception as e:
                         logger.error(f"Failed to fetch channels: {e}", exc_info=True)
                         await self.edit_message(
