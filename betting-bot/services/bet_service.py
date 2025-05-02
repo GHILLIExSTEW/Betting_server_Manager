@@ -326,6 +326,25 @@ class BetService:
             self.logger.exception(f"Error creating parlay bet for user {user_id}: {e}")
             raise BetServiceError("An internal error occurred while creating the parlay bet.")
 
+    async def delete_bet(self, bet_serial: int) -> bool:
+        """Delete a bet and its associated unit_records from the database."""
+        try:
+            # Delete from unit_records first due to foreign key constraints
+            await self.db.execute("DELETE FROM unit_records WHERE bet_serial = %s", bet_serial)
+            self.logger.info(f"Deleted unit_records for bet {bet_serial}")
+            rowcount = await self.db.execute("DELETE FROM bets WHERE bet_serial = %s", bet_serial)
+            self.logger.info(f"Deleted bet {bet_serial} from bets table")
+            success = rowcount is not None and rowcount > 0
+            if not success:
+                self.logger.warning(f"No bet found to delete for bet_serial {bet_serial}")
+            return success
+        except ConnectionError as ce:
+            self.logger.error(f"Database connection error during bet deletion for bet {bet_serial}: {ce}")
+            raise BetServiceError("Database connection error. Please try again later.") from ce
+        except Exception as e:
+            self.logger.exception(f"Error deleting bet {bet_serial}: {e}")
+            raise BetServiceError("Failed to delete bet.")
+
     async def update_bet_status(
         self,
         bet_serial: int,
@@ -342,10 +361,7 @@ class BetService:
 
             if status == 'canceled':
                 # Delete associated records from unit_records and bets
-                await self.db.execute("DELETE FROM unit_records WHERE bet_serial = %s", bet_serial)
-                self.logger.info(f"Deleted unit_records for canceled bet {bet_serial}")
-                rowcount = await self.db.execute("DELETE FROM bets WHERE bet_serial = %s", bet_serial)
-                self.logger.info(f"Deleted bet {bet_serial} from bets table")
+                return await self.delete_bet(bet_serial)
             else:
                 # Update bet status as usual
                 rowcount = await self.db.execute("""
@@ -563,7 +579,7 @@ class BetService:
             try:
                 updated = await self.update_bet_status(bet_serial, new_status, result_desc, result_value)
 
-                if updated or new_status == 'canceled':  # Handle cancellation even if bet is deleted
+                if updated or new_status == 'canceled':
                     if new_status in ['won', 'lost', 'push']:
                         await self.record_bet_result(
                             bet_serial, guild_id, original_user_id, units, odds, result_value
