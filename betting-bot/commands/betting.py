@@ -33,7 +33,7 @@ class BetTypeSelect(Select):
             SelectOption(
                 label="Parlay",
                 value="parlay",
-                description="UNDER CONSTRUCTION"
+                description="Combine multiple bets"
             )
         ]
         super().__init__(
@@ -302,18 +302,27 @@ class BetDetailsModal(Modal):
         if is_manual:
             self.team = TextInput(
                 label="Team",
-                placeholder="Your Team's Name",
+                placeholder="e.g., Lakers",
                 required=True,
                 max_length=100
             )
             self.opponent = TextInput(
                 label="Opponent" if line_type == "game_line" else "Player",
-                placeholder="Your Team's Opponent",
+                placeholder="e.g., Celtics or LeBron James",
                 required=True,
                 max_length=100
             )
             self.add_item(self.team)
             self.add_item(self.opponent)
+
+        if line_type == "player_prop" and not is_manual:
+            self.player = TextInput(
+                label="Player",
+                placeholder="e.g., LeBron James",
+                required=True,
+                max_length=100
+            )
+            self.add_item(self.player)
 
         self.line = TextInput(
             label="Line",
@@ -322,33 +331,23 @@ class BetDetailsModal(Modal):
             max_length=100
         )
         self.odds = TextInput(
-            label="Odds",
+            label="Odds (American)",
             placeholder="e.g., -110, +150",
             required=True,
             max_length=10
         )
-
-        # Include units input for all legs after the first leg of a parlay
-        if not (self.leg_number == 1 and self.bet_type == "parlay"):
-            self.units = TextInput(
-                label="Units (1, 2, or 3)",
-                placeholder="Enter units to risk",
-                required=True,
-                max_length=1
-            )
-            self.add_item(self.units)
-
-        if line_type == "player_prop" and not is_manual:
-            self.player = TextInput(
-                label="Player",
-                placeholder="Your Player's Name",
-                required=True,
-                max_length=100
-            )
-            self.add_item(self.player)
-
         self.add_item(self.line)
         self.add_item(self.odds)
+
+        # Add units input last for all legs after the first leg of a parlay
+        if not (self.leg_number == 1 and self.bet_type == "parlay"):
+            self.units = TextInput(
+                label="Units (e.g., 1, 1.5)",
+                placeholder="Enter units to risk",
+                required=True,
+                max_length=5
+            )
+            self.add_item(self.units)
 
     async def on_submit(self, interaction: Interaction):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number}")
@@ -437,10 +436,10 @@ class UnitsModal(Modal, title="Enter Parlay Units"):
     def __init__(self):
         super().__init__(title="Enter Parlay Units")
         self.units = TextInput(
-            label="Units (1, 2, or 3)",
+            label="Units (e.g., 1, 1.5)",
             placeholder="Enter units to risk for the parlay",
             required=True,
-            max_length=1
+            max_length=5
         )
         self.add_item(self.units)
 
@@ -749,13 +748,20 @@ class BetWorkflowView(View):
                     line_type = self.bet_details.get('line_type')
                     game_id = self.bet_details.get('game_id')
                     is_manual = game_id == "Other"
+                    bet_type = self.bet_details.get('bet_type')
 
                     logger.debug(
                         f"Step 5: line_type={line_type}, is_manual={is_manual}, "
-                        f"game_id={game_id}, interaction_done={interaction.response.is_done()}"
+                        f"game_id={game_id}, bet_type={bet_type}, interaction_done={interaction.response.is_done()}"
                     )
 
-                    if line_type == "player_prop" and not is_manual and hasattr(self.bot, 'game_service'):
+                    if bet_type == "straight":
+                        # Straight bet: proceed directly to confirmation
+                        logger.debug("Straight bet completed; advancing to confirmation")
+                        self.current_step = 5  # Step 6 after increment in go_next
+                        await self.go_next(interaction)
+                        return
+                    elif bet_type == "parlay" and line_type == "player_prop" and not is_manual and hasattr(self.bot, 'game_service'):
                         players_data = await self.bot.game_service.get_game_players(game_id)
                         home_players = players_data.get('home_players', [])
                         away_players = players_data.get('away_players', [])
@@ -805,8 +811,8 @@ class BetWorkflowView(View):
                                 self.stop()
                             return
                     else:
-                        logger.debug("Skipping modal in step 5 for manual entry; advancing to step 6")
-                        self.current_step = 5
+                        logger.debug("Parlay: advancing to confirmation after manual entry or game line")
+                        self.current_step = 5  # Step 6 after increment in go_next
                         await self.go_next(interaction)
                         return
                 elif self.current_step == 6:
@@ -1262,3 +1268,4 @@ class BettingCog(commands.Cog):
 async def setup(bot: commands.Bot):
     await bot.add_cog(BettingCog(bot))
     logger.info("BettingCog loaded")
+    
