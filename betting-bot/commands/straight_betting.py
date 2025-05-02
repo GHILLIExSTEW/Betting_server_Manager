@@ -310,7 +310,7 @@ class BetDetailsModal(Modal):
             if not player:
                 logger.warning("Modal submission failed: Missing player")
                 await interaction.response.send_message("Please provide a valid player.", ephemeral=True)
-            return
+                return
             leg['player'] = player
 
         self.view.bet_details['legs'] = [leg]
@@ -587,7 +587,7 @@ class StraightBetWorkflowView(View):
                                     channel = interaction.guild.get_channel(int(channel_id))
                                     if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
                                         channels.append(channel)
-                    else:
+                    if not channels:
                         channels = sorted(
                             [ch for ch in interaction.guild.text_channels
                              if ch.permissions_for(interaction.user).send_messages and
@@ -729,7 +729,7 @@ class StraightBetWorkflowView(View):
                     raise ValueError("Preview image not found. Please start over.")
 
                 # Step 1: Fetch the member_role from server_settings
-                role_mention = ""
+                role un_mention = ""
                 try:
                     settings = await self.bot.db_manager.fetch_one(
                         "SELECT member_role FROM server_settings WHERE guild_id = %s",
@@ -746,12 +746,13 @@ class StraightBetWorkflowView(View):
                     logger.error(f"Error fetching member_role for guild {interaction.guild_id}: {e}")
 
                 # Step 2: Upload the image as an attachment to get its URL
+                logger.debug(f"Uploading temporary image for bet {bet_serial} to channel {post_channel_id}")
                 discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
                 temp_message = await post_channel.send(file=discord_file)
-                image_url = temp_message.attachments[0].url if temp_message.attachments else None
-
-                if not image_url:
-                    raise ValueError("Failed to upload bet slip image and retrieve URL.")
+                if not temp_message.attachments:
+                    raise ValueError("Temporary message has no attachments.")
+                image_url = temp_message.attachments[0].url
+                logger.debug(f"Retrieved image URL: {image_url}")
 
                 # Step 3: Create an embed with the image URL
                 embed = Embed()
@@ -767,25 +768,41 @@ class StraightBetWorkflowView(View):
 
                 # Step 5: Create or fetch webhook and send the embed with role mention
                 webhook = None
-                for wh in await post_channel.webhooks():
-                    if wh.user.id == self.bot.user.id:
-                        webhook = wh
-                        break
-                if not webhook:
-                    webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
+                try:
+                    for wh in await post_channel.webhooks():
+                        if wh.user.id == self.bot.user.id:
+                            webhook = wh
+                            break
+                    if not webhook:
+                        webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
+                except discord.Forbidden as e:
+                    logger.error(f"Failed to create or fetch webhook in channel {post_channel_id}: {e}")
+                    raise ValueError("Bot lacks permission to manage webhooks.")
 
-                # Send the final message with the embed and role mention
+                logger.debug(f"Sending webhook message for bet {bet_serial} with role_mention: {role_mention}")
                 content = role_mention if role_mention else ""
-                sent_message = await webhook.send(
-                    content=content,
-                    embed=embed,
-                    username=display_name,
-                    avatar_url=avatar_url,
-                    wait=True
-                )
+                try:
+                    sent_message = await webhook.send(
+                        content=content,
+                        embed=embed,
+                        username=display_name,
+                        avatar_url=avatar_url,
+                        wait=True
+                    )
+                    logger.debug(f"Webhook message sent successfully for bet {bet_serial}, message ID: {sent_message.id}")
+                except discord.Forbidden as e:
+                    logger.error(f"Webhook send failed due to permissions in channel {post_channel_id}: {e}")
+                    raise ValueError("Bot lacks permission to send messages via webhook.")
+                except discord.HTTPException as e:
+                    logger.error(f"Webhook send failed for bet {bet_serial}: {e}")
+                    raise ValueError(f"Failed to send webhook message: {e}")
 
                 # Step 6: Delete the temporary message
-                await temp_message.delete()
+                try:
+                    await temp_message.delete()
+                    logger.debug(f"Temporary message deleted for bet {bet_serial}")
+                except discord.HTTPException as e:
+                    logger.warning(f"Failed to delete temporary message for bet {bet_serial}: {e}")
 
                 # Step 7: Track the message for reaction monitoring
                 if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
@@ -798,6 +815,7 @@ class StraightBetWorkflowView(View):
                         'league': details.get('league'),
                         'bet_type': 'straight'
                     }
+                    logger.debug(f"Added message {sent_message.id} to pending_reactions for bet {bet_serial}")
 
                 await self.edit_message(
                     interaction,
@@ -812,6 +830,9 @@ class StraightBetWorkflowView(View):
                     view=None
                 )
         except (ValidationError, BetServiceError) as e:
+            logger.error(f"Error submitting bet: {e}")
+            await self.edit_message(interaction, content=f"❌ Error placing bet: {e}", view=None)
+        except ValueError as e:
             logger.error(f"Error submitting bet: {e}")
             await self.edit_message(interaction, content=f"❌ Error placing bet: {e}", view=None)
         except Exception as e:
