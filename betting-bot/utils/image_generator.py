@@ -274,12 +274,12 @@ class BetSlipGenerator:
                 draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
                 current_y = team_y + 50
 
-            # Draw bet details and track the last y-coordinate
-            last_detail_y = current_y
+            # Draw bet details and track the last odds y-coordinate
+            last_odds_y = current_y
             if bet_type == "parlay" and parlay_legs:
                 for leg in parlay_legs:
-                    last_detail_y = self._draw_leg(
-                        image, draw, leg, league, width, last_detail_y,
+                    last_odds_y = self._draw_leg(
+                        image, draw, leg, league, width, last_odds_y,
                         team_font, odds_font, units_font, emoji_font,
                         draw_logos=not is_same_game
                     )
@@ -292,18 +292,18 @@ class BetSlipGenerator:
                     'odds': odds,
                     'units': units
                 }
-                last_detail_y = self._draw_leg(
-                    image, draw, leg, league, width, last_detail_y,
+                last_odds_y = self._draw_leg(
+                    image, draw, leg, league, width, last_odds_y,
                     team_font, odds_font, units_font, emoji_font,
                     draw_logos=False  # Logos already drawn above
                 )
 
-            # Separator line above units and footer
-            separator_y = last_detail_y - 60  # Position above the units text (last_detail_y is after units)
+            # Separator line below the odds
+            separator_y = last_odds_y + 20  # 20 pixels below the odds text
             draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
 
             # Units text below the separator
-            units_y = separator_y + 30  # Space after separator
+            units_y = separator_y + 30  # 30 pixels below the separator
             units_label = "Unit" if units == 1.0 else "Units"
             units_text = f"To Win {units:.2f} {units_label}"
             units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
@@ -342,7 +342,7 @@ class BetSlipGenerator:
                     )
 
             # Footer: Bet ID and Timestamp below units
-            footer_y = units_y + 30  # Space after units text
+            footer_y = units_y + 30  # 30 pixels below the units text
             draw.text((padding + 10, footer_y), f"Bet #{bet_id}", fill=(150, 150, 150), font=small_font, anchor='lm')
             timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M')
             draw.text((width - padding - 10, footer_y), timestamp_text, fill=(150, 150, 150), font=small_font, anchor='rm')
@@ -372,7 +372,6 @@ class BetSlipGenerator:
         away_team = leg.get('away_team', 'Unknown')
         line = leg.get('line', 'ML')
         odds = float(leg.get('odds', 0))
-        units = float(leg.get('units', 1.0))
 
         current_y = start_y
         if draw_logos:
@@ -397,8 +396,10 @@ class BetSlipGenerator:
         odds_text = f"{odds:+.0f}"
         draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
 
-        # Return the y-coordinate after the odds (units drawn in generate_bet_slip)
-        return odds_y + 40
+        # Return the y-coordinate after the odds (separator, units, and footer drawn in generate_bet_slip)
+        return odds_y
+        # Return the y-coordinate after the odds (separator, units, and footer drawn in generate_bet_slip)
+        return odds_y
 
     def save_bet_slip(self, image: Image.Image, output_path: str) -> None:
         """Save the bet slip image to a file."""
