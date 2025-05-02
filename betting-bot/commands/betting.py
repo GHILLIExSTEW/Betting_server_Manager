@@ -43,13 +43,18 @@ class BetTypeSelect(Select):
         )
 
     async def callback(self, interaction: Interaction):
-        bet_type = self.values[0]
-        logger.debug(f"Bet Type selected: {bet_type}")
+        logger.debug(f"Bet Type selected by {interaction.user}: {self.values[0]}")
         self.disabled = True
         for item in self.parent_view.children:
             item.disabled = True
-        await interaction.response.edit_message(view=self.parent_view)
-        await self.parent_view.start_bet_workflow(interaction, bet_type)
+        try:
+            await interaction.response.edit_message(view=self.parent_view)
+            await self.parent_view.start_bet_workflow(interaction, self.values[0])
+        except Exception as e:
+            logger.error(f"Error processing bet type selection: {e}", exc_info=True)
+            await interaction.followup.send(
+                f"❌ Failed to process bet type selection: {str(e)}", ephemeral=True
+            )
 
 class CancelButton(Button):
     def __init__(self, parent_view):
@@ -61,14 +66,20 @@ class CancelButton(Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: Interaction):
-        logger.debug("Cancel button clicked in bet type selection")
+        logger.debug(f"Cancel button clicked by {interaction.user} in bet type selection")
         self.disabled = True
         for item in self.parent_view.children:
             item.disabled = True
-        await interaction.response.edit_message(
-            content="Bet workflow cancelled.",
-            view=None
-        )
+        try:
+            await interaction.response.edit_message(
+                content="Bet workflow cancelled.",
+                view=None
+            )
+        except Exception as e:
+            logger.error(f"Error cancelling bet workflow: {e}", exc_info=True)
+            await interaction.followup.send(
+                "❌ Failed to cancel bet workflow.", ephemeral=True
+            )
         self.parent_view.stop()
 
 class BetTypeView(View):
@@ -82,6 +93,7 @@ class BetTypeView(View):
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         if interaction.user.id != self.original_interaction.user.id:
+            logger.debug(f"Unauthorized interaction attempt by {interaction.user}")
             await interaction.response.send_message(
                 "You cannot interact with this bet placement.",
                 ephemeral=True
@@ -90,7 +102,7 @@ class BetTypeView(View):
         return True
 
     async def start_bet_workflow(self, interaction: Interaction, bet_type: str):
-        logger.debug(f"Starting {bet_type} bet workflow")
+        logger.debug(f"Starting {bet_type} bet workflow for {interaction.user}")
         try:
             if bet_type == "straight":
                 view = StraightBetWorkflowView(self.original_interaction, self.bot)
@@ -112,11 +124,12 @@ class BettingCog(commands.Cog):
         logger.info("Initializing BettingCog")
 
     @app_commands.command(name="bet", description="Place a new bet (straight or parlay) through a guided workflow.")
-    async def bet_command(self, interaction: Interaction):
+    async def bet_command(self, interaction: discord.Interaction):
         logger.info(f"Bet command initiated by {interaction.user} in guild {interaction.guild_id}")
         try:
             is_auth = True  # Replace with actual authorization check if needed
             if not is_auth:
+                logger.warning(f"Unauthorized bet attempt by {interaction.user}")
                 await interaction.response.send_message(
                     "❌ You are not authorized to place bets.",
                     ephemeral=True
@@ -127,8 +140,9 @@ class BettingCog(commands.Cog):
             view.message = await interaction.followup.send(
                 "Starting bet placement: Please select bet type...", view=view, ephemeral=True
             )
+            logger.debug("Bet type selection message sent")
         except Exception as e:
-            logger.exception(f"Error initiating bet command: {e}")
+            logger.exception(f"Error initiating bet command for {interaction.user}: {e}")
             error_message = f"❌ An error occurred while starting the betting workflow: {str(e)}"
             if interaction.response.is_done():
                 await interaction.followup.send(error_message, ephemeral=True)
