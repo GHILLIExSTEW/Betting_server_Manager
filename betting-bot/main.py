@@ -55,9 +55,7 @@ logger = logging.getLogger(__name__)
 
 # --- Environment Variable Access ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
-TEST_GUILD_ID_STR = os.getenv('TEST_GUILD_ID')
-TEST_GUILD_ID = int(TEST_GUILD_ID_STR) if TEST_GUILD_ID_STR and TEST_GUILD_ID_STR.isdigit() else None
-logger.info(f"TEST_GUILD_ID from .env: {TEST_GUILD_ID}")
+COOKIN_BOOKS_GUILD_ID = 1328126227013439601
 
 # --- Bot Token Check ---
 if not BOT_TOKEN:
@@ -135,21 +133,13 @@ class BettingBot(commands.Bot):
             # Clear command tree to prevent duplicates
             logger.debug("Clearing command tree before syncing")
             self.tree.clear_commands(guild=None)
-            if TEST_GUILD_ID:
-                self.tree.clear_commands(guild=discord.Object(id=TEST_GUILD_ID))
-            self.tree.clear_commands(guild=discord.Object(id=1328126227013439601))
+            self.tree.clear_commands(guild=discord.Object(id=COOKIN_BOOKS_GUILD_ID))
 
             # Sync commands
             try:
-                if TEST_GUILD_ID:
-                    logger.debug(f"Syncing commands to test guild: {TEST_GUILD_ID}")
-                    guild_obj = discord.Object(id=TEST_GUILD_ID)
-                    self.tree.copy_global_to(guild=guild_obj)
-                    synced = await self.tree.sync(guild=guild_obj)
-                    logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced]}")
                 # Sync to Cookin' Books guild
-                logger.debug("Syncing commands to Cookin' Books guild: 1328126227013439601")
-                guild_obj = discord.Object(id=1328126227013439601)
+                logger.debug(f"Syncing commands to Cookin' Books guild: {COOKIN_BOOKS_GUILD_ID}")
+                guild_obj = discord.Object(id=COOKIN_BOOKS_GUILD_ID)
                 self.tree.copy_global_to(guild=guild_obj)
                 synced = await self.tree.sync(guild=guild_obj)
                 logger.info(f"Commands synced to Cookin' Books guild: {[cmd.name for cmd in synced]}")
@@ -316,23 +306,15 @@ class SyncCog(commands.Cog):
             # Clear command tree
             logger.debug("Clearing command tree for sync")
             self.bot.tree.clear_commands(guild=None)
-            if TEST_GUILD_ID:
-                self.bot.tree.clear_commands(guild=discord.Object(id=TEST_GUILD_ID))
-            self.bot.tree.clear_commands(guild=discord.Object(id=1328126227013439601))
+            self.bot.tree.clear_commands(guild=discord.Object(id=COOKIN_BOOKS_GUILD_ID))
             # Sync globally
             synced = await self.bot.tree.sync()
             logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
             # Sync to Cookin' Books
-            guild = discord.Object(id=1328126227013439601)
+            guild = discord.Object(id=COOKIN_BOOKS_GUILD_ID)
             self.bot.tree.copy_global_to(guild=guild)
             synced = await self.bot.tree.sync(guild=guild)
             logger.info(f"Commands synced to Cookin' Books guild: {[cmd.name for cmd in synced]}")
-            # Sync to test guild if set
-            if TEST_GUILD_ID:
-                guild = discord.Object(id=TEST_GUILD_ID)
-                self.bot.tree.copy_global_to(guild=guild)
-                synced = await self.bot.tree.sync(guild=guild)
-                logger.info(f"Commands synced to test guild {TEST_GUILD_ID}: {[cmd.name for cmd in synced]}")
             await interaction.response.send_message("Commands synced successfully!", ephemeral=True)
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}", exc_info=True)
