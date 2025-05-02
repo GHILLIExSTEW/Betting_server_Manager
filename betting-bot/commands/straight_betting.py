@@ -310,7 +310,7 @@ class BetDetailsModal(Modal):
             if not player:
                 logger.warning("Modal submission failed: Missing player")
                 await interaction.response.send_message("Please provide a valid player.", ephemeral=True)
-                return
+            return
             leg['player'] = player
 
         self.view.bet_details['legs'] = [leg]
@@ -728,7 +728,24 @@ class StraightBetWorkflowView(View):
                 if not self.preview_image_bytes:
                     raise ValueError("Preview image not found. Please start over.")
 
-                # Step 1: Upload the image as an attachment to get its URL
+                # Step 1: Fetch the member_role from server_settings
+                role_mention = ""
+                try:
+                    settings = await self.bot.db_manager.fetch_one(
+                        "SELECT member_role FROM server_settings WHERE guild_id = %s",
+                        (interaction.guild_id,)
+                    )
+                    if settings and settings.get('member_role'):
+                        role_id = int(settings['member_role'])
+                        role = interaction.guild.get_role(role_id)
+                        if role:
+                            role_mention = role.mention
+                        else:
+                            logger.warning(f"Role ID {role_id} not found in guild {interaction.guild_id}.")
+                except Exception as e:
+                    logger.error(f"Error fetching member_role for guild {interaction.guild_id}: {e}")
+
+                # Step 2: Upload the image as an attachment to get its URL
                 discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
                 temp_message = await post_channel.send(file=discord_file)
                 image_url = temp_message.attachments[0].url if temp_message.attachments else None
@@ -736,11 +753,11 @@ class StraightBetWorkflowView(View):
                 if not image_url:
                     raise ValueError("Failed to upload bet slip image and retrieve URL.")
 
-                # Step 2: Create an embed with the image URL
+                # Step 3: Create an embed with the image URL
                 embed = Embed()
                 embed.set_image(url=image_url)
 
-                # Step 3: Fetch capper info for display
+                # Step 4: Fetch capper info for display
                 capper_info = await self.bot.db_manager.fetch_one(
                     "SELECT display_name, image_path FROM cappers WHERE user_id = %s",
                     (interaction.user.id,)
@@ -748,7 +765,7 @@ class StraightBetWorkflowView(View):
                 display_name = capper_info['display_name'] if capper_info else interaction.user.display_name
                 avatar_url = capper_info['image_path'] if capper_info else (interaction.user.avatar.url if interaction.user.avatar else None)
 
-                # Step 4: Create or fetch webhook and send the embed
+                # Step 5: Create or fetch webhook and send the embed with role mention
                 webhook = None
                 for wh in await post_channel.webhooks():
                     if wh.user.id == self.bot.user.id:
@@ -757,18 +774,20 @@ class StraightBetWorkflowView(View):
                 if not webhook:
                     webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
 
-                # Send the final message with the embed
+                # Send the final message with the embed and role mention
+                content = role_mention if role_mention else ""
                 sent_message = await webhook.send(
+                    content=content,
                     embed=embed,
                     username=display_name,
                     avatar_url=avatar_url,
                     wait=True
                 )
 
-                # Step 5: Delete the temporary message
+                # Step 6: Delete the temporary message
                 await temp_message.delete()
 
-                # Step 6: Track the message for reaction monitoring
+                # Step 7: Track the message for reaction monitoring
                 if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
                     self.bot.bet_service.pending_reactions[sent_message.id] = {
                         'bet_serial': bet_serial,
