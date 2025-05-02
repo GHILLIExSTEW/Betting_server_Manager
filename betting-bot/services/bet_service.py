@@ -153,10 +153,20 @@ class BetService:
             """
             # Ensure args is a flat tuple with 14 elements
             args = (
-                guild_id, user_id, db_game_id, bet_type,
-                units, odds, channel_id, message_id,
-                now_utc_for_db, 'pending', now_utc_for_db, expiration_time,
-                None, result_description
+                guild_id,
+                user_id,
+                db_game_id,
+                bet_type,
+                units,
+                odds,
+                channel_id,
+                message_id,
+                now_utc_for_db,
+                'pending',
+                now_utc_for_db,
+                expiration_time,
+                None,
+                result_description
             )
 
             await self.db.execute(query, args)
@@ -242,10 +252,20 @@ class BetService:
             """
             # Ensure args is a flat tuple with 14 elements
             args = (
-                guild_id, user_id, db_game_id, bet_type,
-                units, odds, channel_id, None,
-                now_utc_for_db, 'pending', now_utc_for_db, None,
-                None, result_description
+                guild_id,
+                user_id,
+                db_game_id,
+                bet_type,
+                units,
+                odds,
+                channel_id,
+                None,
+                now_utc_for_db,
+                'pending',
+                now_utc_for_db,
+                None,
+                None,
+                result_description
             )
             await self.db.execute(query, args)
 
