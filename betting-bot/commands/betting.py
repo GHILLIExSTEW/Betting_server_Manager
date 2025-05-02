@@ -9,14 +9,9 @@ from discord.ui import View, Select, Button
 import logging
 from typing import Optional
 
-try:
-    from ..utils.errors import BetServiceError, ValidationError
-    from .straight_betting import StraightBetWorkflowView
-    from .parlay_betting import ParlayBetWorkflowView
-except ImportError:
-    from utils.errors import BetServiceError, ValidationError
-    from commands.straight_betting import StraightBetWorkflowView
-    from commands.parlay_betting import ParlayBetWorkflowView
+from utils.errors import BetServiceError, ValidationError
+from commands.straight_betting import StraightBetWorkflowView
+from commands.parlay_betting import ParlayBetWorkflowView
 
 logger = logging.getLogger(__name__)
 
