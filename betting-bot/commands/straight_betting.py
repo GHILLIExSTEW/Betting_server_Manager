@@ -570,10 +570,10 @@ class StraightBetWorkflowView(View):
                             logger.error(f"Failed to send BetDetailsModal: {e}")
                             await interaction.followup.send(
                                 "❌ Failed to send bet details modal. Please try again.",
-                                ephemeral=True
-                            )
-                            self.stop()
-                        return
+                                    ephemeral=True
+                                )
+                                self.stop()
+                            return
                 elif self.current_step == 5:
                     channels = []
                     if hasattr(self.bot, 'db_manager'):
@@ -729,7 +729,7 @@ class StraightBetWorkflowView(View):
                     raise ValueError("Preview image not found. Please start over.")
 
                 # Step 1: Fetch the member_role from server_settings
-                role un_mention = ""
+                role_mention = ""
                 try:
                     settings = await self.bot.db_manager.fetch_one(
                         "SELECT member_role FROM server_settings WHERE guild_id = %s",
