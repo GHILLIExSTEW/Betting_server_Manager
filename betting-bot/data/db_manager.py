@@ -5,20 +5,17 @@ import logging
 from typing import Optional, List, Dict, Any, Union
 import os
 
-# Import your database config
 try:
     from ..config.database_mysql import (
         MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB,
         MYSQL_POOL_MIN_SIZE, MYSQL_POOL_MAX_SIZE
     )
 except ImportError:
-    # Fallback if run differently or structure changes
     from config.database_mysql import (
         MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB,
         MYSQL_POOL_MIN_SIZE, MYSQL_POOL_MAX_SIZE
     )
 
-# Ensure MYSQL_DB is loaded before DatabaseManager is instantiated
 if not MYSQL_DB:
     print("CRITICAL ERROR: MYSQL_DB environment variable is not set.")
 
@@ -32,8 +29,7 @@ class DatabaseManager:
         self._pool: Optional[aiomysql.Pool] = None
         self.db_name = MYSQL_DB
         logger.info("MySQL DatabaseManager initialized.")
-        if not all([MYSQL_HOST, MYSQL_USER, self.db_name,
-                    MYSQL_PASSWORD is not None]):
+        if not all([MYSQL_HOST, MYSQL_USER, self.db_name, MYSQL_PASSWORD is not None]):
             logger.critical(
                 "Missing one or more MySQL environment variables "
                 "(HOST, USER, PASSWORD, DB). DatabaseManager cannot connect."
@@ -42,8 +38,7 @@ class DatabaseManager:
     async def connect(self) -> Optional[aiomysql.Pool]:
         """Create or return existing MySQL connection pool."""
         if self._pool is None:
-            if not all([MYSQL_HOST, MYSQL_USER, self.db_name,
-                        MYSQL_PASSWORD is not None]):
+            if not all([MYSQL_HOST, MYSQL_USER, self.db_name, MYSQL_PASSWORD is not None]):
                 logger.critical(
                     "Cannot connect: MySQL environment variables are not "
                     "configured."
@@ -89,7 +84,7 @@ class DatabaseManager:
                 logger.error(f"Error closing MySQL pool: {e}")
 
     async def execute(self, query: str, *args) -> Optional[int]:
-        """Execute INSERT, UPDATE, DELETE. Returns lastrowid or rowcount."""
+        """Execute INSERT, UPDATE, DELETE. Returns rowcount."""
         if not self._pool:
             await self.connect()
         if not self._pool:
@@ -105,8 +100,7 @@ class DatabaseManager:
             async with self._pool.acquire() as conn:
                 async with conn.cursor() as cursor:  # Default tuple cursor
                     rowcount = await cursor.execute(query, args)
-                    is_insert = query.strip().upper().startswith("INSERT")
-                    return cursor.lastrowid if is_insert else rowcount
+                    return rowcount  # Return rowcount, not lastrowid
         except Exception as e:
             logger.error(f"Error executing query: {query} Args: {args}. Error: {e}", exc_info=True)
             return None
@@ -119,14 +113,13 @@ class DatabaseManager:
             logger.error("Cannot fetch_one: DB pool unavailable.")
             raise ConnectionError("DB pool unavailable.")
 
-        # Flatten nested tuple/list if only one argument is a tuple/list
         if len(args) == 1 and isinstance(args[0], (tuple, list)):
             args = tuple(args[0])
 
         logger.debug(f"Fetching One DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:  # Explicit DictCursor
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
                     await cursor.execute(query, args)
                     return await cursor.fetchone()
         except Exception as e:
@@ -141,14 +134,13 @@ class DatabaseManager:
             logger.error("Cannot fetch_all: DB pool unavailable.")
             raise ConnectionError("DB pool unavailable.")
 
-        # Flatten nested tuple/list if only one argument is a tuple/list
         if len(args) == 1 and isinstance(args[0], (tuple, list)):
             args = tuple(args[0])
 
         logger.debug(f"Fetching All DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:  # Explicit DictCursor
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
                     await cursor.execute(query, args)
                     return await cursor.fetchall()
         except Exception as e:
@@ -163,14 +155,13 @@ class DatabaseManager:
             logger.error("Cannot fetchval: DB pool unavailable.")
             raise ConnectionError("DB pool unavailable.")
 
-        # Flatten nested tuple/list if only one argument is a tuple/list
         if len(args) == 1 and isinstance(args[0], (tuple, list)):
             args = tuple(args[0])
 
         logger.debug(f"Fetching Value DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.Cursor) as cursor:  # Explicit Tuple Cursor
+                async with conn.cursor(aiomysql.Cursor) as cursor:
                     await cursor.execute(query, args)
                     row = await cursor.fetchone()
                     return row[0] if row else None
@@ -180,7 +171,7 @@ class DatabaseManager:
 
     async def table_exists(self, conn, table_name: str) -> bool:
         """Check if a table exists in the database."""
-        async with conn.cursor(aiomysql.Cursor) as cursor:  # Explicit Tuple Cursor
+        async with conn.cursor(aiomysql.Cursor) as cursor:
             try:
                 await cursor.execute(
                     "SELECT COUNT(*) FROM information_schema.tables "
@@ -217,7 +208,6 @@ class DatabaseManager:
                 async with conn.cursor(aiomysql.Cursor) as cursor:
                     logger.info("Attempting to initialize/verify database schema...")
 
-                    # --- Schema Definitions ---
                     if not await self.table_exists(conn, 'users'):
                         await cursor.execute('''
                             CREATE TABLE users (
@@ -284,11 +274,10 @@ class DatabaseManager:
                                 player_id VARCHAR(50) DEFAULT NULL,
                                 league VARCHAR(50) NOT NULL,
                                 team VARCHAR(100) NOT NULL,
-                                opponent VARCHAR(50) NOT NULL,
+                                opponent VARCHAR(50) DEFAULT NULL,
                                 line VARCHAR(255) DEFAULT NULL,
                                 odds DECIMAL(10,2) DEFAULT NULL,
                                 units DECIMAL(10,2) NOT NULL,
-                                stake DECIMAL(4,0) NOT NULL DEFAULT 0,
                                 legs INT DEFAULT NULL,
                                 bet_won TINYINT DEFAULT 0,
                                 bet_loss TINYINT DEFAULT 0,
@@ -321,7 +310,7 @@ class DatabaseManager:
                         await cursor.execute('''
                             CREATE TABLE unit_records (
                                 record_id INT AUTO_INCREMENT PRIMARY KEY,
-                                bet_serial INT NOT NULL COMMENT 'FK to bets.bet_serial',
+                                bet_serial BIGINT NOT NULL COMMENT 'FK to bets.bet_serial',
                                 guild_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
                                 year INT NOT NULL COMMENT 'Year bet resolved',
                                 month INT NOT NULL COMMENT 'Month bet resolved (1-12)',
@@ -329,8 +318,7 @@ class DatabaseManager:
                                 odds DECIMAL(10, 2) NOT NULL COMMENT 'Original odds',
                                 result_value DECIMAL(15, 2) NOT NULL COMMENT 'Net units won/lost',
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Timestamp bet resolved',
-                                FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE,
-                                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                                FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         await cursor.execute('CREATE INDEX idx_unit_records_guild_user_ym ON unit_records(guild_id, user_id, year, month)')
@@ -372,8 +360,7 @@ class DatabaseManager:
                                 bet_push INTEGER DEFAULT 0 NOT NULL,
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                                PRIMARY KEY (guild_id, user_id),
-                                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                                PRIMARY KEY (guild_id, user_id)
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         logger.info("Table 'cappers' created.")
