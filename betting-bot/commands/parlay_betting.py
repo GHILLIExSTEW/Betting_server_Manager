@@ -736,7 +736,7 @@ class ParlayBetWorkflowView(View):
                     self.add_item(ChannelSelect(self, channels))
                     self.add_item(CancelButton(self))
                     step_content = "Select Channel to Post Bet"
-                    await self.edit_message(interaction, content=step_content, view=self, file=file Catalunya)
+                    await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
                 elif self.current_step == 8:
                     try:
                         legs = self.bet_details.get('legs', [])
