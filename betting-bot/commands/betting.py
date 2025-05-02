@@ -3,7 +3,7 @@
 """Betting command for placing bets."""
 
 import discord
-from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel, File
+from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel, File, Webhook
 from discord.ext import commands
 from discord.ui import View, Select, Modal, TextInput, Button
 import logging
@@ -234,10 +234,14 @@ class ManualEntryButton(Button):
             self.parent_view.current_step = 4
         except discord.HTTPException as e:
             logger.error(f"Failed to send manual entry modal: {e}")
-            await interaction.followup.send(
-                "❌ Failed to open manual entry form. Please restart the /bet command.",
-                ephemeral=True
-            )
+            try:
+                await self.parent_view.edit_message(
+                    interaction,
+                    content="❌ Failed to open manual entry form. Please restart the /bet command.",
+                    view=None
+                )
+            except discord.HTTPException as e2:
+                logger.error(f"Failed to edit message after modal error: {e2}")
             self.parent_view.stop()
 
 
@@ -280,13 +284,13 @@ class CancelButton(Button):
 
 class BetDetailsModal(Modal):
     def __init__(self, line_type: str, is_manual: bool = False, is_first_leg: bool = False, bet_type: str = None):
-        # Customize the modal title based on whether it's the first leg of a parlay
+        # Shorten modal titles to fit within Discord's 45-character limit
         if is_first_leg and bet_type == "parlay":
-            title = "Enter First Leg Details (Submit to Add Next Leg)"
+            title = "Enter First Leg (Submit for Next Leg)"  # 41 characters
         elif bet_type == "parlay":
-            title = "Enter Leg Details (Submit to Add or Confirm)"
+            title = "Enter Leg (Submit to Add/Confirm)"  # 37 characters
         else:
-            title = "Enter Bet Details"
+            title = "Enter Bet Details"  # 17 characters
         super().__init__(title=title)
         self.line_type = line_type
         self.is_manual = is_manual
@@ -1106,13 +1110,42 @@ class BetWorkflowView(View):
                     )
 
                 # Reuse the preview image
-                if self.preview_image_bytes:
-                    discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
-                else:
+                if not self.preview_image_bytes:
                     raise ValueError("Preview image not found. Please start over.")
+                discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
 
+                # Fetch user info from the cappers table
+                user_id = interaction.user.id
+                capper_info = await self.bot.db_manager.fetch_one(
+                    "SELECT display_name, image_path FROM cappers WHERE user_id = %s",
+                    (user_id,)
+                )
+                if not capper_info:
+                    logger.warning(f"No capper info found for user {user_id}. Using default bot identity.")
+                    display_name = interaction.user.display_name
+                    avatar_url = interaction.user.avatar.url if interaction.user.avatar else None
+                else:
+                    display_name = capper_info['display_name']
+                    avatar_url = capper_info['image_path']
+
+                # Find or create a webhook in the channel
+                webhook = None
+                for wh in await post_channel.webhooks():
+                    if wh.user.id == self.bot.user.id:
+                        webhook = wh
+                        break
+                if not webhook:
+                    webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
+
+                # Send the message via webhook, overriding username and avatar
                 view = BetResolutionView(bet_serial)
-                sent_message = await post_channel.send(file=discord_file, view=view)
+                sent_message = await webhook.send(
+                    file=discord_file,
+                    view=view,
+                    username=display_name,
+                    avatar_url=avatar_url,
+                    wait=True
+                )
 
                 if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
                     self.bot.bet_service.pending_reactions[sent_message.id] = {
