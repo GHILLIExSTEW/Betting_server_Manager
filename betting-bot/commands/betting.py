@@ -105,6 +105,7 @@ class BetTypeView(View):
 class BettingCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        logger.info("Initializing BettingCog")
 
     @app_commands.command(name="bet", description="Place a new bet (straight or parlay) through a guided workflow.")
     async def bet_command(self, interaction: Interaction):
@@ -132,4 +133,4 @@ class BettingCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(BettingCog(bot))
-    logger.info("BettingCog loaded")
+    logger.info("BettingCog setup completed")
