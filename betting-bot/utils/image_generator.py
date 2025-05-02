@@ -44,7 +44,7 @@ class BetSlipGenerator:
 
     def _get_default_emoji_font(self) -> str:
         """Get the default font path for emojis."""
-        # Use NotoEmoji-Regular.ttf (monochrome) instead of NotoColorEmoji-Regular.ttf
+        # Prioritize NotoEmoji-Regular.ttf in betting-bot/static/fonts/
         custom_emoji_font_path = "betting-bot/static/fonts/NotoEmoji-Regular.ttf"
         if os.path.exists(custom_emoji_font_path):
             logger.debug(f"Using emoji font at {custom_emoji_font_path}")
