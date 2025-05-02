@@ -704,131 +704,158 @@ class BetWorkflowView(View):
                         self.current_step = 5
                         await self.go_next(interaction)
                         return
-                elif self.current_step == 6:
-                    if not self.bet_details.get('legs'):
-                        logger.error("No bet details provided for channel selection")
-                        await self.edit_message(
-                            interaction,
-                            content="❌ No bet details provided. Please start over.",
-                            view=None
-                        )
-                        self.stop()
-                        return
-                
-                    channels = []
-                    if hasattr(self.bot, 'db_manager'):
-                        settings = await self.bot.db_manager.fetch_one(
-                            "SELECT embed_channel_1, embed_channel_2 FROM server_settings WHERE guild_id = %s",
-                            (interaction.guild_id,)
-                        )
-                        if settings:
-                            for channel_id in [settings['embed_channel_1'], settings['embed_channel_2']]:
-                                if channel_id:
-                                    channel = interaction.guild.get_channel(int(channel_id))
-                                    if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
-                                        channels.append(channel)
-                    else:
-                        channels = sorted(
-                            [
-                                ch for ch in interaction.guild.text_channels
-                                if ch.permissions_for(interaction.user).send_messages and
-                                ch.permissions_for(interaction.guild.me).send_messages
-                            ],
-                            key=lambda c: c.position
-                        )
-                
-                    if not channels:
-                        await self.edit_message(
-                            interaction,
-                            content="Error: No text channels found where I can post.",
-                            view=None
-                        )
-                        self.stop()
-                        return
-                
-                    # Generate the bet serial number by creating the bet
-                    legs = self.bet_details.get('legs', [])
-                    if not legs:
-                        await self.edit_message(
-                            interaction,
-                            content="❌ No bet details provided. Please start over.",
-                            view=None
-                        )
-                        self.stop()
-                        return
-                
-                    leg = legs[0]  # For straight bets, we only have one leg
-                    bet_type = self.bet_details.get('bet_type')
-                    league = self.bet_details.get('league')
-                    if bet_type == "straight":
-                        bet_serial = await self.bot.bet_service.create_bet(
-                            guild_id=interaction.guild_id,
-                            user_id=interaction.user.id,
-                            game_id=self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
-                            bet_type="player_prop" if leg.get('player') else "game_line",
-                            team=leg.get('team', leg.get('line')),
-                            opponent=leg.get('opponent'),
-                            line=leg.get('line'),
-                            units=float(leg.get('units_str', '1.00')),
-                            odds=float(leg.get('odds_str', '-110')),
-                            channel_id=None,  # Will update later in submit_bet
-                            league=league
-                        )
-                    else:  # Parlay
-                        bet_serial = await self.bot.bet_service.create_parlay_bet(
-                            guild_id=interaction.guild_id,
-                            user_id=interaction.user.id,
-                            legs=[
+                    elif self.current_step == 6:
+                        if not self.bet_details.get('legs'):
+                            logger.error("No bet details provided for channel selection")
+                            await self.edit_message(
+                                interaction,
+                                content="❌ No bet details provided. Please start over.",
+                                view=None
+                            )
+                            self.stop()
+                            return
+                    
+                        channels = []
+                        if hasattr(self.bot, 'db_manager'):
+                            settings = await self.bot.db_manager.fetch_one(
+                                "SELECT embed_channel_1, embed_channel_2 FROM server_settings WHERE guild_id = %s",
+                                (interaction.guild_id,)
+                            )
+                            if settings:
+                                for channel_id in [settings['embed_channel_1'], settings['embed_channel_2']]:
+                                    if channel_id:
+                                        channel = interaction.guild.get_channel(int(channel_id))
+                                        if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
+                                            channels.append(channel)
+                        else:
+                            channels = sorted(
+                                [
+                                    ch for ch in interaction.guild.text_channels
+                                    if ch.permissions_for(interaction.user).send_messages and
+                                    ch.permissions_for(interaction.guild.me).send_messages
+                                ],
+                                key=lambda c: c.position
+                            )
+                    
+                        if not channels:
+                            await self.edit_message(
+                                interaction,
+                                content="Error: No text channels found where I can post.",
+                                view=None
+                            )
+                            self.stop()
+                            return
+                    
+                        # Generate the bet serial number by creating the bet
+                        legs = self.bet_details.get('legs', [])
+                        if not legs:
+                            await self.edit_message(
+                                interaction,
+                                content="❌ No bet details provided. Please start over.",
+                                view=None
+                            )
+                            self.stop()
+                            return
+                    
+                        bet_type = self.bet_details.get('bet_type')
+                        league = self.bet_details.get('league')
+                        bet_serial = None
+                        if bet_type == "straight":
+                            leg = legs[0]
+                            bet_serial = await self.bot.bet_service.create_bet(
+                                guild_id=interaction.guild_id,
+                                user_id=interaction.user.id,
+                                game_id=self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
+                                bet_type="player_prop" if leg.get('player') else "game_line",
+                                team=leg.get('team', leg.get('line')),
+                                opponent=leg.get('opponent'),
+                                line=leg.get('line'),
+                                units=float(leg.get('units_str', '1.00')),
+                                odds=float(leg.get('odds_str', '-110')),
+                                channel_id=None,
+                                league=league
+                            )
+                        else:  # Parlay
+                            bet_serial = await self.bot.bet_service.create_parlay_bet(
+                                guild_id=interaction.guild_id,
+                                user_id=interaction.user.id,
+                                legs=[
+                                    {
+                                        'game_id': self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
+                                        'bet_type': "player_prop" if leg.get('player') else "game_line",
+                                        'team': leg.get('team', leg.get('line')),
+                                        'opponent': leg.get('opponent'),
+                                        'line': leg.get('line'),
+                                        'units': float(leg.get('units_str', '1.00')),
+                                        'odds': float(leg.get('odds_str', '-110')),
+                                    } for leg in legs
+                                ],
+                                channel_id=None,
+                                league=league
+                            )
+                    
+                        self.bet_details['bet_serial'] = bet_serial
+                    
+                        # Generate the preview image
+                        leg = legs[0]  # Use first leg for basic info if straight bet
+                        home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
+                        away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
+                        league = self.bet_details.get('league', 'NHL')
+                        timestamp = datetime.now(timezone.utc)
+                    
+                        if bet_type == "parlay":
+                            # Check if all legs share the same game_id for same-game parlay
+                            game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
+                            is_same_game = len(game_ids) == 1
+                            parlay_legs = [
                                 {
-                                    'game_id': self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
-                                    'bet_type': "player_prop" if leg.get('player') else "game_line",
-                                    'team': leg.get('team', leg.get('line')),
-                                    'opponent': leg.get('opponent'),
-                                    'line': leg.get('line'),
-                                    'units': float(leg.get('units_str', '1.00')),
+                                    'home_team': leg.get('team', 'Unknown'),
+                                    'away_team': leg.get('opponent', 'Unknown'),
+                                    'line': leg.get('line', 'ML'),
                                     'odds': float(leg.get('odds_str', '-110')),
+                                    'units': float(leg.get('units_str', '1.00'))
                                 } for leg in legs
-                            ],
-                            channel_id=None,
-                            league=league
-                        )
-
-                    self.bet_details['bet_serial'] = bet_serial  # Store for use in submit_bet
-
-                    # Generate the preview image with the bet serial
-                    home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
-                    away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
-                    league = self.bet_details.get('league', 'NHL')
-                    line = leg.get('line', 'ML')
-                    odds = float(leg.get('odds_str', '-110'))
-                    units = float(leg.get('units_str', '1.00'))
-                    timestamp = datetime.now(timezone.utc)
-
-                    bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                        home_team=home_team,
-                        away_team=away_team,
-                        league=league,
-                        line=line,
-                        odds=odds,
-                        units=units,
-                        bet_id=str(bet_serial),
-                        timestamp=timestamp
-                    )
-
-                    # Save the image to a BytesIO object for reuse
-                    self.preview_image_bytes = io.BytesIO()
-                    bet_slip_image.save(self.preview_image_bytes, 'PNG')
-                    self.preview_image_bytes.seek(0)
-
-                    # Create a Discord file for the preview
-                    file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
-                    self.preview_image_bytes.seek(0)  # Reset the pointer for reuse
-
-                    self.add_item(ChannelSelect(self, channels))
-                    self.add_item(CancelButton(self))
-                    step_content += ": Select Channel to Post Bet"
-                    logger.debug(f"Showing channel selection for step 6")
-                    await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
+                            ]
+                            bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                                home_team=home_team,
+                                away_team=away_team,
+                                league=league,
+                                line=legs[0].get('line', 'ML'),  # Fallback for straight bet compatibility
+                                odds=float(legs[0].get('odds_str', '-110')),
+                                units=float(legs[0].get('units_str', '1.00')),
+                                bet_id=str(bet_serial),
+                                timestamp=timestamp,
+                                bet_type="parlay",
+                                parlay_legs=parlay_legs,
+                                is_same_game=is_same_game
+                            )
+                        else:
+                            bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                                home_team=home_team,
+                                away_team=away_team,
+                                league=league,
+                                line=leg.get('line', 'ML'),
+                                odds=float(leg.get('odds_str', '-110')),
+                                units=float(leg.get('units_str', '1.00')),
+                                bet_id=str(bet_serial),
+                                timestamp=timestamp,
+                                bet_type="straight"
+                            )
+                    
+                        # Save the image to a BytesIO object
+                        self.preview_image_bytes = io.BytesIO()
+                        bet_slip_image.save(self.preview_image_bytes, 'PNG')
+                        self.preview_image_bytes.seek(0)
+                    
+                        # Create a Discord file for the preview
+                        file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
+                        self.preview_image_bytes.seek(0)
+                    
+                        self.add_item(ChannelSelect(self, channels))
+                        self.add_item(CancelButton(self))
+                        step_content += ": Select Channel to Post Bet"
+                        logger.debug(f"Showing channel selection for step 6")
+                        await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
                 elif self.current_step == 7:
                     try:
                         legs = self.bet_details.get('legs', [])
