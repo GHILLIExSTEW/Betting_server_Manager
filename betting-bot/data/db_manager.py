@@ -58,7 +58,6 @@ class DatabaseManager:
                     minsize=MYSQL_POOL_MIN_SIZE, maxsize=MYSQL_POOL_MAX_SIZE,
                     autocommit=True, connect_timeout=10,
                     charset='utf8mb4'
-                    # No default cursorclass specified, should default to tuple cursor
                 )
                 async with self._pool.acquire() as conn:
                     async with conn.cursor() as cursor:
@@ -69,10 +68,12 @@ class DatabaseManager:
                 await self.initialize_db()
             except aiomysql.OperationalError as op_err:
                 logger.critical(f"FATAL: OpError connecting to MySQL: {op_err}", exc_info=True)
-                self._pool = None; raise ConnectionError(f"Failed to connect (OperationalError): {op_err}") from op_err
+                self._pool = None
+                raise ConnectionError(f"Failed to connect (OperationalError): {op_err}") from op_err
             except Exception as e:
                 logger.critical(f"FATAL: Failed to connect to MySQL: {e}", exc_info=True)
-                self._pool = None; raise ConnectionError(f"Failed to connect: {e}") from e
+                self._pool = None
+                raise ConnectionError(f"Failed to connect: {e}") from e
         return self._pool
 
     async def close(self):
@@ -89,12 +90,20 @@ class DatabaseManager:
 
     async def execute(self, query: str, *args) -> Optional[int]:
         """Execute INSERT, UPDATE, DELETE. Returns lastrowid or rowcount."""
-        if not self._pool: await self.connect()
-        if not self._pool: logger.error("Cannot execute: DB pool unavailable."); raise ConnectionError("DB pool unavailable.")
+        if not self._pool:
+            await self.connect()
+        if not self._pool:
+            logger.error("Cannot execute: DB pool unavailable.")
+            raise ConnectionError("DB pool unavailable.")
+
+        # Flatten nested tuple/list if only one argument is a tuple/list
+        if len(args) == 1 and isinstance(args[0], (tuple, list)):
+            args = tuple(args[0])
+
         logger.debug(f"Executing DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor() as cursor: # Default tuple cursor
+                async with conn.cursor() as cursor:  # Default tuple cursor
                     rowcount = await cursor.execute(query, args)
                     is_insert = query.strip().upper().startswith("INSERT")
                     return cursor.lastrowid if is_insert else rowcount
@@ -104,12 +113,20 @@ class DatabaseManager:
 
     async def fetch_one(self, query: str, *args) -> Optional[Dict[str, Any]]:
         """Fetch one row as a dictionary."""
-        if not self._pool: await self.connect()
-        if not self._pool: logger.error("Cannot fetch_one: DB pool unavailable."); raise ConnectionError("DB pool unavailable.")
+        if not self._pool:
+            await self.connect()
+        if not self._pool:
+            logger.error("Cannot fetch_one: DB pool unavailable.")
+            raise ConnectionError("DB pool unavailable.")
+
+        # Flatten nested tuple/list if only one argument is a tuple/list
+        if len(args) == 1 and isinstance(args[0], (tuple, list)):
+            args = tuple(args[0])
+
         logger.debug(f"Fetching One DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor: # Explicit DictCursor
+                async with conn.cursor(aiomysql.DictCursor) as cursor:  # Explicit DictCursor
                     await cursor.execute(query, args)
                     return await cursor.fetchone()
         except Exception as e:
@@ -118,12 +135,20 @@ class DatabaseManager:
 
     async def fetch_all(self, query: str, *args) -> List[Dict[str, Any]]:
         """Fetch all rows as a list of dictionaries."""
-        if not self._pool: await self.connect()
-        if not self._pool: logger.error("Cannot fetch_all: DB pool unavailable."); raise ConnectionError("DB pool unavailable.")
+        if not self._pool:
+            await self.connect()
+        if not self._pool:
+            logger.error("Cannot fetch_all: DB pool unavailable.")
+            raise ConnectionError("DB pool unavailable.")
+
+        # Flatten nested tuple/list if only one argument is a tuple/list
+        if len(args) == 1 and isinstance(args[0], (tuple, list)):
+            args = tuple(args[0])
+
         logger.debug(f"Fetching All DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor: # Explicit DictCursor
+                async with conn.cursor(aiomysql.DictCursor) as cursor:  # Explicit DictCursor
                     await cursor.execute(query, args)
                     return await cursor.fetchall()
         except Exception as e:
@@ -132,12 +157,20 @@ class DatabaseManager:
 
     async def fetchval(self, query: str, *args) -> Optional[Any]:
         """Fetch a single value from the first row."""
-        if not self._pool: await self.connect()
-        if not self._pool: logger.error("Cannot fetchval: DB pool unavailable."); raise ConnectionError("DB pool unavailable.")
+        if not self._pool:
+            await self.connect()
+        if not self._pool:
+            logger.error("Cannot fetchval: DB pool unavailable.")
+            raise ConnectionError("DB pool unavailable.")
+
+        # Flatten nested tuple/list if only one argument is a tuple/list
+        if len(args) == 1 and isinstance(args[0], (tuple, list)):
+            args = tuple(args[0])
+
         logger.debug(f"Fetching Value DB Query: {query} Args: {args}")
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.Cursor) as cursor: # Explicit Tuple Cursor
+                async with conn.cursor(aiomysql.Cursor) as cursor:  # Explicit Tuple Cursor
                     await cursor.execute(query, args)
                     row = await cursor.fetchone()
                     return row[0] if row else None
@@ -147,7 +180,7 @@ class DatabaseManager:
 
     async def table_exists(self, conn, table_name: str) -> bool:
         """Check if a table exists in the database."""
-        async with conn.cursor(aiomysql.Cursor) as cursor: # Explicit Tuple Cursor
+        async with conn.cursor(aiomysql.Cursor) as cursor:  # Explicit Tuple Cursor
             try:
                 await cursor.execute(
                     "SELECT COUNT(*) FROM information_schema.tables "
@@ -160,24 +193,19 @@ class DatabaseManager:
                 logger.error(f"Error checking if table '{table_name}' exists: {e}", exc_info=True)
                 raise
 
-    # --- Helper to check/add columns ---
     async def _check_and_add_column(self, cursor, table_name, column_name, column_definition):
         """Checks if a column exists and adds it if not."""
-        # Use DictCursor for SHOW COLUMNS to access by name ('Field')
         async with cursor.connection.cursor(aiomysql.DictCursor) as dict_cursor:
             await dict_cursor.execute(f"SHOW COLUMNS FROM `{table_name}` LIKE %s", (column_name,))
             exists = await dict_cursor.fetchone()
 
         if not exists:
             logger.info(f"Adding column '{column_name}' to table '{table_name}'...")
-            # FIX: Construct the ALTER TABLE statement correctly
-            # Need to include the column name *before* its definition
             alter_statement = f"ALTER TABLE `{table_name}` ADD COLUMN `{column_name}` {column_definition}"
             await cursor.execute(alter_statement)
             logger.info(f"Successfully added column '{column_name}'.")
         else:
             logger.debug(f"Column '{column_name}' already exists in '{table_name}'.")
-
 
     async def initialize_db(self):
         """Initializes the database schema."""
@@ -186,11 +214,10 @@ class DatabaseManager:
             return
         try:
             async with self._pool.acquire() as conn:
-                async with conn.cursor(aiomysql.Cursor) as cursor: # Use default cursor for schema mods
+                async with conn.cursor(aiomysql.Cursor) as cursor:
                     logger.info("Attempting to initialize/verify database schema...")
 
-                    # --- Schema Definitions (Remain the same) ---
-                    # --- USERS Table ---
+                    # --- Schema Definitions ---
                     if not await self.table_exists(conn, 'users'):
                         await cursor.execute('''
                             CREATE TABLE users (
@@ -203,9 +230,9 @@ class DatabaseManager:
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         logger.info("Table 'users' created.")
-                    else: logger.info("Table 'users' already exists.")
+                    else:
+                        logger.info("Table 'users' already exists.")
 
-                    # --- GAMES Table ---
                     if not await self.table_exists(conn, 'games'):
                         await cursor.execute('''
                             CREATE TABLE games (
@@ -230,8 +257,6 @@ class DatabaseManager:
                         logger.info("Table 'games' created.")
                     else:
                         logger.info("Table 'games' already exists.")
-                        # Check and add potentially missing columns to existing games table
-                        # Note: The column definition string passed here includes type, constraints, comments, and AFTER clause
                         await self._check_and_add_column(cursor, 'games', 'sport', "VARCHAR(50) NOT NULL COMMENT 'Sport key' AFTER id")
                         await self._check_and_add_column(cursor, 'games', 'league_name', "VARCHAR(150) NULL AFTER league_id")
                         await self._check_and_add_column(cursor, 'games', 'home_team_name', "VARCHAR(150) NULL AFTER away_team_id")
@@ -244,30 +269,45 @@ class DatabaseManager:
                         await self._check_and_add_column(cursor, 'games', 'venue', "VARCHAR(150) NULL AFTER score")
                         await self._check_and_add_column(cursor, 'games', 'referee', "VARCHAR(100) NULL AFTER venue")
 
-                    # --- BETS Table ---
                     if not await self.table_exists(conn, 'bets'):
                         await cursor.execute('''
                             CREATE TABLE bets (
-                                bet_serial INT AUTO_INCREMENT PRIMARY KEY,
-                                guild_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
-                                game_id BIGINT NULL COMMENT 'FK to games.id',
-                                bet_type VARCHAR(50) NOT NULL, team_name VARCHAR(255) NOT NULL,
-                                stake DECIMAL(15, 2) NOT NULL, odds DECIMAL(10, 2) NOT NULL,
-                                channel_id BIGINT NOT NULL, message_id BIGINT NULL,
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                status VARCHAR(20) DEFAULT 'pending' NOT NULL,
-                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                                expiration_time TIMESTAMP NULL,
-                                result_value DECIMAL(15, 2) NULL, result_description TEXT NULL,
-                                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-                                FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE SET NULL
+                                bet_serial BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                event_id VARCHAR(255) DEFAULT NULL,
+                                guild_id BIGINT NOT NULL,
+                                message_id BIGINT DEFAULT NULL,
+                                status VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT 'pending, won, lost, push, canceled, expired',
+                                user_id BIGINT NOT NULL,
+                                game_id BIGINT DEFAULT NULL,
+                                bet_type VARCHAR(50) DEFAULT NULL,
+                                player_prop VARCHAR(255) DEFAULT NULL,
+                                player_id VARCHAR(50) DEFAULT NULL,
+                                league VARCHAR(50) NOT NULL,
+                                team VARCHAR(100) NOT NULL,
+                                opponent VARCHAR(50) NOT NULL,
+                                line VARCHAR(255) DEFAULT NULL,
+                                odds DECIMAL(10,2) DEFAULT NULL,
+                                units DECIMAL(10,2) NOT NULL,
+                                stake DECIMAL(4,0) NOT NULL DEFAULT 0,
+                                legs INT DEFAULT NULL,
+                                bet_won TINYINT DEFAULT 0,
+                                bet_loss TINYINT DEFAULT 0,
+                                created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                                game_start DATETIME DEFAULT NULL,
+                                result_value DECIMAL(15,2) DEFAULT NULL,
+                                result_description TEXT DEFAULT NULL,
+                                expiration_time TIMESTAMP NULL DEFAULT NULL,
+                                updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                channel_id BIGINT DEFAULT NULL,
+                                PRIMARY KEY (bet_serial),
+                                KEY idx_user_guild (user_id,guild_id),
+                                KEY idx_bets_game_id (game_id),
+                                KEY idx_bets_user_id (user_id),
+                                KEY idx_bets_guild_id (guild_id),
+                                KEY idx_bets_created_at (created_at),
+                                CONSTRAINT fk_bets_game_id FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE SET NULL
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
-                        await cursor.execute('CREATE INDEX idx_bets_user_id ON bets(user_id)')
-                        await cursor.execute('CREATE INDEX idx_bets_guild_id ON bets(guild_id)')
-                        await cursor.execute('CREATE INDEX idx_bets_game_id ON bets(game_id)')
-                        await cursor.execute('CREATE INDEX idx_bets_status ON bets(status)')
-                        await cursor.execute('CREATE INDEX idx_bets_created_at ON bets(created_at)')
                         logger.info("Table 'bets' created.")
                     else:
                         logger.info("Table 'bets' already exists.")
@@ -277,7 +317,6 @@ class DatabaseManager:
                             if col_info and 'bigint' not in col_info.get('Type', '').lower():
                                 logger.warning("Column 'bets.game_id' is not BIGINT. Manual alteration might be needed.")
 
-                    # --- UNIT_RECORDS Table ---
                     if not await self.table_exists(conn, 'unit_records'):
                         await cursor.execute('''
                             CREATE TABLE unit_records (
@@ -304,8 +343,6 @@ class DatabaseManager:
                         await self._check_and_add_column(cursor, 'unit_records', 'year', "INT NOT NULL COMMENT 'Year bet resolved' AFTER user_id")
                         await self._check_and_add_column(cursor, 'unit_records', 'month', "INT NOT NULL COMMENT 'Month bet resolved (1-12)' AFTER year")
 
-
-                    # --- GUILD_SETTINGS Table ---
                     if not await self.table_exists(conn, 'guild_settings'):
                         await cursor.execute('''
                             CREATE TABLE guild_settings (
@@ -322,9 +359,9 @@ class DatabaseManager:
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         logger.info("Table 'guild_settings' created.")
-                    else: logger.info("Table 'guild_settings' already exists.")
+                    else:
+                        logger.info("Table 'guild_settings' already exists.")
 
-                    # --- CAPPERS Table ---
                     if not await self.table_exists(conn, 'cappers'):
                         await cursor.execute('''
                             CREATE TABLE cappers (
@@ -344,8 +381,6 @@ class DatabaseManager:
                         logger.info("Table 'cappers' already exists.")
                         await self._check_and_add_column(cursor, 'cappers', 'bet_push', "INTEGER DEFAULT 0 NOT NULL COMMENT 'Count of pushed bets' AFTER bet_loss")
 
-
-                    # --- LEAGUES Table ---
                     if not await self.table_exists(conn, 'leagues'):
                         await cursor.execute('''
                             CREATE TABLE leagues (
@@ -357,9 +392,9 @@ class DatabaseManager:
                         ''')
                         await cursor.execute('CREATE INDEX idx_leagues_sport_country ON leagues (sport, country)')
                         logger.info("Table 'leagues' created.")
-                    else: logger.info("Table 'leagues' already exists.")
+                    else:
+                        logger.info("Table 'leagues' already exists.")
 
-                    # --- TEAMS Table ---
                     if not await self.table_exists(conn, 'teams'):
                         await cursor.execute('''
                             CREATE TABLE teams (
@@ -374,9 +409,9 @@ class DatabaseManager:
                         await cursor.execute('CREATE INDEX idx_teams_sport_country ON teams (sport, country)')
                         await cursor.execute('CREATE INDEX idx_teams_name ON teams (name)')
                         logger.info("Table 'teams' created.")
-                    else: logger.info("Table 'teams' already exists.")
+                    else:
+                        logger.info("Table 'teams' already exists.")
 
-                    # --- STANDINGS Table ---
                     if not await self.table_exists(conn, 'standings'):
                         await cursor.execute('''
                             CREATE TABLE standings (
@@ -406,8 +441,6 @@ class DatabaseManager:
                                 except Exception as alter_err:
                                     logger.error(f"Failed to alter 'standings' table: {alter_err}. Manual intervention needed.")
 
-
-                    # --- GAME_EVENTS Table ---
                     if not await self.table_exists(conn, 'game_events'):
                         await cursor.execute('''
                             CREATE TABLE game_events (
@@ -419,10 +452,10 @@ class DatabaseManager:
                         ''')
                         await cursor.execute('CREATE INDEX idx_game_events_game_time ON game_events (game_id, created_at)')
                         logger.info("Table 'game_events' created.")
-                    else: logger.info("Table 'game_events' already exists.")
+                    else:
+                        logger.info("Table 'game_events' already exists.")
 
                     logger.info("Database schema initialization/verification complete.")
         except Exception as e:
             logger.error(f"Error initializing/verifying database schema: {e}", exc_info=True)
-            raise # Re-raise the exception
-
+            raise
