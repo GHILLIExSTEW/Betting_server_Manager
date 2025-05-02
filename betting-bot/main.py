@@ -9,7 +9,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
 import time
-from typing import Optional  # Added to fix NameError
+from typing import Optional
 
 # --- Path Setup ---
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -127,7 +127,7 @@ class BettingBot(commands.Bot):
                     synced = await self.tree.sync()
                     logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
                 return True
-            except Exception as e:
+            except discord.HTTPException as e:
                 logger.error(f"Sync attempt {attempt}/{retries} failed: {e}", exc_info=True)
                 if attempt < retries:
                     logger.info(f"Retrying sync in {delay} seconds...")
@@ -150,23 +150,7 @@ class BettingBot(commands.Bot):
 
             # Log all commands before syncing
             commands = [cmd.name for cmd in self.tree.get_commands()]
-            logger.info(f"Registered commands: {commands}")
-
-            # Clear command tree to prevent duplicates
-            logger.debug("Clearing command tree before syncing")
-            self.tree.clear_commands(guild=None)
-
-            # Sync commands
-            try:
-                # Wait until bot is fully ready
-                await self.wait_until_ready()
-                # Sync globally
-                await self.sync_commands_with_retry()
-                # Sync to each guild
-                for guild in self.guilds:
-                    await self.sync_commands_with_retry(guild=guild)
-            except Exception as e:
-                logger.error(f"Failed to sync command tree: {e}", exc_info=True)
+            logger.info(f"Registered commands before syncing: {commands}")
 
             logger.info("Starting services...")
             service_starts = []
@@ -201,6 +185,20 @@ class BettingBot(commands.Bot):
         for guild in self.guilds:
             logger.debug(f"- {guild.name} ({guild.id})")
         logger.info(f"Latency: {self.latency*1000:.2f} ms")
+
+        # Sync commands
+        try:
+            # Sync globally
+            await self.sync_commands_with_retry()
+            # Sync to each guild with a small delay to avoid rate limits
+            for guild in self.guilds:
+                await self.sync_commands_with_retry(guild=guild)
+                await asyncio.sleep(1)  # Small delay to prevent rate limiting
+            commands = [cmd.name for cmd in self.tree.get_commands()]
+            logger.info(f"Commands available after sync: {commands}")
+        except Exception as e:
+            logger.error(f"Failed to sync command tree: {e}", exc_info=True)
+
         logger.info('------ Bot is Ready ------')
 
     async def on_guild_join(self, guild: discord.Guild):
@@ -327,16 +325,12 @@ class SyncCog(commands.Cog):
         try:
             commands = [cmd.name for cmd in self.bot.tree.get_commands()]
             logger.debug(f"Commands to sync: {commands}")
-            # Clear command tree
-            logger.debug("Clearing command tree for sync")
-            self.bot.tree.clear_commands(guild=None)
-            for guild in self.bot.guilds:
-                self.bot.tree.clear_commands(guild=discord.Object(id=guild.id))
             # Sync globally
             await self.bot.sync_commands_with_retry()
             # Sync to each guild
             for guild in self.bot.guilds:
                 await self.bot.sync_commands_with_retry(guild=guild)
+                await asyncio.sleep(1)  # Small delay to prevent rate limiting
             await interaction.response.send_message("Commands synced successfully!", ephemeral=True)
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}", exc_info=True)
