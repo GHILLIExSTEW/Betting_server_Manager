@@ -7,6 +7,7 @@ from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextCh
 from discord.ext import commands
 from discord.ui import View, Select, Modal, TextInput, Button
 import logging
+import pymysql
 from typing import Optional, List, Dict, Union
 from datetime import datetime, timezone
 import io
