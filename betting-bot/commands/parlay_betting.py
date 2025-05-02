@@ -34,7 +34,7 @@ class LeagueSelect(Select):
 
     async def callback(self, interaction: Interaction):
         self.parent_view.bet_details['league'] = self.values[0]
-        logger.debug(f"League selected: {self.values[0]}")
+        logger.debug(f"League selected: {self.values[0]} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
@@ -55,7 +55,7 @@ class LineTypeSelect(Select):
 
     async def callback(self, interaction: Interaction):
         self.parent_view.bet_details['line_type'] = self.values[0]
-        logger.debug(f"Line Type selected: {self.values[0]}")
+        logger.debug(f"Line Type selected: {self.values[0]} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
@@ -92,7 +92,7 @@ class GameSelect(Select):
             if game:
                 self.parent_view.bet_details['home_team_name'] = game.get('home_team_name', 'Unknown')
                 self.parent_view.bet_details['away_team_name'] = game.get('away_team_name', 'Unknown')
-        logger.debug(f"Game selected: {self.values[0]}")
+        logger.debug(f"Game selected: {self.values[0]} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
@@ -119,7 +119,7 @@ class HomePlayerSelect(Select):
                     item.disabled = True
         else:
             self.parent_view.bet_details['player'] = None
-        logger.debug(f"Home player selected: {self.values[0] if self.values else 'None'}")
+        logger.debug(f"Home player selected: {self.values[0] if self.values else 'None'} by user {interaction.user.id}")
         await interaction.response.defer()
         if self.parent_view.bet_details.get('player'):
             await self.parent_view.go_next(interaction)
@@ -146,7 +146,7 @@ class AwayPlayerSelect(Select):
                     item.disabled = True
         else:
             self.parent_view.bet_details['player'] = None
-        logger.debug(f"Away player selected: {self.values[0] if self.values else 'None'}")
+        logger.debug(f"Away player selected: {self.values[0] if self.values else 'None'} by user {interaction.user.id}")
         await interaction.response.defer()
         if self.parent_view.bet_details.get('player'):
             await self.parent_view.go_next(interaction)
@@ -161,7 +161,7 @@ class ManualEntryButton(Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: Interaction):
-        logger.debug("Manual Entry button clicked")
+        logger.debug(f"Manual Entry button clicked by user {interaction.user.id}")
         self.parent_view.bet_details['game_id'] = "Other"
         self.disabled = True
         for item in self.parent_view.children:
@@ -202,7 +202,7 @@ class CancelButton(Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: Interaction):
-        logger.debug("Cancel button clicked")
+        logger.debug(f"Cancel button clicked by user {interaction.user.id}")
         self.disabled = True
         for item in self.parent_view.children:
             item.disabled = True
@@ -265,7 +265,7 @@ class BetDetailsModal(Modal):
         self.add_item(self.line)
 
     async def on_submit(self, interaction: Interaction):
-        logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number}")
+        logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number} by user {interaction.user.id}")
         line = self.line.value.strip()
 
         if not line:
@@ -273,7 +273,7 @@ class BetDetailsModal(Modal):
             await interaction.response.send_message("Please fill in all required fields.", ephemeral=True)
             return
 
-        leg = {'line': line, 'odds_str': '-110'}  # Default odds to -110 since odds field is removed
+        leg = {'line': line, 'odds_str': '-110'}  # Default odds to -110
 
         if self.is_manual:
             team = self.team.value.strip()
@@ -342,7 +342,7 @@ class UnitsSelect(Select):
 
     async def callback(self, interaction: Interaction):
         units = self.values[0]
-        logger.debug(f"Units selected: {units}")
+        logger.debug(f"Units selected: {units} by user {interaction.user.id}")
         for leg in self.parent_view.bet_details['legs']:
             leg['units_str'] = units
         self.disabled = True
@@ -367,7 +367,7 @@ class AddLegButton(Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: Interaction):
-        logger.debug("Add Leg button clicked")
+        logger.debug(f"Add Leg button clicked by user {interaction.user.id}")
         self.parent_view.current_step = 0  # Return to League selection
         self.parent_view.bet_details.pop('game_id', None)
         self.parent_view.bet_details.pop('home_team_name', None)
@@ -388,7 +388,7 @@ class FinalizeButton(Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: Interaction):
-        logger.debug("Finalize button clicked")
+        logger.debug(f"Finalize button clicked by user {interaction.user.id}")
         self.parent_view.current_step = 5  # Proceed to Units selection
         await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.go_next(interaction)
@@ -421,7 +421,7 @@ class ChannelSelect(Select):
             await interaction.response.defer()
             return
         self.parent_view.bet_details['channel_id'] = int(selected_value)
-        logger.debug(f"Channel selected: {selected_value}")
+        logger.debug(f"Channel selected: {selected_value} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
@@ -436,6 +436,7 @@ class ConfirmButton(Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: Interaction):
+        logger.debug(f"Confirm button clicked by user {interaction.user.id}")
         for item in self.parent_view.children:
             if isinstance(item, Button):
                 item.disabled = True
@@ -469,6 +470,7 @@ class ParlayBetWorkflowView(View):
                 "❌ Failed to start bet workflow. Please try again.",
                 ephemeral=True
             )
+            self.stop()
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         if interaction.user.id != self.original_interaction.user.id:
@@ -491,7 +493,7 @@ class ParlayBetWorkflowView(View):
     ):
         logger.debug(
             f"Editing message: content={content}, view={view is not None}, "
-            f"embed={embed is not None}, file={file is not None}"
+            f"embed={embed is not None}, file={file is not None} by user {interaction.user.id if interaction else 'N/A'}"
         )
         target_message = self.message
         try:
@@ -541,11 +543,11 @@ class ParlayBetWorkflowView(View):
 
     async def go_next(self, interaction: Interaction):
         if self.is_processing:
-            logger.debug(f"Skipping go_next call; already processing step {self.current_step}")
+            logger.debug(f"Skipping go_next call; already processing step {self.current_step} for user {interaction.user.id}")
             return
         self.is_processing = True
         try:
-            logger.debug(f"Processing go_next: current_step={self.current_step}")
+            logger.debug(f"Processing go_next: current_step={self.current_step} for user {interaction.user.id}")
             self.clear_items()
             self.current_step += 1
             step_content = f"**Step {self.current_step}**"
@@ -893,7 +895,7 @@ class ParlayBetWorkflowView(View):
             await self.bot.bet_service.update_parlay_bet_channel(bet_serial=bet_serial, channel_id=post_channel_id)
 
             if not self.preview_image_bytes:
-                logger.error("Preview image bytes not found for bet {bet_serial}")
+                logger.error(f"Preview image bytes not found for bet {bet_serial}")
                 raise ValueError("Preview image not found. Please start over.")
 
             # Step 1: Fetch the member_role from server_settings
