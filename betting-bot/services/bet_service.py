@@ -113,6 +113,7 @@ class BetService:
         units: float,
         odds: float,
         channel_id: int,
+        league: Optional[str] = None,  # Add league parameter
         message_id: Optional[int] = None,
         expiration_time: Optional[datetime] = None
     ) -> int:
@@ -136,6 +137,8 @@ class BetService:
                 raise ValidationError("Bet Type cannot be empty.")
             if not team_name:
                 raise ValidationError("Team name/Selection cannot be empty.")
+            if not league:
+                raise ValidationError("League cannot be empty.")  # Validate league
     
             db_game_id = str(game_id) if game_id else None
             now_utc_for_db = datetime.now(timezone.utc)
@@ -144,18 +147,19 @@ class BetService:
             result_description = f"Team: {team_name}"
             query = """
                 INSERT INTO bets (
-                    guild_id, user_id, game_id, bet_type,
+                    guild_id, user_id, game_id, bet_type, league,
                     stake, odds, channel_id, message_id,
                     created_at, status, updated_at, expiration_time,
                     result_value, result_description
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            # Define args as a flat tuple with 14 elements
+            # Define args as a flat tuple with 15 elements
             args = (
                 guild_id,
                 user_id,
                 db_game_id,
                 bet_type,
+                league,
                 units,
                 odds,
                 channel_id,
@@ -170,7 +174,7 @@ class BetService:
     
             # Log args to verify structure
             self.logger.debug(f"Executing bet insertion with args: {args}")
-            await self.db.execute(query, *args)  # Unpack args to ensure flat structure
+            await self.db.execute(query, *args)
     
             # Retrieve the bet_serial
             bet_serial_query = "SELECT LAST_INSERT_ID() as bet_serial"
@@ -194,6 +198,9 @@ class BetService:
         except ConnectionError as ce:
             self.logger.error(f"Database connection error during bet creation for user {user_id}: {ce}")
             raise BetServiceError("Database connection error. Please try again later.") from ce
+        except pymysql.err.OperationalError as oe:
+            self.logger.error(f"Database operational error during bet creation for user {user_id}: {oe}")
+            raise BetServiceError(f"Database error: {oe}") from oe
         except Exception as e:
             self.logger.exception(f"Error creating bet for user {user_id}: {e}")
             raise BetServiceError("An internal error occurred while creating the bet.")
