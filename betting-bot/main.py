@@ -290,7 +290,7 @@ class BettingBot(commands.Bot):
             logger.info("Stopping services...")
             stop_tasks = []
             if hasattr(self, 'data_sync_service') and hasattr(self.data_sync_service, 'stop'): stop_tasks.append(self.data_sync_service.stop())
-            if hasattr(self, 'voice_service') and hasattr(self.vice_service, 'stop'): stop_tasks.append(self.voice_service.stop())
+            if hasattr(self, 'voice_service') and hasattr(self.voice_service, 'stop'): stop_tasks.append(self.voice_service.stop())
             if hasattr(self, 'bet_service') and hasattr(self.bet_service, 'stop'): stop_tasks.append(self.bet_service.stop())
             if hasattr(self, 'game_service') and hasattr(self.game_service, 'stop'): stop_tasks.append(self.game_service.stop())
             if hasattr(self, 'user_service') and hasattr(self.user_service, 'stop'): stop_tasks.append(self.user_service.stop())
