@@ -902,10 +902,9 @@ class ParlayBetWorkflowView(View):
                         break
                 if not webhook:
                     webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
-                view = BetResolutionView(bet_serial)
+                # Send the bet slip message without a view (no preloaded emoji buttons)
                 sent_message = await webhook.send(
                     file=discord_file,
-                    view=view,
                     username=display_name,
                     avatar_url=avatar_url,
                     wait=True
@@ -941,35 +940,3 @@ class ParlayBetWorkflowView(View):
         finally:
             self.preview_image_bytes = None
             self.stop()
-
-class BetResolutionView(View):
-    def __init__(self, bet_serial: int):
-        super().__init__(timeout=None)
-        self.bet_serial = bet_serial
-
-    @discord.ui.button(label="Win", style=ButtonStyle.green, emoji="✅", custom_id="bet_resolve_win")
-    async def win_button(self, interaction: Interaction, button: Button):
-        try:
-            await interaction.message.add_reaction("✅")
-            await interaction.response.send_message("Added Win reaction.", ephemeral=True)
-        except Exception as e:
-            logger.error(f"Error adding win reaction: {e}")
-            await interaction.response.send_message("Could not add reaction.", ephemeral=True)
-
-    @discord.ui.button(label="Loss", style=ButtonStyle.red, emoji="❌", custom_id="bet_resolve_loss")
-    async def loss_button(self, interaction: Interaction, button: Button):
-        try:
-            await interaction.message.add_reaction("❌")
-            await interaction.response.send_message("Added Loss reaction.", ephemeral=True)
-        except Exception as e:
-            logger.error(f"Error adding loss reaction: {e}")
-            await interaction.response.send_message("Could not add reaction.", ephemeral=True)
-
-    @discord.ui.button(label="Push", style=ButtonStyle.grey, emoji="🅿️", custom_id="bet_resolve_push")
-    async def push_button(self, interaction: Interaction, button: Button):
-        try:
-            await interaction.message.add_reaction("🅿️")
-            await interaction.response.send_message("Added Push reaction.", ephemeral=True)
-        except Exception as e:
-            logger.error(f"Error adding push reaction: {e}")
-            await interaction.response.send_message("Could not add reaction.", ephemeral=True)
