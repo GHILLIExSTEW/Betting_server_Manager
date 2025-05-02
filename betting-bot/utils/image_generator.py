@@ -14,13 +14,11 @@ class BetSlipGenerator:
         self.bold_font_path = self._get_default_bold_font()
         self.emoji_font_path = emoji_font_path or self._get_default_emoji_font()
         self.assets_dir = assets_dir
-        self.league_team_dir = os.path.join(self.assets_dir, "logos/teams/HOCKEY/NHL")
-        self.league_logo_dir = os.path.join(self.assets_dir, "logos/leagues/HOCKEY/NHL")
+        self.league_team_base_dir = os.path.join(self.assets_dir, "logos/teams")
+        self.league_logo_base_dir = os.path.join(self.assets_dir, "logos/leagues")
         self._ensure_font_exists()
         self._ensure_bold_font_exists()
         self._ensure_emoji_font_exists()
-        self._ensure_team_dir_exists()
-        self._ensure_league_dir_exists()
 
     def _get_default_font(self) -> str:
         """Get the default font path for regular text."""
@@ -90,23 +88,50 @@ class BetSlipGenerator:
                 logger.error("Could not find a suitable emoji font file. Falling back to text-based lock symbol.")
                 self.emoji_font_path = self.font_path
 
-    def _ensure_team_dir_exists(self) -> None:
-        """Ensure the team logos directory exists."""
-        if not os.path.exists(self.league_team_dir):
-            logger.warning(f"Team logos directory not found at {self.league_team_dir}")
-            os.makedirs(self.league_team_dir, exist_ok=True)
+    def _ensure_team_dir_exists(self, league: str) -> str:
+        """Ensure the team logos directory exists for the given league."""
+        sport_category = {
+            "NBA": "BASKETBALL",
+            "NFL": "FOOTBALL",
+            "MLB": "BASEBALL",
+            "NHL": "HOCKEY",
+            "NCAAB": "BASKETBALL",
+            "NCAAF": "FOOTBALL",
+            "Soccer": "SOCCER",
+            "Tennis": "TENNIS",
+            "UFC/MMA": "MMA"
+        }.get(league, "OTHER")
+        league_team_dir = os.path.join(self.league_team_base_dir, sport_category, league.upper())
+        if not os.path.exists(league_team_dir):
+            logger.warning(f"Team logos directory not found at {league_team_dir}")
+            os.makedirs(league_team_dir, exist_ok=True)
+        return league_team_dir
 
-    def _ensure_league_dir_exists(self) -> None:
-        """Ensure the league logos directory exists."""
-        if not os.path.exists(self.league_logo_dir):
-            logger.warning(f"League logos directory not found at {self.league_logo_dir}")
-            os.makedirs(self.league_logo_dir, exist_ok=True)
+    def _ensure_league_dir_exists(self, league: str) -> str:
+        """Ensure the league logos directory exists for the given league."""
+        sport_category = {
+            "NBA": "BASKETBALL",
+            "NFL": "FOOTBALL",
+            "MLB": "BASEBALL",
+            "NHL": "HOCKEY",
+            "NCAAB": "BASKETBALL",
+            "NCAAF": "FOOTBALL",
+            "Soccer": "SOCCER",
+            "Tennis": "TENNIS",
+            "UFC/MMA": "MMA"
+        }.get(league, "OTHER")
+        league_logo_dir = os.path.join(self.league_logo_base_dir, sport_category, league.upper())
+        if not os.path.exists(league_logo_dir):
+            logger.warning(f"League logos directory not found at {league_logo_dir}")
+            os.makedirs(league_logo_dir, exist_ok=True)
+        return league_logo_dir
 
     def _load_league_logo(self, league: str) -> Optional[Image.Image]:
         """Load the league logo image based on league name."""
         try:
+            league_logo_dir = self._ensure_league_dir_exists(league)
             logo_filename = league.lower() + ".png"
-            logo_path = os.path.join(self.league_logo_dir, logo_filename)
+            logo_path = os.path.join(league_logo_dir, logo_filename)
             if os.path.exists(logo_path):
                 logo = Image.open(logo_path).convert("RGBA")
                 logo = logo.resize((30, 30), Image.Resampling.LANCZOS)
@@ -118,15 +143,18 @@ class BetSlipGenerator:
             logger.error(f"Error loading league logo for {league}: {str(e)}")
             return None
 
-    def _load_team_logo(self, team_name: str) -> Optional[Image.Image]:
-        """Load the team logo image based on team name."""
+    def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
+        """Load the team logo image based on team name and league."""
         try:
+            league_team_dir = self._ensure_team_dir_exists(league)
             team_name_map = {
                 "oilers": "edmonton_oilers",
-                "bruins": "boston_bruins"
+                "bruins": "boston_bruins",
+                "bengals": "cincinnati_bengals",
+                "steelers": "pittsburgh_steelers"
             }
             logo_filename = team_name_map.get(team_name.lower(), team_name.lower().replace(" ", "_")) + ".png"
-            logo_path = os.path.join(self.league_team_dir, logo_filename)
+            logo_path = os.path.join(league_team_dir, logo_filename)
             if os.path.exists(logo_path):
                 logo = Image.open(logo_path).convert("RGBA")
                 logo = logo.resize((100, 100), Image.Resampling.LANCZOS)
@@ -251,8 +279,8 @@ class BetSlipGenerator:
             # Draw team logos for same-game parlay or straight bet
             current_y = header_y + 40
             if bet_type == "parlay" and is_same_game:
-                home_logo = self._load_team_logo(home_team)
-                away_logo = self._load_team_logo(away_team)
+                home_logo = self._load_team_logo(home_team, league)
+                away_logo = self._load_team_logo(away_team, league)
                 logo_y = current_y
                 if home_logo:
                     image.paste(home_logo, (width // 4 - 50, logo_y), home_logo)
@@ -263,8 +291,8 @@ class BetSlipGenerator:
                 draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
                 current_y = team_y + 50
             elif bet_type == "straight":
-                home_logo = self._load_team_logo(home_team)
-                away_logo = self._load_team_logo(away_team)
+                home_logo = self._load_team_logo(home_team, league)
+                away_logo = self._load_team_logo(away_team, league)
                 logo_y = current_y
                 if home_logo:
                     image.paste(home_logo, (width // 4 - 50, logo_y), home_logo)
@@ -303,10 +331,11 @@ class BetSlipGenerator:
             separator_y = last_odds_y + 20  # 20 pixels below the odds text
             draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
 
-            # Units text below the separator
+            # Units text below the separator (use the units from the first leg for parlay)
+            units_to_display = units if bet_type == "straight" else float(parlay_legs[0].get('units_str', '1.00'))
             units_y = separator_y + 30  # 30 pixels below the separator
-            units_label = "Unit" if units == 1.0 else "Units"
-            units_text = f"To Win {units:.2f} {units_label}"
+            units_label = "Unit" if units_to_display == 1.0 else "Units"
+            units_text = f"To Win {units_to_display:.2f} {units_label}"
             units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
             units_width = units_bbox[2] - units_bbox[0]
             lock_icon = self._load_lock_icon()
@@ -377,8 +406,8 @@ class BetSlipGenerator:
         current_y = start_y
         if draw_logos:
             # Load and draw team logos
-            home_logo = self._load_team_logo(home_team)
-            away_logo = self._load_team_logo(away_team)
+            home_logo = self._load_team_logo(home_team, league)
+            away_logo = self._load_team_logo(away_team, league)
             logo_y = current_y
             if home_logo:
                 image.paste(home_logo, (width // 4 - 50, logo_y), home_logo)
