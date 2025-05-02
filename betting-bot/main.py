@@ -9,6 +9,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
 import time
+from typing import Optional  # Added to fix NameError
 
 # --- Path Setup ---
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
