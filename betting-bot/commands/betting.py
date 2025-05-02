@@ -216,11 +216,12 @@ class ManualEntryButton(Button):
                 item.disabled = True
         line_type = self.parent_view.bet_details.get('line_type')
         bet_type = self.parent_view.bet_details.get('bet_type')
+        leg_number = len(self.parent_view.bet_details.get('legs', [])) + 1
         try:
             modal = BetDetailsModal(
                 line_type=line_type,
                 is_manual=True,
-                is_first_leg=len(self.parent_view.bet_details.get('legs', [])) == 0,
+                leg_number=leg_number,
                 bet_type=bet_type
             )
             modal.view = self.parent_view
@@ -283,19 +284,20 @@ class CancelButton(Button):
 
 
 class BetDetailsModal(Modal):
-    def __init__(self, line_type: str, is_manual: bool = False, is_first_leg: bool = False, bet_type: str = None):
-        # Shorten modal titles to fit within Discord's 45-character limit
-        if is_first_leg and bet_type == "parlay":
-            title = "Enter First Leg (Submit for Next Leg)"  # 41 characters
-        elif bet_type == "parlay":
-            title = "Enter Leg (Submit to Add/Confirm)"  # 37 characters
+    def __init__(self, line_type: str, is_manual: bool = False, leg_number: int = 1, bet_type: str = None):
+        # Shorten modal titles to fit within Discord's 45-character limit and clarify action
+        if bet_type == "parlay":
+            if leg_number == 1:
+                title = f"Leg {leg_number}: Submit for Next Leg"  # 29 characters
+            else:
+                title = f"Leg {leg_number}: Submit to Add/Confirm"  # 35 characters
         else:
             title = "Enter Bet Details"  # 17 characters
         super().__init__(title=title)
         self.line_type = line_type
         self.is_manual = is_manual
-        self.is_first_leg = is_first_leg
         self.bet_type = bet_type
+        self.leg_number = leg_number
 
         if is_manual:
             self.team = TextInput(
@@ -327,7 +329,7 @@ class BetDetailsModal(Modal):
         )
 
         # Include units input for all legs after the first leg of a parlay
-        if not (self.is_first_leg and self.bet_type == "parlay"):
+        if not (self.leg_number == 1 and self.bet_type == "parlay"):
             self.units = TextInput(
                 label="Units (e.g., 1, 1.5)",
                 placeholder="Enter units to risk",
@@ -349,7 +351,7 @@ class BetDetailsModal(Modal):
         self.add_item(self.odds)
 
     async def on_submit(self, interaction: Interaction):
-        logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, is_first_leg={self.is_first_leg}")
+        logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number}")
         line = self.line.value.strip()
         odds = self.odds.value.strip()
 
@@ -402,16 +404,21 @@ class BetDetailsModal(Modal):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
 
-        # If this is a parlay, redirect to add another leg or proceed to confirmation
+        # If this is a parlay, redirect to league selection for the next leg or proceed to confirmation
         if self.view.bet_details.get('bet_type') == "parlay":
-            # After adding the first leg, redirect to league selection for the next leg
             if len(self.view.bet_details['legs']) < 2:
-                self.view.current_step = 2  # Redirect to league selection for the next leg
+                # Redirect to league selection for the next leg
+                self.view.current_step = 1  # Step 2 after increment in go_next
+                # Clear league-specific data to allow new selection
+                self.view.bet_details.pop('league', None)
+                self.view.bet_details.pop('game_id', None)
+                self.view.bet_details.pop('home_team_name', None)
+                self.view.bet_details.pop('away_team_name', None)
             else:
                 # After adding the second or subsequent leg, proceed to confirmation
-                self.view.current_step = 5  # Proceed to confirmation (step 7)
+                self.view.current_step = 4  # Step 5 after increment in go_next
         else:
-            self.view.current_step = 5  # Proceed to channel selection for straight bets
+            self.view.current_step = 4  # Step 5 after increment in go_next
 
         await self.view.go_next(interaction)
 
@@ -454,7 +461,7 @@ class UnitsModal(Modal, title="Enter Parlay Units"):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
 
-        self.view.current_step = 5  # Proceed to channel selection
+        self.view.current_step = 4  # Step 5 after increment in go_next
         await self.view.go_next(interaction)
 
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
@@ -504,7 +511,13 @@ class NextLegButton(Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: Interaction):
-        self.parent_view.current_step = 2  # Redirect to league selection for the next leg
+        # Redirect to league selection for the next leg
+        self.parent_view.current_step = 1  # Step 2 after increment in go_next
+        # Clear league-specific data to allow new selection
+        self.parent_view.bet_details.pop('league', None)
+        self.parent_view.bet_details.pop('game_id', None)
+        self.parent_view.bet_details.pop('home_team_name', None)
+        self.parent_view.bet_details.pop('away_team_name', None)
         await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.go_next(interaction)
 
@@ -768,7 +781,7 @@ class BetWorkflowView(View):
                             modal = BetDetailsModal(
                                 line_type=line_type,
                                 is_manual=False,
-                                is_first_leg=len(self.bet_details.get('legs', [])) == 0,
+                                leg_number=len(self.bet_details.get('legs', [])) + 1,
                                 bet_type=self.bet_details.get('bet_type')
                             )
                             modal.view = self
