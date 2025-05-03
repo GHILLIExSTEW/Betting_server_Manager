@@ -224,6 +224,16 @@ class BetDetailsModal(Modal):
         self.line = TextInput(label="Line", required=True, max_length=100)
         self.add_item(self.line)
 
+        # Add total odds field only for legs after the first
+        if self.leg_number > 1:
+            self.total_odds = TextInput(
+                label="Total Odds (e.g., +300)",
+                required=True,
+                max_length=10,
+                placeholder="Enter cumulative odds (e.g., +300)"
+            )
+            self.add_item(self.total_odds)
+
     async def on_submit(self, interaction: Interaction):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number} by user {interaction.user.id}")
         line = self.line.value.strip()
@@ -233,7 +243,7 @@ class BetDetailsModal(Modal):
             await interaction.response.send_message("Please fill in all required fields.", ephemeral=True)
             return
 
-        leg = {'line': line, 'odds_str': '-110'}  # Default odds to -110
+        leg = {'line': line, 'odds_str': '-110'}  # Default odds for individual leg
 
         if self.is_manual:
             team = self.team.value.strip()
@@ -256,6 +266,27 @@ class BetDetailsModal(Modal):
                 await interaction.response.send_message("Please provide a valid player.", ephemeral=True)
                 return
             leg['player'] = player
+
+        # Validate and store total odds for legs after the first
+        if self.leg_number > 1:
+            total_odds_input = self.total_odds.value.strip()
+            if not total_odds_input:
+                logger.warning("Modal submission failed: Missing total odds")
+                await interaction.response.send_message("Please provide the total odds.", ephemeral=True)
+                return
+            try:
+                total_odds_val = float(total_odds_input)
+                if not (-10000 <= total_odds_val <= 10000):
+                    raise ValueError("Total odds must be between -10000 and +10000")
+                if -100 < total_odds_val < 100 and total_odds_val != 0:
+                    raise ValueError("Total odds cannot be between -99 and +99 (except 0)")
+                self.view.bet_details['total_odds_str'] = total_odds_input  # Store the cumulative odds
+            except ValueError as ve:
+                logger.warning(f"Invalid total odds input: {total_odds_input}. Error: {ve}")
+                await interaction.response.send_message(
+                    f"❌ Invalid total odds: {ve}. Please enter a valid number (e.g., +300).", ephemeral=True
+                )
+                return
 
         if 'legs' not in self.view.bet_details:
             self.view.bet_details['legs'] = []
@@ -704,12 +735,14 @@ class ParlayBetWorkflowView(View):
                         } for leg in legs
                     ]
                     try:
+                        # Use the total odds if provided, otherwise default to the first leg's odds
+                        total_odds = float(self.bet_details.get('total_odds_str', leg.get('odds_str', '-110')))
                         bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                             home_team=home_team,
                             away_team=away_team,
                             league=league,
                             line=legs[0].get('line', 'ML'),
-                            odds=float(legs[0].get('odds_str', '-110')),
+                            odds=total_odds,
                             units=float(legs[0].get('units_str', '1.00')),
                             bet_id=str(bet_serial),
                             timestamp=timestamp,
@@ -778,12 +811,13 @@ class ParlayBetWorkflowView(View):
                                     'units': float(leg.get('units_str', '1.00'))
                                 } for leg in legs
                             ]
+                            total_odds = float(self.bet_details.get('total_odds_str', leg.get('odds_str', '-110')))
                             bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                                 home_team=home_team,
                                 away_team=away_team,
                                 league=self.bet_details.get('league', 'NHL'),
                                 line=legs[0].get('line', 'ML'),
-                                odds=float(legs[0].get('odds_str', '-110')),
+                                odds=total_odds,
                                 units=float(legs[0].get('units_str', '1.00')),
                                 bet_id=str(bet_serial),
                                 timestamp=datetime.now(timezone.utc),
@@ -858,20 +892,58 @@ class ParlayBetWorkflowView(View):
             except Exception as e:
                 logger.error(f"Error fetching member_role for guild {interaction.guild_id}: {e}")
 
-            # Send the image directly as an attachment
+            # Fetch capper info for display name and avatar
+            display_name = interaction.user.display_name
+            avatar_url = interaction.user.avatar.url if interaction.user.avatar else None
+            try:
+                capper_info = await self.bot.db_manager.fetch_one(
+                    "SELECT display_name, image_path FROM cappers WHERE user_id = %s AND guild_id = %s",
+                    (interaction.user.id, interaction.guild_id)
+                )
+                if capper_info:
+                    display_name = capper_info['display_name'] if capper_info['display_name'] else display_name
+                    avatar_url = capper_info['image_path'] if capper_info['image_path'] else avatar_url
+            except Exception as e:
+                logger.error(f"Error fetching capper info for user {interaction.user.id} in guild {interaction.guild_id}: {e}")
+
+            # Create or fetch webhook to set username and avatar
+            webhook = None
+            try:
+                webhooks = await post_channel.webhooks()
+                for wh in webhooks:
+                    if wh.user.id == self.bot.user.id:
+                        webhook = wh
+                        break
+                if not webhook:
+                    webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
+                logger.debug(f"Using webhook: {webhook.name} (ID: {webhook.id})")
+            except discord.Forbidden as e:
+                logger.error(f"Failed to create or fetch webhook in channel {post_channel_id}: {e}")
+                raise ValueError("Bot lacks permission to manage webhooks.")
+            except discord.HTTPException as e:
+                logger.error(f"HTTP error creating webhook for channel {post_channel_id}: {e}")
+                raise ValueError(f"Failed to create webhook: {e}")
+
+            # Send the image as an attachment via the webhook
             logger.debug(f"Sending bet slip image for bet {bet_serial} to channel {post_channel_id}")
             self.preview_image_bytes.seek(0)  # Reset the BytesIO pointer
             discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
             content = role_mention if role_mention else ""
             try:
-                sent_message = await post_channel.send(content=content, file=discord_file)
+                sent_message = await webhook.send(
+                    content=content,
+                    file=discord_file,
+                    username=display_name,
+                    avatar_url=avatar_url,
+                    wait=True
+                )
                 logger.debug(f"Bet slip image sent successfully for bet {bet_serial}, message ID: {sent_message.id}")
             except discord.Forbidden as e:
-                logger.error(f"Failed to send bet slip image to channel {post_channel_id}: {e}")
-                raise ValueError("Bot lacks permission to send messages in the channel.")
+                logger.error(f"Webhook send failed due to permissions in channel {post_channel_id}: {e}")
+                raise ValueError("Bot lacks permission to send messages via webhook.")
             except discord.HTTPException as e:
-                logger.error(f"HTTP error sending bet slip image for bet {bet_serial}: {e}")
-                raise ValueError(f"Failed to send bet slip image: {e}")
+                logger.error(f"Webhook send failed for bet {bet_serial}: {e}")
+                raise ValueError(f"Failed to send webhook message: {e}")
 
             # Track the message for reaction monitoring
             if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
