@@ -245,19 +245,41 @@ class BetDetailsModal(Modal):
             self.add_item(self.player)
 
         self.line = TextInput(label="Line", required=True, max_length=100)
+        self.odds = TextInput(
+            label="Odds (e.g., -110 or +200)",
+            required=True,
+            max_length=10,
+            placeholder="Enter odds (e.g., -110 or +200)"
+        )
         self.add_item(self.line)
+        self.add_item(self.odds)
 
     async def on_submit(self, interaction: Interaction):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual} by user {interaction.user.id}")
         line = self.line.value.strip()
+        odds_input = self.odds.value.strip()
 
-        if not line:
+        if not line or not odds_input:
             logger.warning("Modal submission failed: Missing required fields")
             await interaction.response.send_message("Please fill in all required fields.", ephemeral=True)
             return
 
+        # Validate odds input
+        try:
+            odds_val = float(odds_input)
+            if not (-10000 <= odds_val <= 10000):
+                raise ValueError("Odds must be between -10000 and +10000")
+            if -100 < odds_val < 100 and odds_val != 0:
+                raise ValueError("Odds cannot be between -99 and +99 (except 0)")
+        except ValueError as ve:
+            logger.warning(f"Invalid odds input: {odds_input}. Error: {ve}")
+            await interaction.response.send_message(
+                f"❌ Invalid odds: {ve}. Please enter a valid number (e.g., -110 or +200).", ephemeral=True
+            )
+            return
+
         self.view.bet_details['line'] = line
-        self.view.bet_details['odds_str'] = '-110'  # Default odds to -110
+        self.view.bet_details['odds_str'] = odds_input  # Store the user-provided odds
 
         if self.is_manual:
             team = self.team.value.strip()
@@ -774,20 +796,58 @@ class StraightBetWorkflowView(View):
             except Exception as e:
                 logger.error(f"Error fetching authorized_role for guild {interaction.guild_id}: {e}")
 
-            # Send the image directly as an attachment
+            # Fetch capper info for display name and avatar
+            display_name = interaction.user.display_name
+            avatar_url = interaction.user.avatar.url if interaction.user.avatar else None
+            try:
+                capper_info = await self.bot.db_manager.fetch_one(
+                    "SELECT display_name, image_path FROM cappers WHERE user_id = %s AND guild_id = %s",
+                    (interaction.user.id, interaction.guild_id)
+                )
+                if capper_info:
+                    display_name = capper_info['display_name'] if capper_info['display_name'] else display_name
+                    avatar_url = capper_info['image_path'] if capper_info['image_path'] else avatar_url
+            except Exception as e:
+                logger.error(f"Error fetching capper info for user {interaction.user.id} in guild {interaction.guild_id}: {e}")
+
+            # Create or fetch webhook to set username and avatar
+            webhook = None
+            try:
+                webhooks = await post_channel.webhooks()
+                for wh in webhooks:
+                    if wh.user.id == self.bot.user.id:
+                        webhook = wh
+                        break
+                if not webhook:
+                    webhook = await post_channel.create_webhook(name="Bet Embed Webhook")
+                logger.debug(f"Using webhook: {webhook.name} (ID: {webhook.id})")
+            except discord.Forbidden as e:
+                logger.error(f"Failed to create or fetch webhook in channel {post_channel_id}: {e}")
+                raise ValueError("Bot lacks permission to manage webhooks.")
+            except discord.HTTPException as e:
+                logger.error(f"HTTP error creating webhook for channel {post_channel_id}: {e}")
+                raise ValueError(f"Failed to create webhook: {e}")
+
+            # Send the image as an attachment via the webhook
             logger.debug(f"Sending bet slip image for bet {bet_serial} to channel {post_channel_id}")
             self.preview_image_bytes.seek(0)  # Reset the BytesIO pointer
             discord_file = File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
             content = role_mention if role_mention else ""
             try:
-                sent_message = await post_channel.send(content=content, file=discord_file)
+                sent_message = await webhook.send(
+                    content=content,
+                    file=discord_file,
+                    username=display_name,
+                    avatar_url=avatar_url,
+                    wait=True
+                )
                 logger.debug(f"Bet slip image sent successfully for bet {bet_serial}, message ID: {sent_message.id}")
             except discord.Forbidden as e:
-                logger.error(f"Failed to send bet slip image to channel {post_channel_id}: {e}")
-                raise ValueError("Bot lacks permission to send messages in the channel.")
+                logger.error(f"Webhook send failed due to permissions in channel {post_channel_id}: {e}")
+                raise ValueError("Bot lacks permission to send messages via webhook.")
             except discord.HTTPException as e:
-                logger.error(f"HTTP error sending bet slip image for bet {bet_serial}: {e}")
-                raise ValueError(f"Failed to send bet slip image: {e}")
+                logger.error(f"Webhook send failed for bet {bet_serial}: {e}")
+                raise ValueError(f"Failed to send webhook message: {e}")
 
             # Track the message for reaction monitoring
             if sent_message and hasattr(self.bot.bet_service, 'pending_reactions'):
