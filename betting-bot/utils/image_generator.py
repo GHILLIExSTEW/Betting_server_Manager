@@ -382,8 +382,9 @@ class BetSlipGenerator:
         draw_logos: bool = True
     ) -> int:
         """Draw a single leg of a bet (used for both straight and parlay bets)."""
-        home_team = leg.get('home_team', 'Unknown')
-        away_team = leg.get('away_team', 'Unknown')
+        # Handle both straight bet and parlay leg formats
+        home_team = leg.get('home_team', leg.get('team', 'Unknown'))
+        away_team = leg.get('away_team', leg.get('opponent', 'Unknown'))
         line = leg.get('line', 'ML')
         odds = float(leg.get('odds', 0))
         units = float(leg.get('units_str', '1.00'))

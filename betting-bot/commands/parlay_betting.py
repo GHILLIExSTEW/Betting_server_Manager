@@ -470,13 +470,12 @@ class ParlayBetWorkflowView(View):
                     self.stop()
                     return
 
-                leg = legs[0]
-                home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
-                away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
                 league = self.bet_details.get('league', 'NHL')
                 timestamp = datetime.now(timezone.utc)
+                game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
+                is_same_game = len(game_ids) == 1
 
-                # Prepare parlay legs with stored logos
+                # Create parlay legs with proper team names
                 parlay_legs = []
                 for leg in legs:
                     leg_dict = {
@@ -488,18 +487,23 @@ class ParlayBetWorkflowView(View):
                     }
                     parlay_legs.append(leg_dict)
 
-                # Generate preview image
+                # Use first leg's teams for the main parameters
+                first_leg = legs[0]
+                home_team = first_leg.get('team', 'Unknown')
+                away_team = first_leg.get('opponent', 'Unknown')
+
                 bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                     home_team=home_team,
                     away_team=away_team,
                     league=league,
-                    line=legs[0].get('line', 'ML'),
+                    line=first_leg.get('line', 'ML'),
                     odds=float(final_odds_modal.odds_value),
-                    units=float(legs[0].get('units_str', '1.00')),
+                    units=float(first_leg.get('units_str', '1.00')),
                     bet_id=bet_serial,
                     timestamp=timestamp,
                     bet_type="parlay",
-                    parlay_legs=parlay_legs
+                    parlay_legs=parlay_legs,
+                    is_same_game=is_same_game
                 )
 
                 # Save preview image
@@ -804,30 +808,40 @@ class ParlayBetWorkflowView(View):
 
                     # Generate preview image
                     legs = self.bet_details.get('legs', [])
-                    leg = legs[0]
-                    home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
-                    away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
+                    if not legs:
+                        await interaction.followup.send("❌ No bet legs found. Please start over.", ephemeral=True)
+                        self.stop()
+                        return
+
                     league = self.bet_details.get('league', 'NHL')
                     timestamp = datetime.now(timezone.utc)
                     game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
                     is_same_game = len(game_ids) == 1
-                    parlay_legs = [
-                        {
+
+                    # Create parlay legs with proper team names
+                    parlay_legs = []
+                    for leg in legs:
+                        leg_dict = {
                             'home_team': leg.get('team', 'Unknown'),
                             'away_team': leg.get('opponent', 'Unknown'),
                             'line': leg.get('line', 'ML'),
                             'odds': float(self.bet_details.get('total_odds_str', '-110')),
                             'units': float(leg.get('units_str', '1.00'))
-                        } for leg in legs
-                    ]
+                        }
+                        parlay_legs.append(leg_dict)
+
+                    # Use first leg's teams for the main parameters
+                    first_leg = legs[0]
+                    home_team = first_leg.get('team', 'Unknown')
+                    away_team = first_leg.get('opponent', 'Unknown')
 
                     bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                         home_team=home_team,
                         away_team=away_team,
                         league=league,
-                        line=legs[0].get('line', 'ML'),
+                        line=first_leg.get('line', 'ML'),
                         odds=float(self.bet_details.get('total_odds_str', '-110')),
-                        units=float(legs[0].get('units_str', '1.00')),
+                        units=float(first_leg.get('units_str', '1.00')),
                         bet_id=str(uuid.uuid4()),  # Temporary ID for preview
                         timestamp=timestamp,
                         bet_type="parlay",
