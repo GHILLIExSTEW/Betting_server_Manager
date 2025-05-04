@@ -200,61 +200,61 @@ class BetSlipGenerator:
             # Adjust height for parlay bets based on number of legs
             if bet_type == "parlay" and parlay_legs:
                 leg_count = len(parlay_legs)
-                base_height = 400
-                height_per_leg = 250  # Increased height per leg to accommodate both teams' logos and text
-                height = base_height + (leg_count - 1) * height_per_leg
+                base_height = 200  # Reduced base height since we're not showing league logo
+                height_per_leg = 300  # Increased height per leg for larger team logos
+                height = base_height + leg_count * height_per_leg
             else:
                 height = 400
-            width = 600
+            width = 800  # Increased width for better layout
             image = Image.new('RGB', (width, height), (40, 40, 40))
             draw = ImageDraw.Draw(image)
 
             # Load fonts
             try:
-                header_font = ImageFont.truetype(self.font_path, 24)
+                header_font = ImageFont.truetype(self.font_path, 28)  # Increased font size
                 logger.debug(f"Loaded header font: {self.font_path}")
             except Exception as e:
                 logger.error(f"Failed to load header font {self.font_path}: {e}. Using default font.")
                 header_font = ImageFont.load_default()
 
             try:
-                team_font = ImageFont.truetype(self.font_path, 18)
+                team_font = ImageFont.truetype(self.font_path, 22)  # Increased font size
                 logger.debug(f"Loaded team font: {self.font_path}")
             except Exception as e:
                 logger.error(f"Failed to load team font {self.font_path}: {e}. Using default font.")
                 team_font = ImageFont.load_default()
 
             try:
-                odds_font = ImageFont.truetype(self.font_path, 30)
+                odds_font = ImageFont.truetype(self.font_path, 34)  # Increased font size
                 logger.debug(f"Loaded odds font: {self.font_path}")
             except Exception as e:
                 logger.error(f"Failed to load odds font {self.font_path}: {e}. Using default font.")
                 odds_font = ImageFont.load_default()
 
             try:
-                small_font = ImageFont.truetype(self.font_path, 14)
+                small_font = ImageFont.truetype(self.font_path, 18)  # Increased font size
                 logger.debug(f"Loaded small font: {self.font_path}")
             except Exception as e:
                 logger.error(f"Failed to load small font {self.font_path}: {e}. Using default font.")
                 small_font = ImageFont.load_default()
 
             try:
-                units_font = ImageFont.truetype(self.bold_font_path, 14)
+                units_font = ImageFont.truetype(self.bold_font_path, 18)  # Increased font size
                 logger.debug(f"Loaded units font: {self.bold_font_path}")
             except Exception as e:
                 logger.error(f"Failed to load units font {self.bold_font_path}: {e}. Using default font.")
                 units_font = ImageFont.load_default()
 
             try:
-                emoji_font = ImageFont.truetype(self.emoji_font_path, 14)
+                emoji_font = ImageFont.truetype(self.emoji_font_path, 18)  # Increased font size
                 logger.debug(f"Successfully loaded emoji font for rendering: {self.emoji_font_path}")
             except Exception as e:
                 logger.error(f"Failed to load emoji font {self.emoji_font_path}: {e}. Falling back to regular font.")
                 emoji_font = small_font
 
             # Rounded rectangle background
-            padding = 10
-            corner_radius = 20
+            padding = 20  # Increased padding
+            corner_radius = 30  # Increased corner radius
             draw.rounded_rectangle(
                 [(padding, padding), (width - padding, height - padding)],
                 radius=corner_radius,
@@ -262,39 +262,34 @@ class BetSlipGenerator:
                 outline=None
             )
 
-            # League logo and header
-            league_logo = self._load_league_logo(league)
+            # Header
             header_y = 50
             if bet_type == "parlay":
                 leg_count = len(parlay_legs) if parlay_legs else 1
                 header_text = f"{leg_count}-Leg Parlay"
             else:
                 header_text = "Straight Bet"
-            if league_logo:
-                logo_x = (width - league_logo.width) // 2
-                image.paste(league_logo, (logo_x, 20), league_logo)
-                header_y = 60
             draw.text((width // 2, header_y), header_text, fill='white', font=header_font, anchor='mm')
 
             # Draw bet details and track the last odds y-coordinate
-            current_y = header_y + 60  # Increased spacing after header
+            current_y = header_y + 80  # Increased spacing after header
             last_odds_y = current_y
 
             if bet_type == "parlay" and parlay_legs:
                 for i, leg in enumerate(parlay_legs):
                     # Draw separator line between legs (except before the first leg)
                     if i > 0:
-                        separator_y = current_y - 20  # Adjusted separator position
-                        draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
-                        current_y = separator_y + 40  # Increased spacing after separator
+                        separator_y = current_y - 30
+                        draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=2)
+                        current_y = separator_y + 60
 
                     # Draw the leg with logos
                     last_odds_y = self._draw_leg(
                         image, draw, leg, league, width, current_y,
                         team_font, odds_font, units_font, emoji_font,
-                        draw_logos=True  # Always draw logos for parlay legs
+                        draw_logos=True
                     )
-                    current_y = last_odds_y + 40  # Increased spacing between legs
+                    current_y = last_odds_y + 60  # Increased spacing between legs
 
             else:
                 # Single leg for straight bet
@@ -308,22 +303,22 @@ class BetSlipGenerator:
                 last_odds_y = self._draw_leg(
                     image, draw, leg, league, width, current_y,
                     team_font, odds_font, units_font, emoji_font,
-                    draw_logos=True  # Always draw logos for straight bets
+                    draw_logos=True
                 )
 
             # Separator line below the odds
-            separator_y = last_odds_y + 30  # Increased spacing before final separator
-            draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
+            separator_y = last_odds_y + 40
+            draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=2)
 
             # Units text below the separator
             units_to_display = units if bet_type == "straight" else float(parlay_legs[0].get('units_str', '1.00'))
-            units_y = separator_y + 40  # Increased spacing after separator
+            units_y = separator_y + 50
             units_label = "Unit" if units_to_display == 1.0 else "Units"
             units_text = f"To Win {units_to_display:.2f} {units_label}"
             units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
             units_width = units_bbox[2] - units_bbox[0]
             lock_icon = self._load_lock_icon()
-            lock_spacing = 10
+            lock_spacing = 15  # Increased spacing
             if lock_icon:
                 lock_x_left = (width - units_width - 2 * lock_icon.width - 2 * lock_spacing) // 2
                 image.paste(lock_icon, (lock_x_left, units_y - lock_icon.height // 2), lock_icon)
@@ -356,10 +351,10 @@ class BetSlipGenerator:
                     )
 
             # Footer: Bet ID and Timestamp below units
-            footer_y = units_y + 40  # Increased spacing before footer
-            draw.text((padding + 10, footer_y), f"Bet #{bet_id}", fill=(150, 150, 150), font=small_font, anchor='lm')
+            footer_y = units_y + 50
+            draw.text((padding + 20, footer_y), f"Bet #{bet_id}", fill=(150, 150, 150), font=small_font, anchor='lm')
             timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M')
-            draw.text((width - padding - 10, footer_y), timestamp_text, fill=(150, 150, 150), font=small_font, anchor='rm')
+            draw.text((width - padding - 20, footer_y), timestamp_text, fill=(150, 150, 150), font=small_font, anchor='rm')
 
             return image
 
@@ -389,28 +384,52 @@ class BetSlipGenerator:
 
         current_y = start_y
         if draw_logos:
-            # Load and draw team logos
+            # Load and draw team logos with larger size
             home_logo = self._load_team_logo(home_team, league)
             away_logo = self._load_team_logo(away_team, league)
             logo_y = current_y
+            
+            # Save logos for future use if they don't exist
             if home_logo:
-                image.paste(home_logo, (width // 4 - 50, logo_y), home_logo)
+                self._save_team_logo(home_logo, home_team, league)
+                image.paste(home_logo, (width // 4 - 75, logo_y), home_logo)  # Adjusted position for larger logos
             if away_logo:
-                image.paste(away_logo, (3 * width // 4 - 50, logo_y), away_logo)
+                self._save_team_logo(away_logo, away_team, league)
+                image.paste(away_logo, (3 * width // 4 - 75, logo_y), away_logo)  # Adjusted position for larger logos
+            
             # Team names below logos
-            team_y = logo_y + 120
+            team_y = logo_y + 150  # Increased spacing for larger logos
             draw.text((width // 4, team_y), home_team, fill='white', font=team_font, anchor='mm')
             draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
-            current_y = team_y + 50
+            current_y = team_y + 60  # Increased spacing after team names
 
-        # Bet details - show both teams in the line text
+        # Bet details
         line_text = f"{home_team} vs {away_team}: {line}"
         draw.text((width // 2, current_y), line_text, fill='white', font=team_font, anchor='mm')
-        odds_y = current_y + 40
+        odds_y = current_y + 50  # Increased spacing before odds
         odds_text = f"{odds:+.0f}"
         draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
 
         return odds_y
+
+    def _save_team_logo(self, logo: Image.Image, team_name: str, league: str) -> None:
+        """Save team logo for future use."""
+        try:
+            league_team_dir = self._ensure_team_dir_exists(league)
+            team_name_map = {
+                "oilers": "edmonton_oilers",
+                "bruins": "boston_bruins",
+                "bengals": "cincinnati_bengals",
+                "steelers": "pittsburgh_steelers"
+            }
+            safe_team_name = team_name_map.get(team_name.lower(), team_name.lower().replace(" ", "_"))
+            logo_path = os.path.join(league_team_dir, f"{safe_team_name}.png")
+            
+            if not os.path.exists(logo_path):
+                logger.info(f"Saving team logo for {team_name} at {logo_path}")
+                logo.save(logo_path, "PNG")
+        except Exception as e:
+            logger.error(f"Error saving logo for team {team_name}: {str(e)}")
 
     def save_bet_slip(self, image: Image.Image, output_path: str) -> None:
         """Save the bet slip image to a file."""
