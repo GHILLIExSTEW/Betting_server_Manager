@@ -415,6 +415,7 @@ class FinalOddsModal(Modal):
             required=True,
             max_length=10
         )
+        self.add_item(self.odds)  # Add the odds input field to the modal
 
     async def on_submit(self, interaction: Interaction):
         try:
