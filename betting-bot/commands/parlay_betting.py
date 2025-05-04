@@ -341,8 +341,19 @@ class FinalizeButton(Button):
 
     async def callback(self, interaction: Interaction):
         logger.debug(f"Finalize button clicked by user {interaction.user.id}")
-        self.parent_view.current_step = 5  # Proceed to Units selection
-        await interaction.response.edit_message(view=self.parent_view)
+        # Show final odds modal first
+        final_odds_modal = FinalOddsModal()
+        await interaction.response.send_modal(final_odds_modal)
+        await final_odds_modal.wait()
+
+        if not final_odds_modal.odds_value:
+            return
+
+        # Update bet details with final odds
+        self.parent_view.bet_details['total_odds_str'] = final_odds_modal.odds_value
+        
+        # Proceed to units selection
+        self.parent_view.current_step = 5
         await self.parent_view.go_next(interaction)
 
 class LegDecisionView(View):
@@ -646,104 +657,78 @@ class ParlayBetWorkflowView(View):
                 )
 
     async def go_next(self, interaction: Interaction):
+        """Handle progression to the next step in the workflow."""
         if self.is_processing:
-            logger.debug(f"Skipping go_next call; already processing step {self.current_step} for user {interaction.user.id}")
             return
+
         self.is_processing = True
         try:
-            logger.debug(f"Processing go_next: current_step={self.current_step} for user {interaction.user.id}")
+            step_content = f"**Step {self.current_step + 1}**"
             self.clear_items()
-            self.current_step += 1
-            step_content = f"**Step {self.current_step}**"
-            embed_to_send = None
-            file_to_send = None
 
-            logger.debug(f"Entering step {self.current_step}")
-
-            try:
-                if self.current_step == 1:
-                    allowed_leagues = ["NBA", "NFL", "MLB", "NHL", "NCAAB", "NCAAF", "Soccer", "Tennis", "UFC/MMA"]
-                    self.add_item(LeagueSelect(self, allowed_leagues))
-                    self.add_item(CancelButton(self))
-                    step_content += ": Select League"
-                    await self.edit_message(interaction, content=step_content, view=self)
-                elif self.current_step == 2:
-                    self.add_item(LineTypeSelect(self))
-                    self.add_item(CancelButton(self))
-                    step_content += ": Select Line Type"
-                    await self.edit_message(interaction, content=step_content, view=self)
-                elif self.current_step == 3:
-                    league = self.bet_details.get('league')
-                    if not league:
-                        logger.error("No league selected for game selection")
-                        await self.edit_message(
-                            interaction,
-                            content="❌ No league selected. Please start over.",
-                            view=None
-                        )
-                        self.stop()
-                        return
-                    league_games = []
-                    if league != "Other":
-                        sport = {"NFL": "american-football", "NCAAF": "american-football", "NBA": "basketball",
-                                 "NCAAB": "basketball", "MLB": "baseball", "NHL": "hockey", "Soccer": "soccer",
-                                 "Tennis": "tennis"}.get(league)
-                        if sport and hasattr(self.bot, 'game_service'):
-                            self.games = await self.bot.game_service.get_upcoming_games(interaction.guild_id, hours=72)
-                            league_games = [g for g in self.games if str(g.get('league_id')) == league or
-                                            g.get('league_name', '').lower() == league.lower()]
-                    if league_games:
-                        self.add_item(GameSelect(self, league_games))
-                        self.add_item(CancelButton(self))
-                        step_content += f": Select Game for {league} (or Other)"
-                        logger.debug(f"Showing game selection for {league}")
-                        await self.edit_message(interaction, content=step_content, view=self)
-                    else:
-                        logger.warning(f"No upcoming games found for league {league}. Prompting for manual entry.")
-                        self.add_item(ManualEntryButton(self))
-                        self.add_item(CancelButton(self))
-                        step_content = f"No games scheduled for {league}. Would you like to manually enter game data?"
-                        await self.edit_message(interaction, content=step_content, view=self)
-                elif self.current_step == 4:
-                    line_type = self.bet_details.get('line_type')
-                    game_id = self.bet_details.get('game_id')
-                    is_manual = game_id == "Other"
-                    leg_number = len(self.bet_details.get('legs', [])) + 1
-                    if line_type == "player_prop" and not is_manual and hasattr(self.bot, 'game_service'):
-                        players_data = await self.bot.game_service.get_game_players(game_id)
-                        home_players = players_data.get('home_players', [])
-                        away_players = players_data.get('away_players', [])
-                        home_team = self.bet_details.get('home_team_name', 'Home Team')
-                        away_team = self.bet_details.get('away_team_name', 'Away Team')
-                        if home_players or away_players:
-                            self.add_item(HomePlayerSelect(self, home_players, home_team))
-                            self.add_item(AwayPlayerSelect(self, away_players, away_team))
+            if self.current_step == 0:
+                # League selection
+                leagues = ["NHL", "NFL", "NBA", "MLB", "NCAAB", "NCAAF", "UFC", "Soccer"]
+                self.add_item(LeagueSelect(self, leagues))
+                self.add_item(CancelButton(self))
+                step_content += ": Select League"
+                await self.edit_message(interaction, content=step_content, view=self)
+            elif self.current_step == 1:
+                # Line type selection
+                self.add_item(LineTypeSelect(self))
+                self.add_item(CancelButton(self))
+                step_content += ": Select Line Type"
+                await self.edit_message(interaction, content=step_content, view=self)
+            elif self.current_step == 2:
+                # Game selection
+                if hasattr(self.bot, 'game_service'):
+                    try:
+                        league = self.bet_details.get('league', 'NHL')
+                        self.games = await self.bot.game_service.get_upcoming_games(league)
+                        if self.games:
+                            self.add_item(GameSelect(self, self.games))
+                            self.add_item(ManualEntryButton(self))
                             self.add_item(CancelButton(self))
-                            step_content += f": Select a Player from {home_team} or {away_team}"
+                            step_content += ": Select Game or Enter Manually"
                             await self.edit_message(interaction, content=step_content, view=self)
                         else:
-                            logger.warning(f"No players available for game {game_id}. Proceeding to manual player entry.")
-                            modal = BetDetailsModal(line_type=line_type, is_manual=False, leg_number=leg_number)
-                            modal.view = self
-                            try:
-                                if interaction.response.is_done():
-                                    await interaction.followup.send(
-                                        "❌ Please restart the /bet command to enter details.",
-                                        ephemeral=True
-                                    )
-                                    self.stop()
-                                    return
-                                await interaction.response.send_modal(modal)
-                            except discord.HTTPException as e:
-                                logger.error(f"Failed to send BetDetailsModal: {e}")
-                                await interaction.followup.send(
-                                    "❌ Failed to send bet details modal. Please try again.",
-                                    ephemeral=True
-                                )
-                                self.stop()
-                            return
+                            logger.warning(f"No upcoming games found for league {league}. Prompting for manual entry.")
+                            self.add_item(ManualEntryButton(self))
+                            self.add_item(CancelButton(self))
+                            step_content = f"No games scheduled for {league}. Would you like to manually enter game data?"
+                            await self.edit_message(interaction, content=step_content, view=self)
+                    except Exception as e:
+                        logger.error(f"Error fetching games: {e}")
+                        self.add_item(ManualEntryButton(self))
+                        self.add_item(CancelButton(self))
+                        step_content = "Error fetching games. Would you like to manually enter game data?"
+                        await self.edit_message(interaction, content=step_content, view=self)
+                else:
+                    self.add_item(ManualEntryButton(self))
+                    self.add_item(CancelButton(self))
+                    step_content = "Game service not available. Please enter game details manually."
+                    await self.edit_message(interaction, content=step_content, view=self)
+            elif self.current_step == 3:
+                # Bet details entry
+                line_type = self.bet_details.get('line_type')
+                game_id = self.bet_details.get('game_id')
+                is_manual = game_id == "Other"
+                leg_number = len(self.bet_details.get('legs', [])) + 1
+                if line_type == "player_prop" and not is_manual and hasattr(self.bot, 'game_service'):
+                    players_data = await self.bot.game_service.get_game_players(game_id)
+                    home_players = players_data.get('home_players', [])
+                    away_players = players_data.get('away_players', [])
+                    home_team = self.bet_details.get('home_team_name', 'Home Team')
+                    away_team = self.bet_details.get('away_team_name', 'Away Team')
+                    if home_players or away_players:
+                        self.add_item(HomePlayerSelect(self, home_players, home_team))
+                        self.add_item(AwayPlayerSelect(self, away_players, away_team))
+                        self.add_item(CancelButton(self))
+                        step_content += f": Select a Player from {home_team} or {away_team}"
+                        await self.edit_message(interaction, content=step_content, view=self)
                     else:
-                        modal = BetDetailsModal(line_type=line_type, is_manual=is_manual, leg_number=leg_number)
+                        logger.warning(f"No players available for game {game_id}. Proceeding to manual player entry.")
+                        modal = BetDetailsModal(line_type=line_type, is_manual=False, leg_number=leg_number)
                         modal.view = self
                         try:
                             if interaction.response.is_done():
@@ -762,48 +747,48 @@ class ParlayBetWorkflowView(View):
                             )
                             self.stop()
                         return
-                elif self.current_step == 5:
-                    leg_count = len(self.bet_details.get('legs', []))
-                    step_content = f"Leg {leg_count} added successfully. Add another leg or finalize the parlay?"
-                    self.add_item(AddLegButton(self))
-                    self.add_item(FinalizeButton(self))
-                    self.add_item(CancelButton(self))
-                    await self.edit_message(interaction, content=step_content, view=self)
-                elif self.current_step == 6:
-                    step_content = "Select units for the parlay"
-                    view = UnitsView(self)
-                    await self.edit_message(interaction, content=step_content, view=view)
-                elif self.current_step == 7:
-                    channels = []
+                else:
+                    modal = BetDetailsModal(line_type=line_type, is_manual=is_manual, leg_number=leg_number)
+                    modal.view = self
                     try:
-                        if hasattr(self.bot, 'db_manager'):
-                            # Query only embed_channel_1 to avoid missing column error
-                            settings = await self.bot.db_manager.fetch_one(
-                                "SELECT embed_channel_1 FROM guild_settings WHERE guild_id = %s",
-                                (interaction.guild_id,)
+                        if interaction.response.is_done():
+                            await interaction.followup.send(
+                                "❌ Please restart the /bet command to enter details.",
+                                ephemeral=True
                             )
-                            if settings and settings.get('embed_channel_1'):
-                                channel = interaction.guild.get_channel(int(settings['embed_channel_1']))
-                                if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
-                                    channels.append(channel)
-                                    logger.debug(f"Found embed_channel_1: {channel.id} ({channel.name})")
-                        if not channels:
-                            channels = sorted(
-                                [ch for ch in interaction.guild.text_channels
-                                 if ch.permissions_for(interaction.user).send_messages and
-                                 ch.permissions_for(interaction.guild.me).send_messages],
-                                key=lambda c: c.position
-                            )
-                            logger.debug(f"Fallback to guild text channels: {[ch.name for ch in channels]}")
-                    except Exception as e:
-                        logger.error(f"Failed to fetch channels: {e}", exc_info=True)
-                        await self.edit_message(
-                            interaction,
-                            content="❌ Failed to fetch channels. Please try again.",
-                            view=None
+                            self.stop()
+                            return
+                        await interaction.response.send_modal(modal)
+                    except discord.HTTPException as e:
+                        logger.error(f"Failed to send BetDetailsModal: {e}")
+                        await interaction.followup.send(
+                            "❌ Failed to send bet details modal. Please try again.",
+                            ephemeral=True
                         )
                         self.stop()
-                        return
+                    return
+            elif self.current_step == 4:
+                # After bet details are entered
+                leg_count = len(self.bet_details.get('legs', []))
+                step_content = f"Leg {leg_count} added successfully. Add another leg or finalize the parlay?"
+                self.add_item(AddLegButton(self))
+                self.add_item(FinalizeButton(self))
+                self.add_item(CancelButton(self))
+                await self.edit_message(interaction, content=step_content, view=self)
+            elif self.current_step == 5:
+                # Units selection
+                step_content = "Select units for the parlay"
+                view = UnitsView(self)
+                await self.edit_message(interaction, content=step_content, view=view)
+            elif self.current_step == 6:
+                # Generate preview and show channel selection
+                try:
+                    # Get available channels
+                    channels = []
+                    if interaction.guild:
+                        for channel in interaction.guild.text_channels:
+                            if channel.permissions_for(interaction.guild.me).send_messages:
+                                channels.append(channel)
 
                     if not channels:
                         logger.error("No writable channels found")
@@ -815,36 +800,8 @@ class ParlayBetWorkflowView(View):
                         self.stop()
                         return
 
+                    # Generate preview image
                     legs = self.bet_details.get('legs', [])
-                    try:
-                        bet_serial = await self.bot.bet_service.create_parlay_bet(
-                            guild_id=interaction.guild_id,
-                            user_id=interaction.user.id,
-                            legs=[
-                                {
-                                    'game_id': self.bet_details.get('game_id') if self.bet_details.get('game_id') != 'Other' else None,
-                                    'bet_type': "player_prop" if leg.get('player') else "game_line",
-                                    'team': leg.get('team', leg.get('line')),
-                                    'opponent': leg.get('opponent'),
-                                    'line': leg.get('line'),
-                                    'units': float(leg.get('units_str', '1.00')),
-                                    'odds': float(leg.get('odds_str', '-110'))
-                                } for leg in legs
-                            ],
-                            channel_id=None,
-                            league=self.bet_details.get('league', 'NHL')
-                        )
-                        self.bet_details['bet_serial'] = bet_serial
-                    except Exception as e:
-                        logger.error(f"Failed to create parlay bet: {e}", exc_info=True)
-                        await self.edit_message(
-                            interaction,
-                            content="❌ Failed to create bet. Please try again.",
-                            view=None
-                        )
-                        self.stop()
-                        return
-
                     leg = legs[0]
                     home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
                     away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
@@ -857,126 +814,56 @@ class ParlayBetWorkflowView(View):
                             'home_team': leg.get('team', 'Unknown'),
                             'away_team': leg.get('opponent', 'Unknown'),
                             'line': leg.get('line', 'ML'),
-                            'odds': float(leg.get('odds_str', '-110')),
+                            'odds': float(self.bet_details.get('total_odds_str', '-110')),
                             'units': float(leg.get('units_str', '1.00'))
                         } for leg in legs
                     ]
-                    try:
-                        # Use the total odds if provided, otherwise default to the first leg's odds
-                        total_odds = float(self.bet_details.get('total_odds_str', leg.get('odds_str', '-110')))
-                        bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                            home_team=home_team,
-                            away_team=away_team,
-                            league=league,
-                            line=legs[0].get('line', 'ML'),
-                            odds=total_odds,
-                            units=float(legs[0].get('units_str', '1.00')),
-                            bet_id=str(bet_serial),
-                            timestamp=timestamp,
-                            bet_type="parlay",
-                            parlay_legs=parlay_legs,
-                            is_same_game=is_same_game
-                        )
 
-                        self.preview_image_bytes = io.BytesIO()
-                        bet_slip_image.save(self.preview_image_bytes, format='PNG')
-                        self.preview_image_bytes.seek(0)
-                        file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
-                        self.preview_image_bytes.seek(0)
-                    except Exception as e:
-                        logger.error(f"Failed to generate bet slip image: {e}", exc_info=True)
-                        await self.edit_message(
-                            interaction,
-                            content="❌ Failed to generate bet slip image. Please try again.",
-                            view=None
-                        )
-                        self.stop()
-                        return
+                    bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                        home_team=home_team,
+                        away_team=away_team,
+                        league=league,
+                        line=legs[0].get('line', 'ML'),
+                        odds=float(self.bet_details.get('total_odds_str', '-110')),
+                        units=float(legs[0].get('units_str', '1.00')),
+                        bet_id=str(uuid.uuid4()),  # Temporary ID for preview
+                        timestamp=timestamp,
+                        bet_type="parlay",
+                        parlay_legs=parlay_legs,
+                        is_same_game=is_same_game
+                    )
 
+                    self.preview_image_bytes = io.BytesIO()
+                    bet_slip_image.save(self.preview_image_bytes, format='PNG')
+                    self.preview_image_bytes.seek(0)
+                    file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
+                    self.preview_image_bytes.seek(0)
+
+                    # Show preview with channel selection
+                    self.clear_items()
                     self.add_item(ChannelSelect(self, channels))
                     self.add_item(CancelButton(self))
-                    step_content = "Select Channel to Post Bet"
+                    step_content = "Please review your bet and select a channel to post it:"
                     await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
-                elif self.current_step == 8:
-                    try:
-                        legs = self.bet_details.get('legs', [])
-                        if len(legs) < 2:
-                            raise ValueError("Parlay bets require at least two legs")
-                        for leg in legs:
-                            odds_str = leg.get('odds_str', '').replace('+', '').strip()
-                            units_str = leg.get('units_str', '').lower().replace('u', '').strip()
-                            if not odds_str or not units_str:
-                                raise ValueError("Odds and units cannot be empty")
-                            odds_val = int(odds_str)
-                            if not (-10000 <= odds_val <= 10000):
-                                raise ValueError("Odds must be between -10000 and +10000")
-                            if -100 < odds_val < 100:
-                                raise ValueError("Odds cannot be between -99 and +99")
-                            leg['odds'] = float(odds_val)
-                            units_val = float(units_str)
-                            if not (0.1 <= units_val <= 10.0):
-                                raise ValueError("Units must be between 0.1 and 10.0")
-                            leg['units'] = units_val
 
-                        if self.preview_image_bytes:
-                            file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
-                            self.preview_image_bytes.seek(0)
-                        else:
-                            legs = self.bet_details.get('legs', [])
-                            leg = legs[0]
-                            home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
-                            away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
-                            bet_serial = self.bet_details.get('bet_serial', 'Unknown')
-                            game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
-                            is_same_game = len(game_ids) == 1
-                            parlay_legs = [
-                                {
-                                    'home_team': leg.get('team', 'Unknown'),
-                                    'away_team': leg.get('opponent', 'Unknown'),
-                                    'line': leg.get('line', 'ML'),
-                                    'odds': float(leg.get('odds_str', '-110')),
-                                    'units': float(leg.get('units_str', '1.00'))
-                                } for leg in legs
-                            ]
-                            total_odds = float(self.bet_details.get('total_odds_str', leg.get('odds_str', '-110')))
-                            bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                                home_team=home_team,
-                                away_team=away_team,
-                                league=self.bet_details.get('league', 'NHL'),
-                                line=legs[0].get('line', 'ML'),
-                                odds=total_odds,
-                                units=float(legs[0].get('units_str', '1.00')),
-                                bet_id=str(bet_serial),
-                                timestamp=datetime.now(timezone.utc),
-                                bet_type="parlay",
-                                parlay_legs=parlay_legs,
-                                is_same_game=is_same_game
-                            )
-                            self.preview_image_bytes = io.BytesIO()
-                            bet_slip_image.save(self.preview_image_bytes, format='PNG')
-                            self.preview_image_bytes.seek(0)
-                            file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
-                            self.preview_image_bytes.seek(0)
-
-                        self.add_item(ConfirmButton(self))
-                        self.add_item(CancelButton(self))
-                        step_content = "Please Confirm Your Parlay Bet"
-                        await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
-                    except ValueError as ve:
-                        logger.error(f"Bet input validation failed: {ve}")
-                        await self.edit_message(interaction, content=f"❌ Error: {ve} Please start over.", view=None)
-                        self.stop()
-                        return
-                else:
-                    logger.error(f"ParlayBetWorkflowView reached unexpected step: {self.current_step}")
-                    await self.edit_message(interaction, content="❌ Invalid step reached. Please start over.", view=None)
+                except Exception as e:
+                    logger.error(f"Error generating preview: {e}", exc_info=True)
+                    await self.edit_message(
+                        interaction,
+                        content="❌ Error generating bet preview. Please try again.",
+                        view=None
+                    )
                     self.stop()
-                    return
-
-            except Exception as e:
-                logger.exception(f"Error in parlay bet workflow step {self.current_step}: {e}")
-                await self.edit_message(interaction, content="❌ An unexpected error occurred.", view=None)
+            else:
+                logger.error(f"ParlayBetWorkflowView reached unexpected step: {self.current_step}")
+                await self.edit_message(interaction, content="❌ Invalid step reached. Please start over.", view=None)
                 self.stop()
+                return
+
+        except Exception as e:
+            logger.exception(f"Error in parlay bet workflow step {self.current_step}: {e}")
+            await self.edit_message(interaction, content="❌ An unexpected error occurred.", view=None)
+            self.stop()
 
         finally:
             self.is_processing = False
