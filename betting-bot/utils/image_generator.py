@@ -387,7 +387,7 @@ class BetSlipGenerator:
         away_team = leg.get('away_team', leg.get('opponent', 'Unknown'))
         line = leg.get('line', 'ML')
         odds = float(leg.get('odds', 0))
-        units = float(leg.get('units_str', '1.00'))
+        units = float(leg.get('units', 1.00))
 
         current_y = start_y
         if draw_logos:
@@ -410,12 +410,57 @@ class BetSlipGenerator:
             draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
             current_y = team_y + 60
 
-        # Bet details with line only (no odds)
+        # Bet details with line
         details_y = current_y
         line_text = f"{home_team} vs {away_team}: {line}"
         draw.text((width // 2, details_y), line_text, fill='white', font=team_font, anchor='mm')
         
-        return details_y + 40  # Return position after line details
+        # Draw odds below line
+        odds_y = details_y + 40
+        odds_text = f"{odds:+.0f}"
+        draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
+
+        # Draw units with lock symbols
+        units_y = odds_y + 40
+        units_label = "Unit" if units == 1.0 else "Units"
+        units_text = f"To Win {units:.2f} {units_label}"
+        units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
+        units_width = units_bbox[2] - units_bbox[0]
+        lock_icon = self._load_lock_icon()
+        lock_spacing = 15
+
+        if lock_icon:
+            lock_x_left = (width - units_width - 2 * lock_icon.width - 2 * lock_spacing) // 2
+            image.paste(lock_icon, (lock_x_left, units_y - lock_icon.height // 2), lock_icon)
+            lock_x_right = lock_x_left + units_width + lock_icon.width + 2 * lock_spacing
+            image.paste(lock_icon, (lock_x_right, units_y - lock_icon.height // 2), lock_icon)
+            draw.text(
+                (lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y),
+                units_text,
+                fill=(255, 215, 0),
+                font=units_font,
+                anchor='mm'
+            )
+        else:
+            try:
+                draw.text(
+                    (width // 2, units_y),
+                    f"🔒 {units_text} 🔒",
+                    fill=(255, 215, 0),
+                    font=emoji_font,
+                    anchor='mm'
+                )
+            except Exception as e:
+                logger.error(f"Failed to render emoji with emoji font: {str(e)}. Falling back to text-based lock symbol.")
+                draw.text(
+                    (width // 2, units_y),
+                    f"[L] {units_text} [L]",
+                    fill=(255, 215, 0),
+                    font=units_font,
+                    anchor='mm'
+                )
+        
+        return units_y + 40  # Return position after units
 
     def _save_team_logo(self, logo: Image.Image, team_name: str, league: str) -> None:
         """Save team logo for future use."""
