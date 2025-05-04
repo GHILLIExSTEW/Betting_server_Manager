@@ -201,7 +201,7 @@ class BetSlipGenerator:
             if bet_type == "parlay" and parlay_legs:
                 leg_count = len(parlay_legs)
                 base_height = 400
-                height_per_leg = 200  # Increased height per leg to accommodate logos and separators
+                height_per_leg = 250  # Increased height per leg to accommodate both teams' logos and text
                 height = base_height + (leg_count - 1) * height_per_leg
             else:
                 height = 400
@@ -277,16 +277,16 @@ class BetSlipGenerator:
             draw.text((width // 2, header_y), header_text, fill='white', font=header_font, anchor='mm')
 
             # Draw bet details and track the last odds y-coordinate
-            current_y = header_y + 40
+            current_y = header_y + 60  # Increased spacing after header
             last_odds_y = current_y
 
             if bet_type == "parlay" and parlay_legs:
                 for i, leg in enumerate(parlay_legs):
                     # Draw separator line between legs (except before the first leg)
                     if i > 0:
-                        separator_y = current_y - 10
+                        separator_y = current_y - 20  # Adjusted separator position
                         draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
-                        current_y = separator_y + 20
+                        current_y = separator_y + 40  # Increased spacing after separator
 
                     # Draw the leg with logos
                     last_odds_y = self._draw_leg(
@@ -294,7 +294,8 @@ class BetSlipGenerator:
                         team_font, odds_font, units_font, emoji_font,
                         draw_logos=True  # Always draw logos for parlay legs
                     )
-                    current_y = last_odds_y + 20
+                    current_y = last_odds_y + 40  # Increased spacing between legs
+
             else:
                 # Single leg for straight bet
                 leg = {
@@ -311,12 +312,12 @@ class BetSlipGenerator:
                 )
 
             # Separator line below the odds
-            separator_y = last_odds_y + 20
+            separator_y = last_odds_y + 30  # Increased spacing before final separator
             draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
 
             # Units text below the separator
             units_to_display = units if bet_type == "straight" else float(parlay_legs[0].get('units_str', '1.00'))
-            units_y = separator_y + 30
+            units_y = separator_y + 40  # Increased spacing after separator
             units_label = "Unit" if units_to_display == 1.0 else "Units"
             units_text = f"To Win {units_to_display:.2f} {units_label}"
             units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
@@ -355,7 +356,7 @@ class BetSlipGenerator:
                     )
 
             # Footer: Bet ID and Timestamp below units
-            footer_y = units_y + 30
+            footer_y = units_y + 40  # Increased spacing before footer
             draw.text((padding + 10, footer_y), f"Bet #{bet_id}", fill=(150, 150, 150), font=small_font, anchor='lm')
             timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M')
             draw.text((width - padding - 10, footer_y), timestamp_text, fill=(150, 150, 150), font=small_font, anchor='rm')
@@ -402,8 +403,8 @@ class BetSlipGenerator:
             draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
             current_y = team_y + 50
 
-        # Bet details
-        line_text = f"{home_team}: {line}"
+        # Bet details - show both teams in the line text
+        line_text = f"{home_team} vs {away_team}: {line}"
         draw.text((width // 2, current_y), line_text, fill='white', font=team_font, anchor='mm')
         odds_y = current_y + 40
         odds_text = f"{odds:+.0f}"
