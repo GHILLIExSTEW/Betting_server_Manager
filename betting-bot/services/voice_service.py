@@ -154,7 +154,7 @@ class VoiceService:
             now = datetime.now(timezone.utc)
             logger.debug(f"Fetching monthly total for guild {guild_id} - Year: {now.year}, Month: {now.month}")
             result = await self.db.fetchval("""
-                SELECT COALESCE(SUM(result_value), 0.0)
+                SELECT COALESCE(SUM(monthly_result_value), 0.0)
                 FROM unit_records
                 WHERE guild_id = %s AND year = %s AND month = %s
                 """,
@@ -173,7 +173,7 @@ class VoiceService:
             now = datetime.now(timezone.utc)
             logger.debug(f"Fetching yearly total for guild {guild_id} - Year: {now.year}")
             result = await self.db.fetchval("""
-                SELECT COALESCE(SUM(result_value), 0.0)
+                SELECT COALESCE(SUM(total_result_value), 0.0)
                 FROM unit_records
                 WHERE guild_id = %s AND year = %s
                 """,

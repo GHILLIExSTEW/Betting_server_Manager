@@ -176,7 +176,7 @@ class VoiceChannelUpdater:
                     await db.execute(
                         """
                         UPDATE unit_records
-                        SET units = 0
+                        SET monthly_result_value = 0
                         WHERE guild_id = ?
                         """,
                         (guild_id,)
@@ -227,7 +227,7 @@ class VoiceChannelUpdater:
                     await db.execute(
                         """
                         UPDATE unit_records
-                        SET total = 0
+                        SET total_result_value = 0
                         WHERE guild_id = ?
                         """,
                         (guild_id,)
