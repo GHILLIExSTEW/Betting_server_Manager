@@ -201,7 +201,7 @@ class BetSlipGenerator:
             if bet_type == "parlay" and parlay_legs:
                 leg_count = len(parlay_legs)
                 base_height = 400
-                height_per_leg = 150 if not is_same_game else 100  # Less height for same-game parlay (no logos)
+                height_per_leg = 200  # Increased height per leg to accommodate logos and separators
                 height = base_height + (leg_count - 1) * height_per_leg
             else:
                 height = 400
@@ -267,51 +267,34 @@ class BetSlipGenerator:
             header_y = 50
             if bet_type == "parlay":
                 leg_count = len(parlay_legs) if parlay_legs else 1
-                header_text = f"{leg_count}-Leg Parlay"  # Removed league from heading
+                header_text = f"{leg_count}-Leg Parlay"
             else:
-                header_text = "Straight Bet"  # Removed league from heading
+                header_text = "Straight Bet"
             if league_logo:
                 logo_x = (width - league_logo.width) // 2
                 image.paste(league_logo, (logo_x, 20), league_logo)
                 header_y = 60
             draw.text((width // 2, header_y), header_text, fill='white', font=header_font, anchor='mm')
 
-            # Draw team logos for same-game parlay or straight bet
-            current_y = header_y + 40
-            if bet_type == "parlay" and is_same_game:
-                home_logo = self._load_team_logo(home_team, league)
-                away_logo = self._load_team_logo(away_team, league)
-                logo_y = current_y
-                if home_logo:
-                    image.paste(home_logo, (width // 4 - 50, logo_y), home_logo)
-                if away_logo:
-                    image.paste(away_logo, (3 * width // 4 - 50, logo_y), away_logo)
-                team_y = logo_y + 120
-                draw.text((width // 4, team_y), home_team, fill='white', font=team_font, anchor='mm')
-                draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
-                current_y = team_y + 50
-            elif bet_type == "straight":
-                home_logo = self._load_team_logo(home_team, league)
-                away_logo = self._load_team_logo(away_team, league)
-                logo_y = current_y
-                if home_logo:
-                    image.paste(home_logo, (width // 4 - 50, logo_y), home_logo)
-                if away_logo:
-                    image.paste(away_logo, (3 * width // 4 - 50, logo_y), away_logo)
-                team_y = logo_y + 120
-                draw.text((width // 4, team_y), home_team, fill='white', font=team_font, anchor='mm')
-                draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
-                current_y = team_y + 50
-
             # Draw bet details and track the last odds y-coordinate
+            current_y = header_y + 40
             last_odds_y = current_y
+
             if bet_type == "parlay" and parlay_legs:
-                for leg in parlay_legs:
+                for i, leg in enumerate(parlay_legs):
+                    # Draw separator line between legs (except before the first leg)
+                    if i > 0:
+                        separator_y = current_y - 10
+                        draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
+                        current_y = separator_y + 20
+
+                    # Draw the leg with logos
                     last_odds_y = self._draw_leg(
-                        image, draw, leg, league, width, last_odds_y,
+                        image, draw, leg, league, width, current_y,
                         team_font, odds_font, units_font, emoji_font,
-                        draw_logos=not is_same_game
+                        draw_logos=True  # Always draw logos for parlay legs
                     )
+                    current_y = last_odds_y + 20
             else:
                 # Single leg for straight bet
                 leg = {
@@ -322,18 +305,18 @@ class BetSlipGenerator:
                     'units': units
                 }
                 last_odds_y = self._draw_leg(
-                    image, draw, leg, league, width, last_odds_y,
+                    image, draw, leg, league, width, current_y,
                     team_font, odds_font, units_font, emoji_font,
-                    draw_logos=False  # Logos already drawn above
+                    draw_logos=True  # Always draw logos for straight bets
                 )
 
             # Separator line below the odds
-            separator_y = last_odds_y + 20  # 20 pixels below the odds text
+            separator_y = last_odds_y + 20
             draw.line([(padding + 20, separator_y), (width - padding - 20, separator_y)], fill='white', width=1)
 
-            # Units text below the separator (use the units from the first leg for parlay)
+            # Units text below the separator
             units_to_display = units if bet_type == "straight" else float(parlay_legs[0].get('units_str', '1.00'))
-            units_y = separator_y + 30  # 30 pixels below the separator
+            units_y = separator_y + 30
             units_label = "Unit" if units_to_display == 1.0 else "Units"
             units_text = f"To Win {units_to_display:.2f} {units_label}"
             units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
@@ -372,7 +355,7 @@ class BetSlipGenerator:
                     )
 
             # Footer: Bet ID and Timestamp below units
-            footer_y = units_y + 30  # 30 pixels below the units text
+            footer_y = units_y + 30
             draw.text((padding + 10, footer_y), f"Bet #{bet_id}", fill=(150, 150, 150), font=small_font, anchor='lm')
             timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M')
             draw.text((width - padding - 10, footer_y), timestamp_text, fill=(150, 150, 150), font=small_font, anchor='rm')
@@ -426,7 +409,6 @@ class BetSlipGenerator:
         odds_text = f"{odds:+.0f}"
         draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
 
-        # Return the y-coordinate after the odds (separator, units, and footer drawn in generate_bet_slip)
         return odds_y
 
     def save_bet_slip(self, image: Image.Image, output_path: str) -> None:
