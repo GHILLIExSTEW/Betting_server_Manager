@@ -117,8 +117,8 @@ class RoleSelect(discord.ui.Select):
             await interaction.followup.send("Error proceeding to next step.", ephemeral=True)
 
 
-class ServerSettingsView(discord.ui.View):
-    """View to guide through server setup steps."""
+class GuildSettingsView(discord.ui.View):
+    """View to guide through guild setup steps."""
     def __init__(self, bot: commands.Bot, interaction: discord.Interaction):
         super().__init__(timeout=300) # 5 minute timeout
         self.bot = bot
@@ -132,11 +132,19 @@ class ServerSettingsView(discord.ui.View):
 
         # Define the steps for setup
         self.steps = [
-            ("Select Embed Channel", "embed_channel_1", self.text_channels, ChannelSelect),
-            ("Select Command Channel", "command_channel_1", self.text_channels, ChannelSelect),
+            ("Select Embed Channel 1", "embed_channel_1", self.text_channels, ChannelSelect),
+            ("Select Embed Channel 2", "embed_channel_2", self.text_channels, ChannelSelect),
+            ("Select Command Channel 1", "command_channel_1", self.text_channels, ChannelSelect),
+            ("Select Command Channel 2", "command_channel_2", self.text_channels, ChannelSelect),
             ("Select Admin Channel", "admin_channel_1", self.text_channels, ChannelSelect),
             ("Select Admin Role", "admin_role", self.roles, RoleSelect),
             ("Select Authorized Role (Capper Role)", "authorized_role", self.roles, RoleSelect),
+            ("Select Member Role", "member_role", self.roles, RoleSelect),
+            ("Set Daily Report Time (HH:MM)", "daily_report_time", None, None),  # This will need a custom input
+            ("Set Bot Name Mask", "bot_name_mask", None, None),  # This will need a custom input
+            ("Set Bot Image Mask", "bot_image_mask", None, None),  # This will need a custom input
+            ("Set Guild Default Image", "guild_default_image", None, None),  # This will need a custom input
+            ("Set Default Parlay Thumbnail", "default_parlay_thumbnail", None, None)  # This will need a custom input
         ]
 
     async def start_selection(self):
@@ -146,102 +154,88 @@ class ServerSettingsView(discord.ui.View):
 
     async def process_next_selection(self, interaction: discord.Interaction, initial: bool = False):
         """Moves to the next selection step or saves settings."""
+        if not initial:
+            # Store the selected value
+            if isinstance(interaction.data, dict) and 'values' in interaction.data:
+                selected_value = interaction.data['values'][0]
+                current_step_name, current_step_key, _, _ = self.steps[self.current_step]
+                self.settings[current_step_key] = selected_value
+                logger.info(f"Selected {current_step_name}: {selected_value}")
+
+        # Move to next step
+        self.current_step += 1
+
         if self.current_step < len(self.steps):
-            title, setting_key, items, SelectClass = self.steps[self.current_step]
-
-            # Create the select component for the current step
-            select_component = SelectClass(items, title, setting_key)
-
-            # Update the view with the new select component
-            self.clear_items()
-            self.add_item(select_component)
-
-            message_content = f"**Step {self.current_step + 1}/{len(self.steps)}: {title}**"
+            # Show next step
+            step_name, step_key, options, view_class = self.steps[self.current_step]
+            
+            if view_class is None:
+                # Handle text input steps
+                modal = TextInputModal(step_name, step_key)
+                await interaction.response.send_modal(modal)
+            else:
+                # Handle select menu steps
+                view = view_class(options, self.process_next_selection)
+                await interaction.edit_original_response(
+                    content=f"Please select the {step_name}:",
+                    view=view
+                )
+        else:
+            # All steps complete, save settings
+            await interaction.edit_original_response(
+                content="Saving guild settings...",
+                view=None
+            )
 
             try:
-                # Edit the original interaction message
-                if initial:
-                     # Need to check if the initial response was ephemeral and already sent
-                     # This approach assumes the initial response was deferred or needs editing
-                     if not interaction.response.is_done():
-                          # This should typically not happen if the command deferred first
-                          await interaction.response.edit_message(content=message_content, view=self)
-                     else:
-                          await interaction.edit_original_response(content=message_content, view=self)
-                else:
-                    # Edit the message the *previous* selection was attached to
-                    await interaction.edit_original_response(content=message_content, view=self)
+                # Ensure assets/logos/guild_id exists
+                base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                guild_logos_dir = os.path.join(base_dir, 'assets', 'logos', str(interaction.guild.id))
+                os.makedirs(guild_logos_dir, exist_ok=True)
+                logger.info(f"Ensured guild logos directory exists: {guild_logos_dir}")
 
-                self.current_step += 1
+                # Save settings using admin service (accessed via bot)
+                if not hasattr(self.bot, 'admin_service'):
+                    raise AdminServiceError("Admin service not found on bot instance.")
 
-            except discord.NotFound:
-                 logger.warning(f"Original interaction message for ServerSettingsView (Guild: {self.guild.id}) not found. Stopping setup.")
-                 self.stop()
+                # Convert selected IDs from string to int before saving
+                final_settings = {}
+                for k, v in self.settings.items():
+                    if v and v != "none":
+                        if k in ['embed_channel_1', 'embed_channel_2', 'command_channel_1', 'command_channel_2', 
+                               'admin_channel_1', 'admin_role', 'authorized_role', 'member_role',
+                               'voice_channel_id', 'yearly_channel_id']:
+                            final_settings[k] = int(v)
+                        else:
+                            final_settings[k] = v
+
+                await self.bot.admin_service.setup_guild(interaction.guild_id, final_settings)
+
+                await interaction.edit_original_response(
+                    content="✅ Guild setup completed successfully!",
+                    view=None # Remove view
+                )
+            except AdminServiceError as ase:
+                logger.error(f"AdminServiceError saving guild settings for guild {interaction.guild_id}: {ase}")
+                await interaction.edit_original_response(content=f"❌ Error saving settings: {ase}", view=None)
+            except discord.HTTPException as hte:
+                logger.error(f"Discord API error during final setup message edit for guild {interaction.guild_id}: {hte}")
             except Exception as e:
-                 logger.error(f"Error editing message in ServerSettingsView: {e}")
-                 # Try sending a followup error if editing fails
-                 try:
-                     await interaction.followup.send("Error updating setup step.", ephemeral=True)
-                 except Exception: # Ignore if followup also fails
-                     pass
-                 self.stop()
-
-        else:
-            # All steps completed, save settings
-            await self.save_settings(interaction)
-
-    async def save_settings(self, interaction: discord.Interaction):
-        """Saves the collected settings and completes the setup."""
-        self.clear_items() # Clear buttons/selects
-        await interaction.edit_original_response(content="Saving settings...", view=self) # Show saving state
-
-        try:
-            # Ensure assets/logos/guild_id exists
-            # Use relative path from project root if possible
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            guild_logos_dir = os.path.join(base_dir, 'assets', 'logos', str(interaction.guild.id))
-            os.makedirs(guild_logos_dir, exist_ok=True)
-            logger.info(f"Ensured guild logos directory exists: {guild_logos_dir}")
-
-            # Save settings using admin service (accessed via bot)
-            if not hasattr(self.bot, 'admin_service'):
-                 raise AdminServiceError("Admin service not found on bot instance.")
-
-            # Convert selected IDs from string to int before saving
-            final_settings = {k: int(v) for k, v in self.settings.items() if v and v != "none"}
-
-            await self.bot.admin_service.setup_server(interaction.guild_id, final_settings)
-
-            # Sync commands for the guild (optional, maybe better in on_guild_join or separate cmd)
-            # logger.info(f"Syncing commands for guild {interaction.guild.id} after setup.")
-            # await self.bot.tree.sync(guild=discord.Object(id=interaction.guild_id))
-
-            await interaction.edit_original_response(
-                content="✅ Server setup completed successfully!",
-                view=None # Remove view
-            )
-        except AdminServiceError as ase:
-            logger.error(f"AdminServiceError saving server settings for guild {interaction.guild_id}: {ase}")
-            await interaction.edit_original_response(content=f"❌ Error saving settings: {ase}", view=None)
-        except discord.HTTPException as hte:
-             logger.error(f"Discord API error during final setup message edit for guild {interaction.guild_id}: {hte}")
-             # Might not be able to edit the message anymore
-        except Exception as e:
-            logger.exception(f"Error saving server settings for guild {interaction.guild_id}: {e}")
-            await interaction.edit_original_response(content="❌ An unexpected error occurred while saving settings.", view=None)
-        finally:
-            self.stop() # Stop the view
+                logger.exception(f"Error saving guild settings for guild {interaction.guild_id}: {e}")
+                await interaction.edit_original_response(content="❌ An unexpected error occurred while saving settings.", view=None)
+            finally:
+                self.stop() # Stop the view
 
     async def on_timeout(self) -> None:
-         logger.warning(f"ServerSettingsView timed out for guild {self.guild.id}")
-         self.clear_items()
-         try:
-              # Try editing the original message, might fail if already gone
-              await self.original_interaction.edit_original_response(content="Server setup timed out.", view=None)
-         except discord.NotFound:
-              pass # Ignore if message is gone
-         except Exception as e:
-              logger.error(f"Error editing message on ServerSettingsView timeout: {e}")
+        logger.warning(f"GuildSettingsView timed out for guild {self.guild.id}")
+        self.clear_items()
+        try:
+            # Try editing the original message, might fail if already gone
+            await self.original_interaction.edit_original_response(content="Guild setup timed out.", view=None)
+        except discord.NotFound:
+            pass # Ignore if message is gone
+        except Exception as e:
+            logger.error(f"Error editing message on GuildSettingsView timeout: {e}")
 
 
 class VoiceChannelSelect(Select):
@@ -409,6 +403,35 @@ class AdminActionView(View):
          except Exception as e:
               logger.error(f"Error editing message on AdminActionView timeout: {e}")
 
+
+class TextInputModal(discord.ui.Modal):
+    """Modal for text input settings."""
+    def __init__(self, title: str, setting_key: str):
+        super().__init__(title=title)
+        self.setting_key = setting_key
+        self.input = discord.ui.TextInput(
+            label=title,
+            placeholder="Enter value...",
+            required=True
+        )
+        self.add_item(self.input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not hasattr(self.view, 'settings'):
+            logger.error("Parent view or settings dictionary not found in TextInputModal.")
+            await interaction.response.send_message("Error processing input.", ephemeral=True)
+            return
+
+        self.view.settings[self.setting_key] = self.input.value
+        await interaction.response.defer()
+        
+        if hasattr(self.view, 'process_next_selection'):
+            await self.view.process_next_selection(interaction)
+        else:
+            logger.error("process_next_selection method not found in parent view.")
+            await interaction.followup.send("Error proceeding to next step.", ephemeral=True)
+
+
 # --- Cog Definition ---
 class AdminCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -430,7 +453,7 @@ class AdminCog(commands.Cog):
             # Defer the initial response before starting the view
             await interaction.response.defer(ephemeral=True, thinking=True)
 
-            view = ServerSettingsView(self.bot, interaction)
+            view = GuildSettingsView(self.bot, interaction)
             # Send placeholder message, view will edit it
             await interaction.followup.send("Starting server setup...", view=view, ephemeral=True)
             await view.start_selection()

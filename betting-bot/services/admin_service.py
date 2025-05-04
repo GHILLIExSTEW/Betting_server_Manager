@@ -9,6 +9,10 @@ from discord import app_commands
 
 logger = logging.getLogger(__name__)
 
+class AdminServiceError(Exception):
+    """Custom exception for admin service errors."""
+    pass
+
 class AdminService:
     def __init__(self, bot, db_manager):
         """
@@ -40,6 +44,38 @@ class AdminService:
         except Exception as e:
             logger.error(f"Failed to stop AdminService: {e}", exc_info=True)
             raise RuntimeError(f"Could not stop AdminService: {str(e)}")
+
+    async def setup_guild(self, guild_id: int, settings: dict):
+        """Set up guild settings in the database.
+        
+        Args:
+            guild_id: The Discord guild ID.
+            settings: Dictionary of settings to save.
+        """
+        logger.info(f"Setting up guild {guild_id} with settings: {settings}")
+        try:
+            # Build the update query dynamically based on provided settings
+            set_clauses = []
+            params = []
+            
+            for key, value in settings.items():
+                set_clauses.append(f"{key} = %s")
+                params.append(value)
+            
+            # Add guild_id to params
+            params.append(guild_id)
+            
+            query = f"""
+                INSERT INTO guild_settings (guild_id, {', '.join(settings.keys())})
+                VALUES (%s, {', '.join(['%s'] * len(settings))})
+                ON DUPLICATE KEY UPDATE {', '.join(set_clauses)}
+            """
+            
+            await self.db_manager.execute(query, params)
+            logger.info(f"Guild settings updated for guild {guild_id}")
+        except Exception as e:
+            logger.error(f"Failed to set up guild settings for guild {guild_id}: {e}", exc_info=True)
+            raise AdminServiceError(f"Failed to set up guild settings: {str(e)}")
 
 class AdminCog(commands.Cog):
     def __init__(self, bot, admin_service):
