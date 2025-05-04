@@ -442,6 +442,26 @@ class DatabaseManager:
                     else:
                         logger.info("Table 'game_events' already exists.")
 
+                    if not await self.table_exists(conn, 'bet_reactions'):
+                        await cursor.execute('''
+                            CREATE TABLE bet_reactions (
+                                reaction_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                bet_serial BIGINT NOT NULL,
+                                user_id BIGINT NOT NULL,
+                                emoji VARCHAR(32) NOT NULL,
+                                channel_id BIGINT NOT NULL,
+                                message_id BIGINT NOT NULL,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                        ''')
+                        await cursor.execute('CREATE INDEX idx_bet_reactions_bet ON bet_reactions(bet_serial)')
+                        await cursor.execute('CREATE INDEX idx_bet_reactions_user ON bet_reactions(user_id)')
+                        await cursor.execute('CREATE INDEX idx_bet_reactions_message ON bet_reactions(message_id)')
+                        logger.info("Table 'bet_reactions' created.")
+                    else:
+                        logger.info("Table 'bet_reactions' already exists.")
+
                     logger.info("Database schema initialization/verification complete.")
         except Exception as e:
             logger.error(f"Error initializing/verifying database schema: {e}", exc_info=True)

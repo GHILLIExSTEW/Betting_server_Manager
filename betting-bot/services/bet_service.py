@@ -339,6 +339,54 @@ class BetService:
             )
             await self.db_manager.execute(query, params)
 
+            # Update unit records if the reaction is a win/loss
+            if str(payload.emoji) in ['✅', '❌']:  # Check for win/loss emojis
+                # Get bet details
+                bet_query = """
+                    SELECT guild_id, user_id, units, odds, status
+                    FROM bets
+                    WHERE bet_serial = %s
+                """
+                bet_result = await self.db_manager.fetch_one(bet_query, (bet_serial,))
+                
+                if bet_result:
+                    guild_id = bet_result['guild_id']
+                    user_id = bet_result['user_id']
+                    units = bet_result['units']
+                    odds = bet_result['odds']
+                    
+                    # Calculate result value based on emoji
+                    result_value = units * (1 + odds/100) if str(payload.emoji) == '✅' else -units
+                    
+                    # Get current year and month
+                    now = datetime.now(timezone.utc)
+                    year = now.year
+                    month = now.month
+                    
+                    # Update unit records
+                    unit_query = """
+                        INSERT INTO unit_records (
+                            bet_serial, guild_id, user_id, year, month, units, odds, result_value, created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            result_value = VALUES(result_value),
+                            created_at = VALUES(created_at)
+                    """
+                    unit_params = (
+                        bet_serial, guild_id, user_id, year, month, units, odds, result_value,
+                        datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+                    )
+                    await self.db_manager.execute(unit_query, unit_params)
+                    
+                    # Update bet status
+                    status_query = """
+                        UPDATE bets
+                        SET status = %s
+                        WHERE bet_serial = %s
+                    """
+                    status = 'won' if str(payload.emoji) == '✅' else 'lost'
+                    await self.db_manager.execute(status_query, (status, bet_serial))
+
         except Exception as e:
             logger.error(f"Failed to handle reaction add for message {payload.message_id}: {e}", exc_info=True)
 

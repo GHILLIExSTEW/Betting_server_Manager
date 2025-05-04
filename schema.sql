@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS guild_users (
 
 -- Bets table
 CREATE TABLE IF NOT EXISTS bets (
-    bet_serial INT AUTO_INCREMENT PRIMARY KEY,
+    bet_serial BIGINT PRIMARY KEY,
     guild_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
     league VARCHAR(50) NOT NULL,
@@ -110,6 +110,18 @@ CREATE TABLE IF NOT EXISTS user_images (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
+-- Bet Reactions table
+CREATE TABLE IF NOT EXISTS bet_reactions (
+    reaction_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    bet_serial BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    emoji VARCHAR(32) NOT NULL,
+    channel_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE
+);
+
 -- Create indexes
 CREATE INDEX idx_bets_guild_user ON bets(guild_id, user_id);
 CREATE INDEX idx_bets_status ON bets(status);
@@ -117,6 +129,9 @@ CREATE INDEX idx_unit_records_guild_user ON unit_records(guild_id, user_id);
 CREATE INDEX idx_games_league ON games(league);
 CREATE INDEX idx_games_status ON games(status);
 CREATE INDEX idx_team_logos_league ON team_logos(league);
+CREATE INDEX idx_bet_reactions_bet ON bet_reactions(bet_serial);
+CREATE INDEX idx_bet_reactions_user ON bet_reactions(user_id);
+CREATE INDEX idx_bet_reactions_message ON bet_reactions(message_id);
 
 -- Create views
 CREATE VIEW monthly_stats AS

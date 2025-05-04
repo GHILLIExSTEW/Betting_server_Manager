@@ -113,11 +113,11 @@ class VoiceChannelUpdater:
             
             async with db.execute(
                 """
-                SELECT SUM(units) as total
+                SELECT COALESCE(SUM(result_value), 0.0) as total
                 FROM unit_records
-                WHERE guild_id = ? AND created_at >= ?
+                WHERE guild_id = ? AND year = ? AND month = ?
                 """,
-                (guild_id, start_of_month)
+                (guild_id, now.year, now.month)
             ) as cursor:
                 result = await cursor.fetchone()
                 return result['total'] if result and result['total'] is not None else 0.0
@@ -129,15 +129,14 @@ class VoiceChannelUpdater:
         """Get the total units for the current year."""
         try:
             now = datetime.utcnow()
-            start_of_year = datetime(now.year, 1, 1)
             
             async with db.execute(
                 """
-                SELECT SUM(total) as total
+                SELECT COALESCE(SUM(result_value), 0.0) as total
                 FROM unit_records
-                WHERE guild_id = ? AND created_at >= ?
+                WHERE guild_id = ? AND year = ?
                 """,
-                (guild_id, start_of_year)
+                (guild_id, now.year)
             ) as cursor:
                 result = await cursor.fetchone()
                 return result['total'] if result and result['total'] is not None else 0.0
