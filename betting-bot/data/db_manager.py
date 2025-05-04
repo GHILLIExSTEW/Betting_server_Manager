@@ -316,7 +316,7 @@ class DatabaseManager:
                                 month INT NOT NULL COMMENT 'Month bet resolved (1-12)',
                                 units DECIMAL(15, 2) NOT NULL COMMENT 'Original stake',
                                 odds DECIMAL(10, 2) NOT NULL COMMENT 'Original odds',
-                                result_value DECIMAL(15, 2) NOT NULL COMMENT 'Net units won/lost',
+                                monthly_result_value DECIMAL(15, 2) NOT NULL COMMENT 'Net units won/lost',
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Timestamp bet resolved',
                                 FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -354,6 +354,7 @@ class DatabaseManager:
                                 bot_image_mask TEXT NULL,
                                 guild_default_image TEXT NULL,
                                 default_parlay_thumbnail TEXT NULL,
+                                total_result_value DECIMAL(15, 2) DEFAULT 0.0,
                                 min_units DECIMAL(15, 2) DEFAULT 0.1,
                                 max_units DECIMAL(15, 2) DEFAULT 10.0,
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

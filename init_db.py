@@ -32,6 +32,7 @@ def init_db():
         bot_image_mask TEXT,
         guild_default_image TEXT,
         default_parlay_thumbnail TEXT,
+        total_result_value REAL DEFAULT 0.0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
@@ -44,7 +45,7 @@ def init_db():
         user_id INTEGER NOT NULL,
         year INTEGER NOT NULL,
         month INTEGER NOT NULL,
-        result_value REAL NOT NULL,
+        monthly_result_value REAL NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(guild_id, user_id, year, month)
     )
