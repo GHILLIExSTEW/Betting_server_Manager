@@ -204,7 +204,8 @@ class BetSlipGenerator:
                 height_per_leg = 300  # Increased height per leg for larger team logos
                 height = base_height + leg_count * height_per_leg + 100  # Added extra height for odds at bottom
             else:
-                height = 400
+                height = 500  # Increased height for straight bets to accommodate units
+
             width = 800  # Increased width for better layout
             image = Image.new('RGB', (width, height), (40, 40, 40))
             draw = ImageDraw.Draw(image)
@@ -408,20 +409,20 @@ class BetSlipGenerator:
             team_y = logo_y + 150
             draw.text((width // 4, team_y), home_team, fill='white', font=team_font, anchor='mm')
             draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
-            current_y = team_y + 60
+            current_y = team_y + 80  # Increased spacing after team names
 
         # Bet details with line
         details_y = current_y
         line_text = f"{home_team} vs {away_team}: {line}"
         draw.text((width // 2, details_y), line_text, fill='white', font=team_font, anchor='mm')
         
-        # Draw odds below line
-        odds_y = details_y + 40
+        # Draw odds below line with increased spacing
+        odds_y = details_y + 60  # Increased spacing after line
         odds_text = f"{odds:+.0f}"
         draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
 
-        # Draw units with lock symbols
-        units_y = odds_y + 40
+        # Draw units with lock symbols and increased spacing
+        units_y = odds_y + 60  # Increased spacing after odds
         units_label = "Unit" if units == 1.0 else "Units"
         units_text = f"To Win {units:.2f} {units_label}"
         units_bbox = draw.textbbox((0, 0), units_text, font=units_font)
@@ -460,7 +461,7 @@ class BetSlipGenerator:
                     anchor='mm'
                 )
         
-        return units_y + 40  # Return position after units
+        return units_y + 60  # Increased spacing after units
 
     def _save_team_logo(self, logo: Image.Image, team_name: str, league: str) -> None:
         """Save team logo for future use."""
