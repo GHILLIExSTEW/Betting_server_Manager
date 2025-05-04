@@ -225,16 +225,6 @@ class BetDetailsModal(Modal):
         self.line = TextInput(label="Line", required=True, max_length=100)
         self.add_item(self.line)
 
-        # Add total odds field only for legs after the first
-        if self.leg_number > 1:
-            self.total_odds = TextInput(
-                label="Total Odds (e.g., +300)",
-                required=True,
-                max_length=10,
-                placeholder="Enter cumulative odds (e.g., +300)"
-            )
-            self.add_item(self.total_odds)
-
     async def on_submit(self, interaction: Interaction):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number} by user {interaction.user.id}")
         line = self.line.value.strip()
@@ -252,7 +242,8 @@ class BetDetailsModal(Modal):
             if not all([team, opponent]):
                 logger.warning("Modal submission failed: Missing team or opponent/player")
                 await interaction.response.send_message(
-                    "Please provide valid team and opponent/player.", ephemeral=True
+                    "Please provide valid team and opponent/player.",
+                    ephemeral=True
                 )
                 return
             leg['team'] = team
@@ -267,27 +258,6 @@ class BetDetailsModal(Modal):
                 await interaction.response.send_message("Please provide a valid player.", ephemeral=True)
                 return
             leg['player'] = player
-
-        # Validate and store total odds for legs after the first
-        if self.leg_number > 1:
-            total_odds_input = self.total_odds.value.strip()
-            if not total_odds_input:
-                logger.warning("Modal submission failed: Missing total odds")
-                await interaction.response.send_message("Please provide the total odds.", ephemeral=True)
-                return
-            try:
-                total_odds_val = float(total_odds_input)
-                if not (-10000 <= total_odds_val <= 10000):
-                    raise ValueError("Total odds must be between -10000 and +10000")
-                if -100 < total_odds_val < 100 and total_odds_val != 0:
-                    raise ValueError("Total odds cannot be between -99 and +99 (except 0)")
-                self.view.bet_details['total_odds_str'] = total_odds_input  # Store the cumulative odds
-            except ValueError as ve:
-                logger.warning(f"Invalid total odds input: {total_odds_input}. Error: {ve}")
-                await interaction.response.send_message(
-                    f"❌ Invalid total odds: {ve}. Please enter a valid number (e.g., +300).", ephemeral=True
-                )
-                return
 
         if 'legs' not in self.view.bet_details:
             self.view.bet_details['legs'] = []
