@@ -663,23 +663,24 @@ class ParlayBetWorkflowView(View):
 
         self.is_processing = True
         try:
-            step_content = f"**Step {self.current_step + 1}**"
+            self.current_step += 1  # Increment step counter first
+            step_content = f"**Step {self.current_step}**"
             self.clear_items()
 
-            if self.current_step == 0:
+            if self.current_step == 1:
                 # League selection
                 leagues = ["NHL", "NFL", "NBA", "MLB", "NCAAB", "NCAAF", "UFC", "Soccer"]
                 self.add_item(LeagueSelect(self, leagues))
                 self.add_item(CancelButton(self))
                 step_content += ": Select League"
                 await self.edit_message(interaction, content=step_content, view=self)
-            elif self.current_step == 1:
+            elif self.current_step == 2:
                 # Line type selection
                 self.add_item(LineTypeSelect(self))
                 self.add_item(CancelButton(self))
                 step_content += ": Select Line Type"
                 await self.edit_message(interaction, content=step_content, view=self)
-            elif self.current_step == 2:
+            elif self.current_step == 3:
                 # Game selection
                 if hasattr(self.bot, 'game_service'):
                     try:
@@ -708,7 +709,7 @@ class ParlayBetWorkflowView(View):
                     self.add_item(CancelButton(self))
                     step_content = "Game service not available. Please enter game details manually."
                     await self.edit_message(interaction, content=step_content, view=self)
-            elif self.current_step == 3:
+            elif self.current_step == 4:
                 # Bet details entry
                 line_type = self.bet_details.get('line_type')
                 game_id = self.bet_details.get('game_id')
@@ -767,7 +768,7 @@ class ParlayBetWorkflowView(View):
                         )
                         self.stop()
                     return
-            elif self.current_step == 4:
+            elif self.current_step == 5:
                 # After bet details are entered
                 leg_count = len(self.bet_details.get('legs', []))
                 step_content = f"Leg {leg_count} added successfully. Add another leg or finalize the parlay?"
@@ -775,12 +776,12 @@ class ParlayBetWorkflowView(View):
                 self.add_item(FinalizeButton(self))
                 self.add_item(CancelButton(self))
                 await self.edit_message(interaction, content=step_content, view=self)
-            elif self.current_step == 5:
+            elif self.current_step == 6:
                 # Units selection
                 step_content = "Select units for the parlay"
                 view = UnitsView(self)
                 await self.edit_message(interaction, content=step_content, view=view)
-            elif self.current_step == 6:
+            elif self.current_step == 7:
                 # Generate preview and show channel selection
                 try:
                     # Get available channels
