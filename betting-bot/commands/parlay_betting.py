@@ -9,6 +9,7 @@ import logging
 from typing import Optional, List, Dict, Union
 from datetime import datetime, timezone
 import io
+import uuid
 
 try:
     from utils.errors import BetServiceError, ValidationError, GameNotFoundError
@@ -379,8 +380,8 @@ class LegDecisionView(View):
         super().__init__(timeout=600)
         self.parent_view = parent_view
         self.add_item(AddLegButton(self.parent_view))
-        self.add_item(FinalizeButton(self.parent_view))
-        self.add_item(CancelButton(self.parent_view))
+        self.add_item(FinalizeButton(self))
+        self.add_item(CancelButton(self))
 
 class ChannelSelect(Select):
     def __init__(self, parent_view, channels: List[TextChannel]):
@@ -424,6 +425,29 @@ class ConfirmButton(Button):
         await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.submit_bet(interaction)
 
+class FinalOddsModal(Modal):
+    def __init__(self):
+        super().__init__(title="Enter Final Parlay Odds")
+        self.odds = TextInput(
+            label="Final Odds",
+            placeholder="Enter the final odds (e.g., -110, +150)",
+            required=True,
+            max_length=10
+        )
+
+    async def on_submit(self, interaction: Interaction):
+        try:
+            # Validate odds format
+            odds_str = self.odds.value.strip()
+            if not odds_str.startswith(('-', '+')):
+                odds_str = f"+{odds_str}"
+            float(odds_str)  # Validate it's a number
+            await interaction.response.defer()
+            self.odds_value = odds_str
+        except ValueError:
+            await interaction.response.send_message("❌ Invalid odds format. Please use American odds format (e.g., -110, +150)", ephemeral=True)
+            self.odds_value = None
+
 class ParlayBetWorkflowView(View):
     def __init__(self, interaction: Interaction, bot):
         super().__init__(timeout=600)
@@ -437,6 +461,139 @@ class ParlayBetWorkflowView(View):
         self.latest_interaction = interaction
         self.bet_slip_generator = BetSlipGenerator()
         self.preview_image_bytes = None
+        self.team_logos = {}  # Store team logos for each leg
+
+    async def finalize_bet(self, interaction: Interaction):
+        """Handle the finalization of the parlay bet."""
+        try:
+            # Show final odds modal
+            final_odds_modal = FinalOddsModal()
+            await interaction.response.send_modal(final_odds_modal)
+            await final_odds_modal.wait()
+
+            if not final_odds_modal.odds_value:
+                return
+
+            # Update bet details with final odds
+            self.bet_details['total_odds_str'] = final_odds_modal.odds_value
+
+            # Generate preview
+            try:
+                bet_serial = str(uuid.uuid4())  # Temporary ID for preview
+                self.bet_details['bet_serial'] = bet_serial
+                
+                legs = self.bet_details.get('legs', [])
+                if not legs:
+                    await interaction.followup.send("❌ No bet legs found. Please start over.", ephemeral=True)
+                    self.stop()
+                    return
+
+                leg = legs[0]
+                home_team = self.bet_details.get('home_team_name', leg.get('team', 'Unknown'))
+                away_team = self.bet_details.get('away_team_name', leg.get('opponent', 'Unknown'))
+                league = self.bet_details.get('league', 'NHL')
+                timestamp = datetime.now(timezone.utc)
+
+                # Prepare parlay legs with stored logos
+                parlay_legs = []
+                for leg in legs:
+                    leg_dict = {
+                        'home_team': leg.get('team', 'Unknown'),
+                        'away_team': leg.get('opponent', 'Unknown'),
+                        'line': leg.get('line', 'ML'),
+                        'odds': float(final_odds_modal.odds_value),
+                        'units': float(leg.get('units_str', '1.00'))
+                    }
+                    parlay_legs.append(leg_dict)
+
+                # Generate preview image
+                bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                    home_team=home_team,
+                    away_team=away_team,
+                    league=league,
+                    line=legs[0].get('line', 'ML'),
+                    odds=float(final_odds_modal.odds_value),
+                    units=float(legs[0].get('units_str', '1.00')),
+                    bet_id=bet_serial,
+                    timestamp=timestamp,
+                    bet_type="parlay",
+                    parlay_legs=parlay_legs
+                )
+
+                # Save preview image
+                self.preview_image_bytes = io.BytesIO()
+                bet_slip_image.save(self.preview_image_bytes, format='PNG')
+                self.preview_image_bytes.seek(0)
+
+                # Get available channels
+                channels = []
+                if interaction.guild:
+                    for channel in interaction.guild.text_channels:
+                        if channel.permissions_for(interaction.guild.me).send_messages:
+                            channels.append(channel)
+
+                # Show preview with channel selection
+                file_to_send = File(self.preview_image_bytes, filename="bet_slip_preview.png")
+                self.preview_image_bytes.seek(0)
+
+                # Clear existing items and add channel selection
+                self.clear_items()
+                self.add_item(ChannelSelect(self, channels))
+                self.add_item(CancelButton(self))
+
+                await interaction.followup.send(
+                    "Please review your bet and select a channel to post it:",
+                    view=self,
+                    file=file_to_send,
+                    ephemeral=True
+                )
+
+            except Exception as e:
+                logger.error(f"Error generating preview: {e}", exc_info=True)
+                await interaction.followup.send(
+                    "❌ Error generating bet preview. Please try again.",
+                    ephemeral=True
+                )
+                self.stop()
+
+        except Exception as e:
+            logger.error(f"Error in finalize_bet: {e}", exc_info=True)
+            await interaction.followup.send(
+                "❌ Error finalizing bet. Please try again.",
+                ephemeral=True
+            )
+            self.stop()
+
+    async def add_leg(self, interaction: Interaction, leg_details: Dict[str, Any]):
+        """Add a leg to the parlay bet."""
+        try:
+            # Remove odds input from leg details
+            leg_details.pop('odds_str', None)  # We'll get final odds at the end
+            self.bet_details['legs'].append(leg_details)
+
+            # Store team logos for this leg
+            home_team = leg_details.get('team', 'Unknown')
+            away_team = leg_details.get('opponent', 'Unknown')
+            league = leg_details.get('league', 'NHL')
+            
+            # Add teams to the stored logos dict
+            self.team_logos[f"{home_team}_{league}"] = None  # Will be populated when generating image
+            self.team_logos[f"{away_team}_{league}"] = None
+
+            leg_count = len(self.bet_details['legs'])
+            await interaction.response.send_message(
+                f"✅ Added leg {leg_count} to parlay. Would you like to add another leg or finalize the bet?",
+                view=self,
+                ephemeral=True
+            )
+
+        except Exception as e:
+            logger.error(f"Error adding leg: {e}", exc_info=True)
+            await interaction.response.send_message(
+                "❌ Error adding leg to parlay. Please try again.",
+                ephemeral=True
+            )
+            self.stop()
 
     async def start_flow(self):
         logger.debug(f"Starting parlay bet workflow for user {self.original_interaction.user} (ID: {self.original_interaction.user.id})")

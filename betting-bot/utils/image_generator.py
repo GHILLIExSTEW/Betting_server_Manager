@@ -381,6 +381,7 @@ class BetSlipGenerator:
         away_team = leg.get('away_team', 'Unknown')
         line = leg.get('line', 'ML')
         odds = float(leg.get('odds', 0))
+        units = float(leg.get('units_str', '1.00'))
 
         current_y = start_y
         if draw_logos:
@@ -392,25 +393,33 @@ class BetSlipGenerator:
             # Save logos for future use if they don't exist
             if home_logo:
                 self._save_team_logo(home_logo, home_team, league)
-                image.paste(home_logo, (width // 4 - 75, logo_y), home_logo)  # Adjusted position for larger logos
+                image.paste(home_logo, (width // 4 - 75, logo_y), home_logo)
             if away_logo:
                 self._save_team_logo(away_logo, away_team, league)
-                image.paste(away_logo, (3 * width // 4 - 75, logo_y), away_logo)  # Adjusted position for larger logos
+                image.paste(away_logo, (3 * width // 4 - 75, logo_y), away_logo)
             
             # Team names below logos
-            team_y = logo_y + 150  # Increased spacing for larger logos
+            team_y = logo_y + 150
             draw.text((width // 4, team_y), home_team, fill='white', font=team_font, anchor='mm')
             draw.text((3 * width // 4, team_y), away_team, fill='white', font=team_font, anchor='mm')
-            current_y = team_y + 60  # Increased spacing after team names
+            current_y = team_y + 60
 
-        # Bet details
+        # Bet details with odds and units for each leg
+        details_y = current_y
         line_text = f"{home_team} vs {away_team}: {line}"
-        draw.text((width // 2, current_y), line_text, fill='white', font=team_font, anchor='mm')
-        odds_y = current_y + 50  # Increased spacing before odds
-        odds_text = f"{odds:+.0f}"
-        draw.text((width // 2, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
+        draw.text((width // 2, details_y), line_text, fill='white', font=team_font, anchor='mm')
+        
+        # Show odds and units for this leg
+        odds_y = details_y + 40
+        odds_text = f"Odds: {odds:+.0f}"
+        units_text = f"Units: {units:.2f}"
+        
+        # Draw odds on the left side
+        draw.text((width // 3, odds_y), odds_text, fill='white', font=odds_font, anchor='mm')
+        # Draw units on the right side
+        draw.text((2 * width // 3, odds_y), units_text, fill='white', font=odds_font, anchor='mm')
 
-        return odds_y
+        return odds_y + 40  # Return position after odds and units
 
     def _save_team_logo(self, logo: Image.Image, team_name: str, league: str) -> None:
         """Save team logo for future use."""
