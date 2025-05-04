@@ -117,7 +117,7 @@ class BetService:
                 raise ValidationError("Odds cannot be between -99 and +99")
 
             # Generate unique bet serial
-            bet_serial = str(uuid.uuid4())
+            bet_serial = int(datetime.now(timezone.utc).timestamp() * 1000)  # Convert current timestamp to milliseconds
 
             # Insert bet into database
             query = """
@@ -186,7 +186,7 @@ class BetService:
                     raise ValidationError("Odds cannot be between -99 and +99 for each leg")
 
             # Generate unique bet serial
-            bet_serial = str(uuid.uuid4())
+            bet_serial = int(datetime.now(timezone.utc).timestamp() * 1000)  # Convert current timestamp to milliseconds
 
             # Insert parlay bet into database
             query = """

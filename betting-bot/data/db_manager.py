@@ -262,7 +262,7 @@ class DatabaseManager:
                     if not await self.table_exists(conn, 'bets'):
                         await cursor.execute('''
                             CREATE TABLE bets (
-                                bet_serial BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                bet_serial BIGINT PRIMARY KEY,
                                 event_id VARCHAR(255) DEFAULT NULL,
                                 guild_id BIGINT NOT NULL,
                                 message_id BIGINT DEFAULT NULL,
