@@ -242,29 +242,34 @@ class BetSlipGenerator:
                 bet_text = f"{home_team}: {line}"
                 draw.text((width // 2, details_y), bet_text, fill='white', font=details_font, anchor='mm')
 
-                # Draw odds and units with lock symbols
-                units_y = details_y + 50
+                # Draw separator line
+                separator_y = details_y + 40
+                draw.line([(20, separator_y), (width - 20, separator_y)], fill='white', width=2)
+
+                # Draw odds below separator
+                odds_y = separator_y + 30
                 odds_text = f"{odds:+.0f}"
+                draw.text((width // 2, odds_y), odds_text, fill='white', font=details_font, anchor='mm')
+
+                # Draw units with lock symbols
+                units_y = odds_y + 40
                 units_text = f"To Win {units:.2f} Units"
-                combined_text = f"{odds_text} {units_text}"
-                
-                # Calculate text dimensions for lock placement
-                text_bbox = draw.textbbox((0, 0), combined_text, font=details_font)
-                text_width = text_bbox[2] - text_bbox[0]
+                units_bbox = draw.textbbox((0, 0), units_text, font=details_font)
+                units_width = units_bbox[2] - units_bbox[0]
                 
                 # Load and place lock icons
                 lock_icon = self._load_lock_icon()
                 if lock_icon:
                     lock_spacing = 15
-                    lock_x_left = (width - text_width - 2 * lock_icon.width - 2 * lock_spacing) // 2
+                    lock_x_left = (width - units_width - 2 * lock_icon.width - 2 * lock_spacing) // 2
                     image.paste(lock_icon, (lock_x_left, units_y - lock_icon.height // 2), lock_icon)
-                    lock_x_right = lock_x_left + text_width + lock_icon.width + 2 * lock_spacing
+                    lock_x_right = lock_x_left + units_width + lock_icon.width + 2 * lock_spacing
                     image.paste(lock_icon, (lock_x_right, units_y - lock_icon.height // 2), lock_icon)
                     
-                    # Draw combined text
+                    # Draw units text
                     draw.text(
                         (width // 2, units_y),
-                        combined_text,
+                        units_text,
                         fill=(255, 215, 0),  # Gold color
                         font=details_font,
                         anchor='mm'
@@ -273,7 +278,7 @@ class BetSlipGenerator:
                     # Fallback to emoji locks
                     draw.text(
                         (width // 2, units_y),
-                        f"🔒 {combined_text} 🔒",
+                        f"🔒 {units_text} 🔒",
                         fill=(255, 215, 0),
                         font=details_font,
                         anchor='mm'
