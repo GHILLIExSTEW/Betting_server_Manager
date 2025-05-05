@@ -226,121 +226,103 @@ class BetDetailsModal(Modal):
             self.add_item(self.opponent)
 
         self.line = TextInput(label="Line", required=True, max_length=100)
+        self.odds = TextInput(label="Odds", required=True, max_length=100)
         self.add_item(self.line)
+        self.add_item(self.odds)
 
     async def on_submit(self, interaction: Interaction):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number} by user {interaction.user.id}")
-        line = self.line.value.strip()
+        try:
+            # Create leg details
+            leg = {
+                'team': self.team.value.strip(),
+                'opponent': self.opponent.value.strip(),
+                'line': self.line.value.strip(),
+                'odds_str': self.odds.value.strip(),
+                'units_str': '1.00',  # Default units
+                'bet_type': self.line_type,
+                'league': self.view.bet_details.get('league', 'NHL')
+            }
 
-        if not line:
-            logger.warning("Modal submission failed: Missing required fields")
-            await interaction.response.send_message("Please fill in all required fields.", ephemeral=True)
-            return
-
-        leg = {'line': line, 'odds_str': '-110'}  # Default odds for individual leg
-
-        if self.is_manual:
-            team = self.team.value.strip()
-            opponent = self.opponent.value.strip()
-            if not all([team, opponent]):
-                logger.warning("Modal submission failed: Missing team or opponent/player")
-                await interaction.response.send_message(
-                    "Please provide valid team and opponent/player.",
-                    ephemeral=True
-                )
-                return
-            leg['team'] = team
-            if self.line_type == "game_line":
-                leg['opponent'] = opponent
-            else:
-                leg['player'] = opponent
-        elif self.line_type == "player_prop":
-            player = self.player.value.strip()
-            opponent = self.opponent.value.strip()
-            if not all([player, opponent]):
-                logger.warning("Modal submission failed: Missing player or opponent")
-                await interaction.response.send_message("Please provide a valid player and opponent.", ephemeral=True)
-                return
-            leg['player'] = player
-            leg['opponent'] = opponent
-            # For player props, we need to set the team based on the player's team
-            if hasattr(self.view, 'bet_details'):
-                if 'home_team_name' in self.view.bet_details and 'away_team_name' in self.view.bet_details:
-                    # Determine which team the player is on
-                    if player in self.view.bet_details.get('home_players', []):
-                        leg['team'] = self.view.bet_details['home_team_name']
-                    elif player in self.view.bet_details.get('away_players', []):
-                        leg['team'] = self.view.bet_details['away_team_name']
-                    else:
-                        # If we can't determine the team, use the home team as default
-                        leg['team'] = self.view.bet_details['home_team_name']
-
-        # Store team information for logo loading
-        if 'team' in leg and 'opponent' in leg:
-            league = self.view.bet_details.get('league', 'NHL')
-            leg['league'] = league
-
-            # Get image paths for the teams
-            try:
-                # Get the bet_serial from the view's bet_details
-                bet_serial = self.view.bet_details.get('bet_serial')
-                if not bet_serial:
-                    logger.warning("No bet_serial found in bet_details")
+            # If this is the first leg, create the bet in the database
+            if len(self.view.bet_details.get('legs', [])) == 0:
+                try:
+                    # Create initial parlay bet
+                    bet_serial = await self.view.bot.bet_service.create_parlay_bet(
+                        guild_id=interaction.guild_id,
+                        user_id=interaction.user.id,
+                        legs=[leg],  # Initial leg
+                        channel_id=None,  # Will be set later
+                        league=leg['league']
+                    )
+                    self.view.bet_details['bet_serial'] = bet_serial
+                    logger.debug(f"Created initial parlay bet with serial {bet_serial}")
+                except Exception as e:
+                    logger.error(f"Failed to create initial parlay bet: {e}")
+                    await interaction.response.send_message("❌ Failed to create bet. Please try again.", ephemeral=True)
                     return
 
-                # Get the current leg number
-                leg_number = len(self.view.bet_details.get('legs', [])) + 1
+            # Store team information for logo loading
+            if 'team' in leg and 'opponent' in leg:
+                league = self.view.bet_details.get('league', 'NHL')
+                leg['league'] = league
 
-                # Get image paths from the bet_slip_generator
-                team_image_path = None
-                opponent_image_path = None
+                # Get image paths for the teams
+                try:
+                    # Get the bet_serial from the view's bet_details
+                    bet_serial = self.view.bet_details.get('bet_serial')
+                    if not bet_serial:
+                        logger.warning("No bet_serial found in bet_details")
+                        return
 
-                # Get the team logo paths
-                team_logo = self.view.bet_slip_generator._load_team_logo(leg['team'], league)
-                opponent_logo = self.view.bet_slip_generator._load_team_logo(leg['opponent'], league)
+                    # Get the current leg number
+                    leg_number = len(self.view.bet_details.get('legs', [])) + 1
 
-                if team_logo:
-                    team_image_path = os.path.join(
-                        self.view.bet_slip_generator.league_team_base_dir,
-                        self.view.bet_slip_generator._ensure_team_dir_exists(league),
-                        f"{leg['team'].lower().replace(' ', '_')}.png"
-                    )
-                if opponent_logo:
-                    opponent_image_path = os.path.join(
-                        self.view.bet_slip_generator.league_team_base_dir,
-                        self.view.bet_slip_generator._ensure_team_dir_exists(league),
-                        f"{leg['opponent'].lower().replace(' ', '_')}.png"
-                    )
+                    # Get image paths from the bet_slip_generator
+                    team_image_path = None
+                    opponent_image_path = None
 
-                # Store the image paths in the database
-                await self.view.bot.db_manager.execute(
-                    """
-                    INSERT INTO bet_images (bet_serial, leg, league, team_image_path, opponent_image_path, guild_id, user_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (bet_serial, leg_number, league, team_image_path, opponent_image_path, interaction.guild_id, interaction.user.id)
-                )
-                logger.debug(f"Stored image paths for bet {bet_serial}, leg {leg_number}")
+                    # Get the team logo paths
+                    team_logo = self.view.bet_slip_generator._load_team_logo(leg['team'], league)
+                    opponent_logo = self.view.bet_slip_generator._load_team_logo(leg['opponent'], league)
 
-            except Exception as e:
-                logger.error(f"Error storing image paths: {e}")
-                # Non-critical error, continue without storing image paths
+                    if team_logo:
+                        team_image_path = os.path.join(
+                            self.view.bet_slip_generator.league_team_base_dir,
+                            self.view.bet_slip_generator._ensure_team_dir_exists(league),
+                            f"{leg['team'].lower().replace(' ', '_')}.png"
+                        )
+                    if opponent_logo:
+                        opponent_image_path = os.path.join(
+                            self.view.bet_slip_generator.league_team_base_dir,
+                            self.view.bet_slip_generator._ensure_team_dir_exists(league),
+                            f"{leg['opponent'].lower().replace(' ', '_')}.png"
+                        )
 
-        if 'legs' not in self.view.bet_details:
-            self.view.bet_details['legs'] = []
-        self.view.bet_details['legs'].append(leg)
-        logger.debug(f"Bet details entered: {leg}")
+                    # Store image paths in bet_images table
+                    if team_image_path or opponent_image_path:
+                        try:
+                            query = """
+                                INSERT INTO bet_images (bet_serial, leg, league, team_image_path, opponent_image_path, guild_id, user_id)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """
+                            await self.view.bot.db_manager.execute(
+                                query,
+                                (bet_serial, leg_number, league, team_image_path, opponent_image_path, interaction.guild_id, interaction.user.id)
+                            )
+                            logger.debug(f"Stored image paths for bet {bet_serial} leg {leg_number}")
+                        except Exception as e:
+                            logger.error(f"Failed to store image paths for bet {bet_serial}: {e}")
+                except Exception as e:
+                    logger.error(f"Error handling team logos: {e}")
 
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
+            # Add the leg to bet details
+            await self.view.add_leg(interaction, leg)
+            self.view.current_step = 5
 
-        self.view.current_step = 4  # Leg decision step
-        self.view.bet_details.pop('game_id', None)
-        self.view.bet_details.pop('home_team_name', None)
-        self.view.bet_details.pop('away_team_name', None)
-        self.view.bet_details.pop('line_type', None)
-        self.view.bet_details.pop('player', None)
-        await self.view.go_next(interaction)
+        except Exception as e:
+            logger.error(f"Error in BetDetailsModal on_submit: {e}")
+            await interaction.response.send_message("❌ Failed to process bet details. Please try again.", ephemeral=True)
 
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
         logger.error(f"Error in BetDetailsModal: {error}", exc_info=True)
@@ -1101,6 +1083,9 @@ class ParlayBetWorkflowView(View):
                     'bet_type': 'parlay'
                 }
                 logger.debug(f"Added message {sent_message.id} to pending_reactions for bet {bet_serial}")
+
+            # Confirm the bet after successful posting
+            await self.bot.bet_service.confirm_bet(bet_serial)
 
             await self.edit_message(
                 interaction,

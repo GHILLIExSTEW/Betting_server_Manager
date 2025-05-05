@@ -862,6 +862,9 @@ class StraightBetWorkflowView(View):
                 }
                 logger.debug(f"Added message {sent_message.id} to pending_reactions for bet {bet_serial}")
 
+            # Confirm the bet after successful posting
+            await self.bot.bet_service.confirm_bet(bet_serial)
+
             await self.edit_message(
                 interaction,
                 content=f"✅ Bet placed successfully! (ID: `{bet_serial}`). Posted to {post_channel.mention}.",

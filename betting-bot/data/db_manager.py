@@ -281,6 +281,7 @@ class DatabaseManager:
                                 legs INT DEFAULT NULL,
                                 bet_won TINYINT DEFAULT 0,
                                 bet_loss TINYINT DEFAULT 0,
+                                confirmed TINYINT DEFAULT 0 COMMENT 'Whether the bet has been posted to a channel',
                                 created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
                                 game_start DATETIME DEFAULT NULL,
                                 result_value DECIMAL(15,2) DEFAULT NULL,

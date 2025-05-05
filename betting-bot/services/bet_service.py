@@ -67,6 +67,88 @@ class BetService:
             logger.error(f"Failed to clean up expired bets: {e}", exc_info=True)
             raise BetServiceError(f"Could not clean up expired bets: {str(e)}")
 
+    async def cleanup_unconfirmed_bets(self):
+        """Delete unconfirmed bets that are older than 5 minutes."""
+        logger.info("Starting cleanup of unconfirmed bets")
+        try:
+            # First get the bets that need to be cleaned up
+            query = """
+                SELECT bet_serial, guild_id, user_id 
+                FROM bets 
+                WHERE confirmed = 0 
+                AND created_at < NOW() - INTERVAL '5 minutes'
+            """
+            expired_bets = await self.db_manager.fetch_all(query)
+            
+            if not expired_bets:
+                logger.debug("No unconfirmed bets to clean up")
+                return
+                
+            logger.info(f"Found {len(expired_bets)} unconfirmed bets to clean up")
+            
+            for bet in expired_bets:
+                try:
+                    # Clean up related records in a transaction
+                    async with self.db_manager.transaction():
+                        # Delete bet legs
+                        await self.db_manager.execute(
+                            "DELETE FROM bet_legs WHERE bet_serial = %s",
+                            (bet['bet_serial'],)
+                        )
+                        # Delete bet images
+                        await self.db_manager.execute(
+                            "DELETE FROM bet_images WHERE bet_serial = %s",
+                            (bet['bet_serial'],)
+                        )
+                        # Delete the bet itself
+                        await self.db_manager.execute(
+                            "DELETE FROM bets WHERE bet_serial = %s",
+                            (bet['bet_serial'],)
+                        )
+                    logger.info(f"Successfully cleaned up bet {bet['bet_serial']} for user {bet['user_id']} in guild {bet['guild_id']}")
+                except Exception as e:
+                    logger.error(f"Failed to clean up bet {bet['bet_serial']}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error in cleanup_unconfirmed_bets: {e}", exc_info=True)
+            raise BetServiceError(f"Failed to clean up unconfirmed bets: {str(e)}")
+
+    async def confirm_bet(self, bet_serial: str) -> bool:
+        """Mark a bet as confirmed after it has been posted."""
+        logger.info(f"Attempting to confirm bet {bet_serial}")
+        try:
+            # First check if the bet exists and is not already confirmed
+            check_query = """
+                SELECT confirmed 
+                FROM bets 
+                WHERE bet_serial = %s
+            """
+            result = await self.db_manager.fetch_one(check_query, (bet_serial,))
+            
+            if not result:
+                logger.warning(f"Bet {bet_serial} not found")
+                return False
+                
+            if result['confirmed'] == 1:
+                logger.info(f"Bet {bet_serial} is already confirmed")
+                return True
+                
+            # Update the bet status
+            update_query = """
+                UPDATE bets 
+                SET confirmed = 1,
+                    updated_at = NOW()
+                WHERE bet_serial = %s
+            """
+            await self.db_manager.execute(update_query, (bet_serial,))
+            logger.info(f"Successfully confirmed bet {bet_serial}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error confirming bet {bet_serial}: {e}", exc_info=True)
+            raise BetServiceError(f"Failed to confirm bet {bet_serial}: {str(e)}")
+
     async def create_straight_bet(
         self,
         guild_id: int,
@@ -186,13 +268,13 @@ class BetService:
                     raise ValidationError("Odds cannot be between -99 and +99 for each leg")
 
             # Generate unique bet serial
-            bet_serial = int(datetime.now(timezone.utc).timestamp() * 1000)  # Convert current timestamp to milliseconds
+            bet_serial = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-            # Insert parlay bet into database
+            # Insert parlay bet into database with confirmed = 0
             query = """
                 INSERT INTO bets (
-                    bet_serial, guild_id, user_id, bet_type, channel_id, league, status, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    bet_serial, guild_id, user_id, bet_type, channel_id, league, status, created_at, confirmed
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0)
             """
             params = (
                 bet_serial, guild_id, user_id, 'parlay', channel_id, league, 'pending',
@@ -200,7 +282,7 @@ class BetService:
             )
             await self.db_manager.execute(query, params)
 
-            # Insert each leg into a legs table
+            # Insert each leg
             leg_query = """
                 INSERT INTO bet_legs (
                     bet_serial, game_id, bet_type, team, opponent, line, units, odds
