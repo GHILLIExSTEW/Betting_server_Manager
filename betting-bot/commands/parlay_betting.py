@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Union, Any
 from datetime import datetime, timezone
 import io
 import uuid
+import os
 
 try:
     from utils.errors import BetServiceError, ValidationError, GameNotFoundError
@@ -262,23 +263,68 @@ class BetDetailsModal(Modal):
                 return
             leg['player'] = player
             leg['opponent'] = opponent
+            # For player props, we need to set the team based on the player's team
+            if hasattr(self.view, 'bet_details'):
+                if 'home_team_name' in self.view.bet_details and 'away_team_name' in self.view.bet_details:
+                    # Determine which team the player is on
+                    if player in self.view.bet_details.get('home_players', []):
+                        leg['team'] = self.view.bet_details['home_team_name']
+                    elif player in self.view.bet_details.get('away_players', []):
+                        leg['team'] = self.view.bet_details['away_team_name']
+                    else:
+                        # If we can't determine the team, use the home team as default
+                        leg['team'] = self.view.bet_details['home_team_name']
 
         # Store team information for logo loading
         if 'team' in leg and 'opponent' in leg:
             league = self.view.bet_details.get('league', 'NHL')
             leg['league'] = league
-            # Pre-load logos for this leg if the method exists
+
+            # Get image paths for the teams
             try:
-                if hasattr(self.view, '_preload_team_logos'):
-                    await self.view._preload_team_logos(leg['team'], leg['opponent'], league)
-                else:
-                    # Store team names in the logos dict if not already present
-                    if hasattr(self.view, 'team_logos'):
-                        self.view.team_logos[f"{leg['team']}_{league}"] = None
-                        self.view.team_logos[f"{leg['opponent']}_{league}"] = None
+                # Get the bet_serial from the view's bet_details
+                bet_serial = self.view.bet_details.get('bet_serial')
+                if not bet_serial:
+                    logger.warning("No bet_serial found in bet_details")
+                    return
+
+                # Get the current leg number
+                leg_number = len(self.view.bet_details.get('legs', [])) + 1
+
+                # Get image paths from the bet_slip_generator
+                team_image_path = None
+                opponent_image_path = None
+
+                # Get the team logo paths
+                team_logo = self.view.bet_slip_generator._load_team_logo(leg['team'], league)
+                opponent_logo = self.view.bet_slip_generator._load_team_logo(leg['opponent'], league)
+
+                if team_logo:
+                    team_image_path = os.path.join(
+                        self.view.bet_slip_generator.league_team_base_dir,
+                        self.view.bet_slip_generator._ensure_team_dir_exists(league),
+                        f"{leg['team'].lower().replace(' ', '_')}.png"
+                    )
+                if opponent_logo:
+                    opponent_image_path = os.path.join(
+                        self.view.bet_slip_generator.league_team_base_dir,
+                        self.view.bet_slip_generator._ensure_team_dir_exists(league),
+                        f"{leg['opponent'].lower().replace(' ', '_')}.png"
+                    )
+
+                # Store the image paths in the database
+                await self.view.bot.db_manager.execute(
+                    """
+                    INSERT INTO bet_images (bet_serial, leg, league, team_image_path, opponent_image_path, guild_id, user_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (bet_serial, leg_number, league, team_image_path, opponent_image_path, interaction.guild_id, interaction.user.id)
+                )
+                logger.debug(f"Stored image paths for bet {bet_serial}, leg {leg_number}")
+
             except Exception as e:
-                logger.error(f"Error preloading team logos: {e}")
-                # Non-critical error, continue without logos
+                logger.error(f"Error storing image paths: {e}")
+                # Non-critical error, continue without storing image paths
 
         if 'legs' not in self.view.bet_details:
             self.view.bet_details['legs'] = []
@@ -540,12 +586,15 @@ class ParlayBetWorkflowView(View):
 
                 # Ensure all team logos are loaded
                 for leg in parlay_legs:
-                    await self._preload_team_logos(leg['home_team'], leg['away_team'], leg['league'])
+                    await self._preload_team_logos(leg['home_team'], leg['away_team'], leg.get('league', league))
+
+                # Check if all legs have the same league
+                all_legs_same_league = all(leg.get('league', league) == league for leg in parlay_legs)
 
                 bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                     home_team=home_team,
                     away_team=away_team,
-                    league=league,
+                    league=league if (is_same_game or all_legs_same_league) else None,  # Only show league if same game or all same league
                     line=first_leg.get('line', 'ML'),
                     odds=total_odds,
                     units=total_units,
@@ -903,7 +952,7 @@ class ParlayBetWorkflowView(View):
                     bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                         home_team=home_team,
                         away_team=away_team,
-                        league=league,
+                        league=league if (is_same_game or all(leg.get('league', league) == league for leg in parlay_legs)) else None,  # Only show league if same game or all same league
                         line=first_leg.get('line', 'ML'),
                         odds=float(self.bet_details.get('total_odds_str', '-110')),
                         units=float(first_leg.get('units_str', '1.00')),
