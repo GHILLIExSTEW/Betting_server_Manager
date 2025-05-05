@@ -350,13 +350,11 @@ class BetDetailsModal(Modal):
 
                     if team_logo:
                         team_image_path = os.path.join(
-                            self.view.bet_slip_generator.league_team_base_dir,
                             self.view.bet_slip_generator._ensure_team_dir_exists(league),
                             f"{bet_details['team'].lower().replace(' ', '_')}.png"
                         )
                     if opponent_logo:
                         opponent_image_path = os.path.join(
-                            self.view.bet_slip_generator.league_team_base_dir,
                             self.view.bet_slip_generator._ensure_team_dir_exists(league),
                             f"{bet_details['opponent'].lower().replace(' ', '_')}.png"
                         )
