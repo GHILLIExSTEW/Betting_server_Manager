@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Union
 from datetime import datetime, timezone
 import uuid
 import discord
+import json
 
 try:
     from utils.errors import BetServiceError, ValidationError
@@ -114,196 +115,117 @@ class BetService:
             logger.error(f"Error in cleanup_unconfirmed_bets: {e}", exc_info=True)
             raise BetServiceError(f"Failed to clean up unconfirmed bets: {str(e)}")
 
-    async def confirm_bet(self, bet_serial: str) -> bool:
-        """Mark a bet as confirmed after it has been posted."""
-        logger.info(f"Attempting to confirm bet {bet_serial}")
+    async def confirm_bet(self, bet_serial: int, channel_id: int) -> bool:
+        """Mark a bet as confirmed when the image is sent to a channel."""
         try:
-            # First check if the bet exists and is not already confirmed
-            check_query = """
-                SELECT confirmed 
-                FROM bets 
-                WHERE bet_serial = %s
-            """
-            result = await self.db_manager.fetch_one(check_query, (bet_serial,))
-            
-            if not result:
-                logger.warning(f"Bet {bet_serial} not found")
-                return False
-                
-            if result['confirmed'] == 1:
-                logger.info(f"Bet {bet_serial} is already confirmed")
-                return True
-                
-            # Update the bet status
-            update_query = """
+            query = """
                 UPDATE bets 
-                SET confirmed = 1,
-                    updated_at = NOW()
+                SET confirmed = 1, 
+                    channel_id = %s 
                 WHERE bet_serial = %s
             """
-            await self.db_manager.execute(update_query, (bet_serial,))
-            logger.info(f"Successfully confirmed bet {bet_serial}")
-            return True
-            
+            result = await self.db_manager.execute(query, (channel_id, bet_serial))
+            return result.rowcount > 0
         except Exception as e:
-            logger.error(f"Error confirming bet {bet_serial}: {e}", exc_info=True)
-            raise BetServiceError(f"Failed to confirm bet {bet_serial}: {str(e)}")
+            logger.error(f"Error confirming bet {bet_serial}: {e}")
+            return False
 
     async def create_straight_bet(
-        self,
-        guild_id: int,
-        user_id: int,
-        game_id: Optional[str],
-        bet_type: str,
-        team: str,
-        opponent: Optional[str],
-        line: str,
-        units: float,
-        odds: float,
-        channel_id: Optional[int],
+        self, guild_id: int, user_id: int, game_id: Optional[str],
+        bet_type: str, team: str, opponent: str, line: str,
+        units: float, odds: float, channel_id: Optional[int],
         league: str
-    ) -> str:
-        """
-        Create a new straight bet in the database.
-
-        Args:
-            guild_id (int): ID of the guild.
-            user_id (int): ID of the user placing the bet.
-            game_id (Optional[str]): ID of the game (None for manual entries).
-            bet_type (str): Type of bet ('game_line' or 'player_prop').
-            team (str): Team or entity bet on.
-            opponent (Optional[str]): Opponent team or player (if applicable).
-            line (str): Betting line (e.g., ML, O/U 5.5).
-            units (float): Units wagered.
-            odds (float): Odds for the bet.
-            channel_id (Optional[int]): ID of the channel where the bet is posted.
-            league (str): League of the bet (e.g., NHL, NBA).
-
-        Returns:
-            str: Unique bet serial number.
-
-        Raises:
-            ValidationError: If input validation fails.
-            BetServiceError: If database operation fails.
-        """
-        logger.debug(f"Creating straight bet for user {user_id} in guild {guild_id}, league: {league}")
+    ) -> Optional[int]:
+        """Create a straight bet."""
         try:
-            # Validate inputs
-            if not team or not line:
-                raise ValidationError("Team and line are required")
-            if units <= 0:
-                raise ValidationError("Units must be positive")
-            if not (-10000 <= odds <= 10000):
-                raise ValidationError("Odds must be between -10000 and +10000")
-            if -100 < odds < 100:
-                raise ValidationError("Odds cannot be between -99 and +99")
-
-            # Generate unique bet serial
-            bet_serial = int(datetime.now(timezone.utc).timestamp() * 1000)  # Convert current timestamp to milliseconds
-
-            # Insert bet into database
+            bet_details = {
+                'game_id': game_id,
+                'bet_type': bet_type,
+                'team': team,
+                'opponent': opponent,
+                'line': line
+            }
+            
             query = """
                 INSERT INTO bets (
-                    bet_serial, guild_id, user_id, game_id, bet_type, team, opponent,
-                    line, units, odds, channel_id, league, status, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    guild_id, user_id, league, bet_type,
+                    bet_details, units, odds, channel_id,
+                    confirmed
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                RETURNING bet_serial
             """
-            params = (
-                bet_serial, guild_id, user_id, game_id, bet_type, team, opponent,
-                line, units, odds, channel_id, league, 'pending',
-                datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            
+            result = await self.db_manager.execute(
+                query,
+                (
+                    guild_id, user_id, league, bet_type,
+                    json.dumps(bet_details), units, odds,
+                    channel_id, 1 if channel_id else 0
+                )
             )
-            await self.db_manager.execute(query, params)
-
-            logger.info(f"Straight bet created: serial={bet_serial}, user={user_id}, guild={guild_id}")
-            return bet_serial
-
-        except ValidationError as ve:
-            logger.error(f"Validation error creating straight bet for user {user_id}: {ve}")
-            raise
+            
+            if result and result.rowcount > 0:
+                return result.fetchone()[0]
+            return None
+            
         except Exception as e:
-            logger.error(f"Failed to create straight bet for user {user_id}: {e}", exc_info=True)
-            raise BetServiceError(f"Could not create straight bet: {str(e)}")
+            logger.error(f"Error creating straight bet: {e}")
+            return None
 
     async def create_parlay_bet(
-        self,
-        guild_id: int,
-        user_id: int,
-        legs: List[Dict[str, Union[str, float, Optional[str]]]],
-        channel_id: Optional[int],
-        league: str
-    ) -> str:
-        """
-        Create a new parlay bet in the database.
-
-        Args:
-            guild_id (int): ID of the guild.
-            user_id (int): ID of the user placing the bet.
-            legs (List[Dict]): List of bet legs, each with game_id, bet_type, team, opponent, line, units, odds.
-            channel_id (Optional[int]): ID of the channel where the bet is posted.
-            league (str): League of the bet (e.g., NHL, NBA).
-
-        Returns:
-            str: Unique bet serial number.
-
-        Raises:
-            ValidationError: If input validation fails.
-            BetServiceError: If database operation fails.
-        """
-        logger.debug(f"Creating parlay bet for user {user_id} in guild {guild_id}, league: {league}, legs: {len(legs)}")
+        self, guild_id: int, user_id: int, legs: List[Dict],
+        channel_id: Optional[int], league: str
+    ) -> Optional[int]:
+        """Create a parlay bet."""
         try:
-            # Validate inputs
-            if len(legs) < 2:
-                raise ValidationError("Parlay bets require at least two legs")
-            for leg in legs:
-                if not leg.get('team') or not leg.get('line'):
-                    raise ValidationError("Each leg must have a team and line")
-                units = leg.get('units', 0.0)
-                odds = leg.get('odds', 0.0)
-                if units <= 0:
-                    raise ValidationError("Units must be positive for each leg")
-                if not (-10000 <= odds <= 10000):
-                    raise ValidationError("Odds must be between -10000 and +10000 for each leg")
-                if -100 < odds < 100:
-                    raise ValidationError("Odds cannot be between -99 and +99 for each leg")
-
-            # Generate unique bet serial
-            bet_serial = int(datetime.now(timezone.utc).timestamp() * 1000)
-
-            # Insert parlay bet into database with confirmed = 0
+            bet_details = {
+                'legs': legs,
+                'total_odds': self._calculate_parlay_odds(legs)
+            }
+            
             query = """
                 INSERT INTO bets (
-                    bet_serial, guild_id, user_id, bet_type, channel_id, league, status, created_at, confirmed
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0)
-            """
-            params = (
-                bet_serial, guild_id, user_id, 'parlay', channel_id, league, 'pending',
-                datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            )
-            await self.db_manager.execute(query, params)
-
-            # Insert each leg
-            leg_query = """
-                INSERT INTO bet_legs (
-                    bet_serial, game_id, bet_type, team, opponent, line, units, odds
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """
-            for leg in legs:
-                leg_params = (
-                    bet_serial, leg.get('game_id'), leg.get('bet_type'), leg.get('team'),
-                    leg.get('opponent'), leg.get('line'), leg.get('units'), leg.get('odds')
+                    guild_id, user_id, league, bet_type,
+                    bet_details, units, odds, channel_id,
+                    confirmed
+                ) VALUES (
+                    %s, %s, %s, 'parlay', %s, %s, %s, %s, %s
                 )
-                await self.db_manager.execute(leg_query, leg_params)
-
-            logger.info(f"Parlay bet created: serial={bet_serial}, user={user_id}, guild={guild_id}, legs={len(legs)}")
-            return bet_serial
-
-        except ValidationError as ve:
-            logger.error(f"Validation error creating parlay bet for user {user_id}: {ve}")
-            raise
+                RETURNING bet_serial
+            """
+            
+            total_units = sum(float(leg.get('units', 1.0)) for leg in legs)
+            
+            result = await self.db_manager.execute(
+                query,
+                (
+                    guild_id, user_id, league,
+                    json.dumps(bet_details), total_units,
+                    bet_details['total_odds'], channel_id,
+                    1 if channel_id else 0
+                )
+            )
+            
+            if result and result.rowcount > 0:
+                return result.fetchone()[0]
+            return None
+            
         except Exception as e:
-            logger.error(f"Failed to create parlay bet for user {user_id}: {e}", exc_info=True)
-            raise BetServiceError(f"Could not create parlay bet: {str(e)}")
+            logger.error(f"Error creating parlay bet: {e}")
+            return None
+
+    def _calculate_parlay_odds(self, legs: List[Dict]) -> float:
+        """Calculate total odds for a parlay bet."""
+        total_odds = 1.0
+        for leg in legs:
+            odds = float(leg.get('odds', 0))
+            if odds > 0:
+                total_odds *= (odds / 100.0 + 1)
+            else:
+                total_odds *= (100.0 / abs(odds) + 1)
+        return round((total_odds - 1) * 100)
 
     async def update_straight_bet_channel(self, bet_serial: str, channel_id: int):
         """

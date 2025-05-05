@@ -379,6 +379,18 @@ class BetDetailsModal(Modal):
             # Update view's bet details
             self.view.bet_details.update(bet_details)
             self.view.current_step = 4
+
+            # Properly handle the modal response
+            await interaction.response.defer()
+            
+            # Update the message after modal submission
+            await self.view.edit_message(
+                interaction,
+                content="Processing bet details...",
+                view=self.view
+            )
+            
+            # Continue with the workflow
             await self.view.go_next(interaction)
 
         except Exception as e:

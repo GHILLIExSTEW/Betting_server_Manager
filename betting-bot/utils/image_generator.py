@@ -184,24 +184,28 @@ class BetSlipGenerator:
             return "N/A"
 
     def _ensure_team_dir_exists(self, league: str) -> str:
-        """Ensure the team logos directory exists for the given league."""
-        # References global SPORT_CATEGORY_MAP
-        sport_category = SPORT_CATEGORY_MAP.get(league.upper(), league.upper() if league else "OTHER")
-        # Uses self.league_team_base_dir (which is based on global _PATHS)
-        league_team_dir = os.path.join(self.league_team_base_dir, sport_category, league.upper() if league else "UNKNOWN")
+        """Ensure team logo directory exists and return path."""
+        sport_category = self._get_sport_category(league) or 'other'
+        team_dir = os.path.join(self.league_team_base_dir, sport_category, league.lower())
+        os.makedirs(team_dir, exist_ok=True)
+        return team_dir
 
-        if not os.path.isdir(league_team_dir):
-            logger.info(f"Team logos directory not found at {league_team_dir}, creating it.")
-            try:
-                os.makedirs(league_team_dir, exist_ok=True)
-            except OSError as e:
-                 logger.error(f"Failed to create directory {league_team_dir}: {e}")
-                 logger.warning(f"Falling back to base team logo directory: {self.league_team_base_dir}")
-                 os.makedirs(self.league_team_base_dir, exist_ok=True) # Ensure base exists
-                 return self.league_team_base_dir
-        return league_team_dir
-
-    # _ensure_league_dir_exists is removed (was source of SyntaxError and unused)
+    def _get_sport_category(self, league: str) -> Optional[str]:
+        """Map league to sport category."""
+        league = league.upper()
+        categories = {
+            'NHL': 'hockey',
+            'AHL': 'hockey',
+            'NBA': 'basketball',
+            'WNBA': 'basketball',
+            'NFL': 'football',
+            'NCAAF': 'football',
+            'MLB': 'baseball',
+            'MLS': 'soccer',
+            'EPL': 'soccer',
+            'UFC': 'mma',
+        }
+        return categories.get(league)
 
     def _cleanup_cache(self):
         """Clean up expired cache entries."""
@@ -300,48 +304,30 @@ class BetSlipGenerator:
     def _load_league_logo(self, league: str) -> Optional[Image.Image]:
         """Load the league logo image."""
         try:
-            cache_key = f"league_{league}"
-            current_time = time.time()
-            
-            # Check cache first
-            if cache_key in self._logo_cache:
-                logo, timestamp = self._logo_cache[cache_key]
-                if current_time - timestamp <= self._cache_expiry:
-                    return logo
-                else:
-                    del self._logo_cache[cache_key]
+            if not league:
+                return None
 
-            # Map league names to their logo filenames
-            league_name_map = {
-                "NHL": "nhl.png",
-                "NBA": "nba.png",
-                "NFL": "nfl.png",
-                "MLB": "mlb.png",
-                "NCAAB": "ncaab.png",
-                "NCAAF": "ncaaf.png",
-                "Soccer": "soccer.png",
-                "Tennis": "tennis.png",
-                "UFC/MMA": "ufc.png"
-            }
-            
-            # Get the logo filename
-            logo_filename = league_name_map.get(league.upper(), f"{league.lower()}.png")
-            logo_path = os.path.join(self.league_logo_base_dir, logo_filename)
-            
-            # Try to load the league logo
+            # Map league to sport category
+            sport_category = self._get_sport_category(league)
+            if not sport_category:
+                logger.warning(f"Unknown sport category for league {league}")
+                return None
+
+            # Build path with sport category
+            logo_path = os.path.join(
+                self.league_logo_base_dir,
+                sport_category,
+                f"{league.lower().replace(' ', '_')}.png"
+            )
+
+            # Ensure sport category directory exists
+            os.makedirs(os.path.dirname(logo_path), exist_ok=True)
+
             if os.path.exists(logo_path):
                 try:
-                    logo = Image.open(logo_path).convert("RGBA")
-                    logo = logo.resize((40, 40), Image.Resampling.LANCZOS)
-                    
-                    # Update cache
-                    self._cleanup_cache()
-                    if len(self._logo_cache) >= self._max_cache_size:
-                        oldest_key = min(self._logo_cache.items(), key=lambda x: x[1][1])[0]
-                        del self._logo_cache[oldest_key]
-                    
-                    self._logo_cache[cache_key] = (logo, current_time)
-                    return logo
+                    with Image.open(logo_path) as img:
+                        # Convert to RGBA for transparency support
+                        return img.convert('RGBA')
                 except Exception as e:
                     logger.error(f"Error loading league logo from {logo_path}: {str(e)}")
             
@@ -530,11 +516,19 @@ class BetSlipGenerator:
 
             # --- Footer ---
             footer_y = height - 30
-            draw.text((20, footer_y), f"Bet #{bet_id}", fill=(150, 150, 150), font=self.font_m_18, anchor='lm')
+            bet_id_text = f"Bet #{bet_id}"
             timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M UTC')
-            ts_bbox = draw.textbbox((0,0), timestamp_text, font=self.font_m_18)
+            
+            # Calculate widths
+            bet_id_bbox = draw.textbbox((0, 0), bet_id_text, font=self.font_m_18)
+            ts_bbox = draw.textbbox((0, 0), timestamp_text, font=self.font_m_18)
+            bet_id_width = bet_id_bbox[2] - bet_id_bbox[0]
             ts_width = ts_bbox[2] - ts_bbox[0]
-            draw.text((width - 20 - ts_width, footer_y), timestamp_text, fill=(150, 150, 150), font=self.font_m_18)
+            
+            # Draw bet ID and timestamp with proper spacing
+            padding = 20
+            draw.text((padding, footer_y), bet_id_text, fill=(150, 150, 150), font=self.font_m_18, anchor='lm')
+            draw.text((width - padding, footer_y), timestamp_text, fill=(150, 150, 150), font=self.font_m_18, anchor='rm')
 
             logger.info(f"Bet slip PIL image generated successfully for Bet ID: {bet_id}")
             return image.convert("RGB") # Convert back to RGB before returning
