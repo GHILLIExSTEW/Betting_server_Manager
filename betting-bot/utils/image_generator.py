@@ -1,18 +1,18 @@
 # /home/container/betting-bot/utils/image_generator.py
 
 import os
-import logging # Added import
+import logging
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
-from utils.league_dictionaries import league_colors, league_logos
+# Removed incorrect import: from utils.league_dictionaries import league_colors, league_logos
 from utils.bet_utils import format_odds_with_sign
 from config import Config
 from data.models.bet import Bet, BetLeg
 from typing import List, Optional
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__) # Added logger instantiation
+logging.basicConfig(level=logging.INFO) # Basic config, ensure your main setup runs first
+logger = logging.getLogger(__name__)
 
 # Constants
 ASSET_DIR = Config.ASSET_DIR
@@ -20,17 +20,13 @@ DEFAULT_FONT_PATH = os.path.join(ASSET_DIR, 'fonts', 'GothamMedium.ttf')
 DEFAULT_BOLD_FONT_PATH = os.path.join(ASSET_DIR, 'fonts', 'GothamBold.ttf')
 LOGO_DIR = os.path.join(ASSET_DIR, 'logos')
 DEFAULT_TEAM_LOGO = os.path.join(LOGO_DIR, 'default_logo.png')
+DEFAULT_INDICATOR_COLOR = (114, 137, 218) # Default color (Discord blurple) since league colors are not used
 
 # Ensure default fonts exist
 if not os.path.exists(DEFAULT_FONT_PATH):
     logger.error(f"Default font not found at {DEFAULT_FONT_PATH}")
-    # Handle error appropriately, maybe raise an exception or use a fallback
 if not os.path.exists(DEFAULT_BOLD_FONT_PATH):
     logger.error(f"Default bold font not found at {DEFAULT_BOLD_FONT_PATH}")
-    # Handle error appropriately
-
-# Log successful import of league dictionaries - This was the line causing the error
-logger.info("Successfully imported league dictionaries.") # Now logger is defined
 
 # Load default fonts
 try:
@@ -62,33 +58,42 @@ class BetSlipGenerator:
     def _load_team_logo(self, league_name: str, team_name: str) -> Image.Image:
         """Loads a team logo, falling back to default if not found."""
         try:
+            # Construct path: ASSET_DIR/logos/LEAGUE_NAME/Team_Name.png
             logo_filename = f"{team_name.replace(' ', '_')}.png"
             logo_path = os.path.join(self.logo_dir, league_name.upper(), logo_filename)
+
             if not os.path.exists(logo_path):
                 # Fallback: try finding logo directly in logo_dir if league folder doesn't exist or logo isn't there
-                logo_path = os.path.join(self.logo_dir, logo_filename)
-                if not os.path.exists(logo_path):
-                     # Use default logo if specific one not found
-                    logo_path = self.default_logo
-                    logger.warning(f"Team logo not found for {team_name} in league {league_name}. Using default. Checked: {os.path.join(self.logo_dir, league_name.upper(), logo_filename)} and {os.path.join(self.logo_dir, logo_filename)}")
-                else:
+                logo_path_fallback = os.path.join(self.logo_dir, logo_filename)
+                if os.path.exists(logo_path_fallback):
+                     logo_path = logo_path_fallback
                      logger.debug(f"Found team logo for {team_name} directly in logo dir: {logo_path}")
-            else:
-                logger.debug(f"Found team logo for {team_name} in league {league_name}: {logo_path}")
+                else:
+                     # Use default logo if specific one not found
+                     default_logo_path = self.default_logo
+                     logger.warning(f"Team logo not found for {team_name} in league {league_name}. Using default. Checked: {logo_path} and {logo_path_fallback}")
+                     logo_path = default_logo_path # Use default path
+
+            # Check if the final logo_path exists before trying to open
+            if not os.path.exists(logo_path):
+                 logger.error(f"Final logo path does not exist: {logo_path}. Even default logo might be missing.")
+                 # Return a small transparent image if even default logo is missing
+                 return Image.new('RGBA', (self.logo_size, self.logo_size), (0, 0, 0, 0))
 
             logo = Image.open(logo_path).convert("RGBA")
             logo.thumbnail((self.logo_size, self.logo_size), Image.Resampling.LANCZOS)
             return logo
-        except FileNotFoundError:
-            logger.warning(f"Default logo not found at {self.default_logo}. Returning empty image.")
-            # Return a small transparent image if default logo is also missing
+
+        except FileNotFoundError: # Should be caught by the os.path.exists check now, but keep for safety
+            logger.warning(f"FileNotFoundError for logo path: {logo_path}. Returning transparent image.")
             return Image.new('RGBA', (self.logo_size, self.logo_size), (0, 0, 0, 0))
         except Exception as e:
             logger.exception(f"Error loading logo for {team_name} ({league_name}): {e}")
+            # Return a transparent image on any other error
             return Image.new('RGBA', (self.logo_size, self.logo_size), (0, 0, 0, 0))
 
 
-    def _draw_leg(self, draw: ImageDraw.ImageDraw, y_offset: int, leg: BetLeg, league_color: tuple, leg_number: int):
+    def _draw_leg(self, draw: ImageDraw.ImageDraw, y_offset: int, leg: BetLeg, leg_number: int):
         """Draws a single bet leg."""
         leg_top = y_offset
         leg_bottom = leg_top + self.leg_height
@@ -96,39 +101,53 @@ class BetSlipGenerator:
         # Background for the leg
         draw.rectangle([0, leg_top, self.width, leg_bottom], fill=(35, 39, 42)) # Dark grey background
 
-        # League color indicator line
-        draw.line([0, leg_top, self.width, leg_top], fill=league_color, width=4)
+        # Default color indicator line (removed league_color dependency)
+        draw.line([0, leg_top, self.width, leg_top], fill=DEFAULT_INDICATOR_COLOR, width=4)
 
         # Leg Number
         leg_num_text = f"#{leg_number}"
         draw.text((self.padding, leg_top + self.padding // 2), leg_num_text, fill=(200, 200, 200), font=self.font_b_18)
 
         # Team Info (if applicable)
-        if leg.team_name:
-            team_logo = self._load_team_logo(leg.league_name or "default", leg.team_name)
-            logo_y = leg_top + (self.leg_height - self.logo_size) // 2
-            Image.alpha_composite(self.image, Image.new('RGBA', self.image.size, (0,0,0,0))).paste(team_logo, (self.padding + 50, logo_y), team_logo) # Adjust x based on leg num text
+        logo_area_width = self.padding + 50 # Reserve space for leg num roughly
+        text_start_x = logo_area_width # Default start for text
 
-            # Team Name and Bet Type Text
-            team_x = self.padding + 50 + self.logo_size + self.padding
-            draw.text((team_x, leg_top + self.padding), leg.team_name, fill=(255, 255, 255), font=self.font_b_24)
-            draw.text((team_x, leg_top + self.padding + 30), f"{leg.bet_type}: {leg.line}", fill=(200, 200, 200), font=self.font_m_18)
+        if leg.team_name:
+            # Use league_name from the leg for finding the logo directory
+            team_logo = self._load_team_logo(leg.league_name or "unknown_league", leg.team_name)
+            logo_y = leg_top + (self.leg_height - self.logo_size) // 2
+            # Paste the logo using alpha compositing to handle transparency
+            temp_image = Image.new('RGBA', self.image.size, (0, 0, 0, 0))
+            temp_image.paste(team_logo, (logo_area_width, logo_y), team_logo)
+            self.image = Image.alpha_composite(self.image.convert("RGBA"), temp_image).convert("RGB")
+            draw = ImageDraw.Draw(self.image) # Recreate draw object after pasting
+
+            # Team Name and Bet Type Text start after logo
+            text_start_x = logo_area_width + self.logo_size + self.padding
+            draw.text((text_start_x, leg_top + self.padding), leg.team_name, fill=(255, 255, 255), font=self.font_b_24)
+            draw.text((text_start_x, leg_top + self.padding + 30), f"{leg.bet_type}: {leg.line}", fill=(200, 200, 200), font=self.font_m_18)
         else:
-            # Handle player props or other non-team bets
-            prop_x = self.padding + 50 # Align with where team text would start
-            draw.text((prop_x, leg_top + self.padding), f"{leg.bet_type}: {leg.line}", fill=(255, 255, 255), font=self.font_b_24)
+            # Handle player props or other non-team bets - text starts closer to left
+            draw.text((text_start_x, leg_top + self.padding), f"{leg.bet_type}: {leg.line}", fill=(255, 255, 255), font=self.font_b_24)
 
 
         # Odds
         odds_text = format_odds_with_sign(leg.odds)
-        tw, th = draw.textbbox((0,0), odds_text, font=self.font_b_24)[2:4]
+        # Use textbbox to get width and height for centering
+        try:
+            bbox = draw.textbbox((0, 0), odds_text, font=self.font_b_24)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+        except AttributeError: # Fallback for older PIL versions
+             tw, th = draw.textsize(odds_text, font=self.font_b_24)
+
         odds_x = self.width - self.padding - tw
         odds_y = leg_top + (self.leg_height - th) // 2
         draw.text((odds_x, odds_y), odds_text, fill=(255, 255, 255), font=self.font_b_24)
 
         # Separator line
-        if leg_number > 0: # Don't draw separator above the first leg
-            draw.line([self.padding, leg_top, self.width - self.padding, leg_top], fill=(60, 60, 60), width=1)
+        # No need for leg_number > 0 check as it's drawn relative to leg_top
+        draw.line([self.padding, leg_bottom -1, self.width - self.padding, leg_bottom-1], fill=(60, 60, 60), width=1)
 
 
     def create_bet_slip(self, bet: Bet) -> Optional[BytesIO]:
@@ -139,21 +158,35 @@ class BetSlipGenerator:
 
         num_legs = len(bet.legs)
         total_height = self.header_height + (num_legs * self.leg_height) + self.footer_height
+        # Start with RGB, convert to RGBA only when pasting logos, then back to RGB
         self.image = Image.new('RGB', (self.width, total_height), (44, 47, 51)) # Discord grey background
         draw = ImageDraw.Draw(self.image)
 
         # --- Header ---
         header_bottom = self.header_height
-        # Use league color of the first leg for the header top border
-        first_leg_league = bet.legs[0].league_name or "default"
-        header_color = league_colors.get(first_leg_league.upper(), (114, 137, 218)) # Default to Discord blurple
+        # Use default color for header top border (removed league_color dependency)
+        header_color = DEFAULT_INDICATOR_COLOR
         draw.rectangle([0, 0, self.width, header_bottom], fill=(35, 39, 42)) # Darker grey header
         draw.line([0, 0, self.width, 0], fill=header_color, width=5) # Top border
 
-        # Header Title (Bet Type)
-        title = "Straight Bet" if num_legs == 1 else "Multi-Team Parlay Bet" if all(leg.team_name is not None for leg in bet.legs) else "Parlay Bet"
+        # Header Title (Bet Type) - Uses Multi-Team Parlay Bet title per user context
+        is_multi_team = num_legs > 1 and all(leg.team_name is not None for leg in bet.legs)
+        if is_multi_team:
+            title = "Multi-Team Parlay Bet"
+        elif num_legs == 1:
+             title = "Straight Bet"
+        else: # Parlay with props or only props
+            title = "Parlay Bet"
 
-        tw, th = draw.textbbox((0,0), title, font=self.font_b_36)[2:4]
+
+        # Use textbbox for centering title
+        try:
+            bbox = draw.textbbox((0, 0), title, font=self.font_b_36)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+        except AttributeError: # Fallback for older PIL versions
+             tw, th = draw.textsize(title, font=self.font_b_36)
+
         title_x = (self.width - tw) // 2
         title_y = (self.header_height - th) // 2
         draw.text((title_x, title_y), title, fill=(255, 255, 255), font=self.font_b_36)
@@ -161,9 +194,10 @@ class BetSlipGenerator:
         # --- Legs ---
         current_y = self.header_height
         for i, leg in enumerate(bet.legs):
-            league_name = leg.league_name or "default"
-            league_color = league_colors.get(league_name.upper(), (114, 137, 218))
-            self._draw_leg(draw, current_y, leg, league_color, i + 1)
+            # Pass draw object that might be recreated if logos are pasted
+            self._draw_leg(draw, current_y, leg, i + 1)
+            # Important: Re-assign draw object in case self.image was changed by alpha_composite
+            draw = ImageDraw.Draw(self.image)
             current_y += self.leg_height
 
         # --- Footer ---
@@ -177,9 +211,19 @@ class BetSlipGenerator:
         payout_text = f"To Win: {bet.potential_payout:.2f} Units"
 
         draw.text((self.padding, footer_top + self.padding), stake_text, fill=(200, 200, 200), font=self.font_m_18)
-        tw, _ = draw.textbbox((0,0), odds_text, font=self.font_m_18)[2:4]
+
+        try: # Use textbbox for centering odds
+            bbox = draw.textbbox((0, 0), odds_text, font=self.font_m_18)
+            tw = bbox[2] - bbox[0]
+        except AttributeError:
+            tw, _ = draw.textsize(odds_text, font=self.font_m_18)
         draw.text(((self.width - tw) // 2, footer_top + self.padding), odds_text, fill=(200, 200, 200), font=self.font_m_18)
-        tw, _ = draw.textbbox((0,0), payout_text, font=self.font_b_18)[2:4]
+
+        try: # Use textbbox for right-aligning payout
+            bbox = draw.textbbox((0, 0), payout_text, font=self.font_b_18)
+            tw = bbox[2] - bbox[0]
+        except AttributeError:
+            tw, _ = draw.textsize(payout_text, font=self.font_b_18)
         draw.text((self.width - self.padding - tw, footer_top + self.padding), payout_text, fill=(100, 255, 100), font=self.font_b_18) # Green payout
 
         # Optional: Capper Name
@@ -199,7 +243,9 @@ class BetSlipGenerator:
             logger.exception(f"Error saving image to BytesIO: {e}")
             return None
 
-# Example Usage (for testing)
+# Example Usage (for testing - requires running from project root or adjusting paths)
+# (Keep the example usage block as is, but it will now test the modified code)
+# ... [Rest of the __main__ block for testing] ...
 if __name__ == '__main__':
     # Ensure the script is run from the project root or adjust paths accordingly
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
