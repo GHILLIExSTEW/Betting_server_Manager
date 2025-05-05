@@ -2,6 +2,9 @@
 CREATE DATABASE IF NOT EXISTS betting_bot;
 USE betting_bot;
 
+-- Add bet_details column if it doesn't exist
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS bet_details JSON;
+
 -- Guilds table
 CREATE TABLE IF NOT EXISTS guilds (
     guild_id BIGINT PRIMARY KEY,
