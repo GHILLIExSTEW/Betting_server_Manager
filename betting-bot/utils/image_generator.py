@@ -285,13 +285,16 @@ class BetSlipGenerator:
         """Load the lock icon image with caching."""
         if self._lock_icon_cache is None:
             try:
-                if os.path.exists(self.lock_icon_path):
-                     with Image.open(self.lock_icon_path) as lock:
+                lock_icon_path = os.path.join(self.assets_dir, "lock_icon.png")
+                if os.path.exists(lock_icon_path):
+                    with Image.open(lock_icon_path) as lock:
                         lock = lock.convert("RGBA")
-                        lock = lock.resize((20, 20), Image.Resampling.LANCZOS) # Size from user file
+                        lock = lock.resize((30, 30), Image.Resampling.LANCZOS)  # Increased size for visibility
                         self._lock_icon_cache = lock.copy()
-                else: logger.warning(f"Lock icon not found at {self.lock_icon_path}")
-            except Exception as e: logger.error(f"Error loading lock icon: {str(e)}")
+                else:
+                    logger.warning(f"Lock icon not found at {lock_icon_path}")
+            except Exception as e:
+                logger.error(f"Error loading lock icon: {str(e)}")
         return self._lock_icon_cache
 
 
@@ -302,29 +305,28 @@ class BetSlipGenerator:
         parlay_legs: Optional[List[Dict[str, Any]]] = None, is_same_game: bool = False
     ) -> Optional[Image.Image]: # Return PIL Image or None
         """Generate a bet slip image for straight or parlay bets."""
-        # Using drawing logic based on user's uploaded file structure
         logger.info(f"Generating bet slip - Type: {bet_type}, League: {league}, BetID: {bet_id}")
         try:
+            # Adjust dimensions for better visibility
             width = 800
-            header_h = 80 # Use values from __init__ or defaults if preferred
-            footer_h = 60
-            # Height calculation from user file was complex, use simpler approach
-            # Base height + space per leg for parlays
-            leg_draw_height = 150 # Approx height needed per parlay leg display
+            header_h = 100  # Increased header height
+            footer_h = 80
+            leg_draw_height = 180  # Increased leg height
             num_legs = len(parlay_legs) if parlay_legs else 1
-            parlay_extra_height = (num_legs -1) * leg_draw_height if bet_type == "parlay" and parlay_legs else 0
-            parlay_total_section_height = 120 if bet_type == "parlay" else 0 # Space for total odds/stake
-            base_content_height = 310 # Approx height for straight bet content (logos, bet, odds, units)
-            height = header_h + (base_content_height if bet_type=='straight' else parlay_extra_height + leg_draw_height) + parlay_total_section_height + footer_h
+            parlay_extra_height = (num_legs - 1) * leg_draw_height if bet_type == "parlay" and parlay_legs else 0
+            parlay_total_section_height = 120 if bet_type == "parlay" else 0
+            base_content_height = 400  # Increased base content height
+            height = header_h + (base_content_height if bet_type == 'straight' else parlay_extra_height + leg_draw_height) + parlay_total_section_height + footer_h
 
-            image = Image.new('RGB', (width, height), (40, 40, 40)) # Dark background from user file
+            # Create image with dark background
+            image = Image.new('RGBA', (width, height), (40, 40, 40, 255))
             draw = ImageDraw.Draw(image)
 
-            # --- Header --- (From user file)
-            header_y = 40
+            # Draw header
+            header_y = 30  # Adjusted header position
             header_text = f"{league.upper() if league else ''} - {'Straight Bet' if bet_type == 'straight' else 'Parlay'}"
             header_text = header_text.strip(" - ")
-            bbox = draw.textbbox((0, 0), header_text, font=self.font_b_36) # Use bold header font
+            bbox = draw.textbbox((0, 0), header_text, font=self.font_b_36)
             tw = bbox[2] - bbox[0]
             draw.text(((width - tw) / 2, header_y), header_text, fill='white', font=self.font_b_36)
 
@@ -373,30 +375,38 @@ class BetSlipGenerator:
                 odds_text = self._format_odds_with_sign(int(odds))
                 draw.text((width // 2, odds_y), odds_text, fill='white', font=self.font_b_24, anchor='mm') # User file used details_font(28), try bold 24
 
-                # Draw units
-                units_y = odds_y + 40
+                # Draw units with lock icons
+                units_y = odds_y + 50  # Increased spacing
                 units_text = f"To Win {units:.2f} Units"
-                units_bbox = draw.textbbox((0, 0), units_text, font=self.font_b_24) # Bold 24 for units
+                units_bbox = draw.textbbox((0, 0), units_text, font=self.font_b_24)
                 units_width = units_bbox[2] - units_bbox[0]
+                
                 lock_icon = self._load_lock_icon()
                 if lock_icon:
-                    lock_spacing = 15
-                    lock_x_left = (width - units_width - 2 * lock_icon.width - 2 * lock_spacing) // 2
-                    if image.mode != 'RGBA': image = image.convert("RGBA")
+                    lock_spacing = 20  # Increased spacing
+                    text_total_width = units_width + 2 * lock_icon.width + 2 * lock_spacing
+                    start_x = (width - text_total_width) // 2
+                    
+                    # Draw left lock icon
+                    if image.mode != 'RGBA':
+                        image = image.convert('RGBA')
                     temp_lock_l = Image.new('RGBA', image.size, (0,0,0,0))
-                    temp_lock_l.paste(lock_icon, (lock_x_left, units_y - lock_icon.height // 2), lock_icon)
+                    temp_lock_l.paste(lock_icon, (start_x, units_y - lock_icon.height // 2), lock_icon)
                     image = Image.alpha_composite(image, temp_lock_l)
+                    
+                    # Draw text
+                    draw = ImageDraw.Draw(image)
+                    text_x = start_x + lock_icon.width + lock_spacing
+                    draw.text((text_x, units_y), units_text, fill=(255, 215, 0), font=self.font_b_24)
+                    
+                    # Draw right lock icon
                     temp_lock_r = Image.new('RGBA', image.size, (0,0,0,0))
-                    lock_x_right = lock_x_left + units_width + lock_icon.width + 2 * lock_spacing
-                    temp_lock_r.paste(lock_icon, (lock_x_right, units_y - lock_icon.height // 2), lock_icon)
+                    temp_lock_r.paste(lock_icon, (text_x + units_width + lock_spacing, units_y - lock_icon.height // 2), lock_icon)
                     image = Image.alpha_composite(image, temp_lock_r)
-                    draw = ImageDraw.Draw(image) # Recreate draw object
-                    draw.text((lock_x_left + lock_icon.width + lock_spacing + units_width // 2, units_y),
-                              units_text, fill=(255, 215, 0), font=self.font_b_24, anchor='mm')
-                else: # Fallback
-                    draw.text((width // 2, units_y), f"白 {units_text} 白",
-                              fill=(255, 215, 0), font=self.emoji_font_24, anchor='mm')
-
+                    draw = ImageDraw.Draw(image)
+                else:
+                    # Fallback without lock icons
+                    draw.text((width // 2, units_y), units_text, fill=(255, 215, 0), font=self.font_b_24, anchor='mm')
 
             elif bet_type == "parlay" and parlay_legs:
                 # --- Parlay Drawing (based on user file's generate method) ---
