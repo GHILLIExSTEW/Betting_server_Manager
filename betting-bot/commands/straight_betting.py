@@ -9,6 +9,7 @@ import logging
 from typing import Optional, List, Dict, Union
 from datetime import datetime, timezone
 import io
+import os
 
 try:
     from utils.errors import BetServiceError, ValidationError, GameNotFoundError
@@ -226,7 +227,7 @@ class CancelButton(Button):
 class BetDetailsModal(Modal):
     def __init__(self, line_type: str, is_manual: bool = False):
         title = "Enter Bet Details"
-        super().__init__(title=title[:45])
+        super().__init__(title=title)
         self.line_type = line_type
         self.is_manual = is_manual
 
@@ -255,7 +256,7 @@ class BetDetailsModal(Modal):
                 label="Player - Line",
                 required=True,
                 max_length=100,
-                placeholder="Enter Player - Line (e.g., Points Over 25.5)"
+                placeholder="Enter Player - Line (e.g., LeBron James - Points Over 25.5)"
             )
             self.add_item(self.player_line)
         else:
@@ -279,56 +280,90 @@ class BetDetailsModal(Modal):
 
     async def on_submit(self, interaction: Interaction):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual} by user {interaction.user.id}")
-        
-        # Get line value based on bet type
-        if self.line_type == "player_prop":
-            line = self.player_line.value.strip()
-        else:
-            line = self.line.value.strip()
-            
-        odds_input = self.odds.value.strip()
-
-        if not line or not odds_input:
-            logger.warning("Modal submission failed: Missing required fields")
-            await interaction.response.send_message("Please fill in all required fields.", ephemeral=True)
-            return
-
-        # Validate odds input
         try:
-            odds_val = float(odds_input)
-            if not (-10000 <= odds_val <= 10000):
-                raise ValueError("Odds must be between -10000 and +10000")
-            if -100 < odds_val < 100 and odds_val != 0:
-                raise ValueError("Odds cannot be between -99 and +99 (except 0)")
-        except ValueError as ve:
-            logger.warning(f"Invalid odds input: {odds_input}. Error: {ve}")
-            await interaction.response.send_message(
-                f"❌ Invalid odds: {ve}. Please enter a valid number (e.g., -110 or +200).", ephemeral=True
-            )
-            return
-
-        self.view.bet_details['line'] = line
-        self.view.bet_details['odds_str'] = odds_input
-
-        if self.is_manual or self.line_type == "player_prop":
-            team = self.team.value.strip()
-            opponent = self.opponent.value.strip()
-            if not all([team, opponent]):
-                logger.warning("Modal submission failed: Missing team or opponent/player")
-                await interaction.response.send_message(
-                    "Please provide valid team and opponent/player.", ephemeral=True
-                )
-                return
-            self.view.bet_details['team'] = team
-            if self.line_type == "game_line":
-                self.view.bet_details['opponent'] = opponent
+            # Get line value based on bet type
+            if self.line_type == "player_prop":
+                line = self.player_line.value.strip()
             else:
-                self.view.bet_details['player'] = opponent
+                line = self.line.value.strip()
 
-        logger.debug(f"Bet details entered: {self.view.bet_details}")
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-        await self.view.go_next(interaction)
+            # Create bet details
+            bet_details = {
+                'bet_type': 'straight',
+                'league': self.view.bet_details.get('league', 'NHL'),
+                'line_type': self.line_type,
+                'game_id': self.view.bet_details.get('game_id', 'Other'),
+                'line': line,
+                'odds_str': self.odds.value.strip(),
+                'team': self.team.value.strip() if hasattr(self, 'team') else None,
+                'opponent': self.opponent.value.strip()
+            }
+
+            logger.debug(f"Bet details entered: {bet_details}")
+
+            # Validate required fields
+            if not all(bet_details[field].strip() if bet_details[field] else None for field in ['team', 'opponent', 'line', 'odds_str']):
+                await interaction.response.send_message("❌ All fields are required. Please fill them all.", ephemeral=True)
+                return
+
+            # Store team information for logo loading
+            if 'team' in bet_details and 'opponent' in bet_details:
+                league = bet_details.get('league', 'NHL')
+
+                # Get image paths for the teams
+                try:
+                    # Get the bet_serial from the view's bet_details
+                    bet_serial = self.view.bet_details.get('bet_serial')
+                    if not bet_serial:
+                        logger.warning("No bet_serial found in bet_details")
+                        return
+
+                    # Get image paths from the bet_slip_generator
+                    team_image_path = None
+                    opponent_image_path = None
+
+                    # Get the team logo paths
+                    team_logo = self.view.bet_slip_generator._load_team_logo(bet_details['team'], league)
+                    opponent_logo = self.view.bet_slip_generator._load_team_logo(bet_details['opponent'], league)
+
+                    if team_logo:
+                        team_image_path = os.path.join(
+                            self.view.bet_slip_generator.league_team_base_dir,
+                            self.view.bet_slip_generator._ensure_team_dir_exists(league),
+                            f"{bet_details['team'].lower().replace(' ', '_')}.png"
+                        )
+                    if opponent_logo:
+                        opponent_image_path = os.path.join(
+                            self.view.bet_slip_generator.league_team_base_dir,
+                            self.view.bet_slip_generator._ensure_team_dir_exists(league),
+                            f"{bet_details['opponent'].lower().replace(' ', '_')}.png"
+                        )
+
+                    # Store image paths in bet_images table
+                    if team_image_path or opponent_image_path:
+                        try:
+                            query = """
+                                INSERT INTO bet_images (bet_serial, league, team_image_path, opponent_image_path, guild_id, user_id)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                            """
+                            await self.view.bot.db_manager.execute(
+                                query,
+                                (bet_serial, league, team_image_path, opponent_image_path, interaction.guild_id, interaction.user.id)
+                            )
+                            logger.debug(f"Stored image paths for bet {bet_serial}")
+                        except Exception as e:
+                            logger.error(f"Failed to store image paths for bet {bet_serial}: {e}")
+                except Exception as e:
+                    logger.error(f"Error handling team logos: {e}")
+
+            # Update view's bet details
+            self.view.bet_details.update(bet_details)
+            self.view.current_step = 4
+            await self.view.go_next(interaction)
+
+        except Exception as e:
+            logger.error(f"Error in BetDetailsModal on_submit: {e}")
+            await interaction.response.send_message("❌ Failed to process bet details. Please try again.", ephemeral=True)
 
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
         logger.error(f"Error in BetDetailsModal: {error}", exc_info=True)
