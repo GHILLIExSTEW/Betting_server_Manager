@@ -141,9 +141,36 @@ class BetSlipGenerator:
         self._cache_expiry = 3600
         self._last_cache_cleanup = time.time()
         
+        # Set dimensions
+        self.width = 800
+        self.leg_height = 120
+        self.header_height = 100
+        self.footer_height = 80
+        self.padding = 20
+        self.logo_size = 60
+        self.image = None
+        
+        # Use globally loaded fonts
+        self.font_m_18 = font_m_18
+        self.font_m_24 = font_m_24
+        self.font_b_18 = font_b_18
+        self.font_b_24 = font_b_24
+        self.font_b_36 = font_b_36
+        self.emoji_font_24 = emoji_font_24
+        
         logger.info(f"BetSlipGenerator initialized with assets_dir: {self.assets_dir}")
 
-    # Removed _get_default_*, _ensure_* methods as logic is now global
+    def _get_default_font(self) -> str:
+        """Get the default font path."""
+        return _PATHS["DEFAULT_FONT_PATH"]
+
+    def _get_default_bold_font(self) -> str:
+        """Get the default bold font path."""
+        return _PATHS["DEFAULT_BOLD_FONT_PATH"]
+
+    def _get_default_emoji_font(self) -> str:
+        """Get the default emoji font path."""
+        return _PATHS["DEFAULT_EMOJI_FONT_PATH_NOTO"]
 
     def _format_odds_with_sign(self, odds: Optional[Any]) -> str:
         """Formats odds, adding a '+' for positive values. Handles None/non-numeric."""
