@@ -306,6 +306,28 @@ class BetDetailsModal(Modal):
                 await interaction.response.send_message("❌ All fields are required. Please fill them all.", ephemeral=True)
                 return
 
+            # Create the bet in the database first
+            try:
+                bet_serial = await self.view.bot.bet_service.create_straight_bet(
+                    guild_id=interaction.guild_id,
+                    user_id=interaction.user.id,
+                    game_id=bet_details['game_id'] if bet_details['game_id'] != 'Other' else None,
+                    bet_type="player_prop" if self.line_type == "player_prop" else "game_line",
+                    team=bet_details['team'],
+                    opponent=bet_details['opponent'],
+                    line=bet_details['line'],
+                    units=1.00,  # Default units
+                    odds=float(bet_details['odds_str']),
+                    channel_id=None,  # Will be set later
+                    league=bet_details['league']
+                )
+                self.view.bet_details['bet_serial'] = bet_serial
+                logger.debug(f"Created straight bet with serial {bet_serial}")
+            except Exception as e:
+                logger.error(f"Failed to create straight bet: {e}")
+                await interaction.response.send_message("❌ Failed to create bet. Please try again.", ephemeral=True)
+                return
+
             # Store team information for logo loading
             if 'team' in bet_details and 'opponent' in bet_details:
                 league = bet_details.get('league', 'NHL')
