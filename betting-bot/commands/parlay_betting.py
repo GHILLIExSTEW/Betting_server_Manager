@@ -259,6 +259,13 @@ class BetDetailsModal(Modal):
                 return
             leg['player'] = player
 
+        # Store team information for logo loading
+        if 'team' in leg and 'opponent' in leg:
+            league = self.view.bet_details.get('league', 'NHL')
+            leg['league'] = league
+            # Pre-load logos for this leg
+            await self.view._preload_team_logos(leg['team'], leg['opponent'], league)
+
         if 'legs' not in self.view.bet_details:
             self.view.bet_details['legs'] = []
         self.view.bet_details['legs'].append(leg)
@@ -445,6 +452,21 @@ class ParlayBetWorkflowView(View):
         self.preview_image_bytes = None
         self.team_logos = {}  # Store team logos for each leg
 
+    async def _preload_team_logos(self, team1: str, team2: str, league: str):
+        """Preload team logos for a leg."""
+        try:
+            # Load and cache logos for both teams
+            logo1 = self.bet_slip_generator._load_team_logo(team1, league)
+            logo2 = self.bet_slip_generator._load_team_logo(team2, league)
+            
+            # Store logos in the cache
+            self.team_logos[f"{team1}_{league}"] = logo1
+            self.team_logos[f"{team2}_{league}"] = logo2
+            
+            logger.debug(f"Preloaded logos for {team1} and {team2} in {league}")
+        except Exception as e:
+            logger.error(f"Error preloading team logos: {e}")
+
     async def finalize_bet(self, interaction: Interaction):
         """Handle the finalization of the parlay bet."""
         try:
@@ -475,15 +497,18 @@ class ParlayBetWorkflowView(View):
                 game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
                 is_same_game = len(game_ids) == 1
 
-                # Create parlay legs with proper team names
+                # Create parlay legs with proper team names and odds
                 parlay_legs = []
                 for leg in legs:
                     leg_dict = {
                         'home_team': leg.get('team', 'Unknown'),
                         'away_team': leg.get('opponent', 'Unknown'),
                         'line': leg.get('line', 'ML'),
-                        'odds': float(final_odds_modal.odds_value),
-                        'units': float(leg.get('units_str', '1.00'))
+                        'odds': float(leg.get('odds', 0)),
+                        'units': float(leg.get('units_str', '1.00')),
+                        'game_id': leg.get('game_id'),
+                        'bet_type': leg.get('bet_type', 'ML'),
+                        'league': leg.get('league', league)
                     }
                     parlay_legs.append(leg_dict)
 
@@ -492,13 +517,21 @@ class ParlayBetWorkflowView(View):
                 home_team = first_leg.get('team', 'Unknown')
                 away_team = first_leg.get('opponent', 'Unknown')
 
+                # Calculate total parlay odds
+                total_odds = self._calculate_parlay_odds(parlay_legs)
+                total_units = sum(float(leg.get('units_str', '1.00')) for leg in legs)
+
+                # Ensure all team logos are loaded
+                for leg in parlay_legs:
+                    await self._preload_team_logos(leg['home_team'], leg['away_team'], leg['league'])
+
                 bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                     home_team=home_team,
                     away_team=away_team,
                     league=league,
                     line=first_leg.get('line', 'ML'),
-                    odds=float(final_odds_modal.odds_value),
-                    units=float(first_leg.get('units_str', '1.00')),
+                    odds=total_odds,
+                    units=total_units,
                     bet_id=bet_serial,
                     timestamp=timestamp,
                     bet_type="parlay",
@@ -508,7 +541,7 @@ class ParlayBetWorkflowView(View):
 
                 # Save preview image
                 self.preview_image_bytes = io.BytesIO()
-                bet_slip_image.save(self.preview_image_bytes, format='PNG')
+                bet_slip_image.save(self.preview_image_bytes, format='PNG', optimize=True)
                 self.preview_image_bytes.seek(0)
 
                 # Get available channels
@@ -549,6 +582,21 @@ class ParlayBetWorkflowView(View):
                 ephemeral=True
             )
             self.stop()
+
+    def _calculate_parlay_odds(self, legs: List[Dict[str, Any]]) -> float:
+        """Calculate the total odds for a parlay bet."""
+        try:
+            total_odds = 1.0
+            for leg in legs:
+                odds = float(leg.get('odds', 0))
+                if odds > 0:
+                    total_odds *= (odds / 100) + 1
+                else:
+                    total_odds *= (100 / abs(odds)) + 1
+            return (total_odds - 1) * 100
+        except Exception as e:
+            logger.error(f"Error calculating parlay odds: {str(e)}")
+            return 0.0
 
     async def add_leg(self, interaction: Interaction, leg_details: Dict[str, Any]):
         """Add a leg to the parlay bet."""
