@@ -365,12 +365,12 @@ class BetDetailsModal(Modal):
                     if team_image_path or opponent_image_path:
                         try:
                             query = """
-                                INSERT INTO bet_images (bet_serial, league, team_image_path, opponent_image_path, guild_id, user_id)
-                                VALUES (%s, %s, %s, %s, %s, %s)
+                                INSERT INTO bet_images (bet_serial, leg, league, team_image_path, opponent_image_path, guild_id, user_id)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
                             """
                             await self.view.bot.db_manager.execute(
                                 query,
-                                (bet_serial, league, team_image_path, opponent_image_path, interaction.guild_id, interaction.user.id)
+                                (bet_serial, 1, league, team_image_path, opponent_image_path, interaction.guild_id, interaction.user.id)
                             )
                             logger.debug(f"Stored image paths for bet {bet_serial}")
                         except Exception as e:
