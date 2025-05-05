@@ -226,7 +226,7 @@ class BetSlipGenerator:
         self,
         home_team: str,
         away_team: str,
-        league: str,
+        league: Optional[str],
         line: str,
         odds: float,
         units: float,
@@ -263,7 +263,10 @@ class BetSlipGenerator:
 
             # Draw header
             header_y = 40
-            header_text = f"{league} - {'Straight Bet' if bet_type == 'straight' else 'Parlay'}"
+            if league:
+                header_text = f"{league} - {'Straight Bet' if bet_type == 'straight' else 'Parlay'}"
+            else:
+                header_text = 'Parlay' if bet_type == 'parlay' else 'Straight Bet'
             draw.text((width // 2, header_y), header_text, fill='white', font=header_font, anchor='mm')
 
             if bet_type == "straight":
@@ -272,14 +275,14 @@ class BetSlipGenerator:
                 logo_size = (120, 120)  # Larger logos
 
                 # Draw home team logo and name
-                home_logo = self._load_team_logo(home_team, league)
+                home_logo = self._load_team_logo(home_team, league or 'NHL')  # Default to NHL if no league specified
                 if home_logo:
                     home_logo = home_logo.resize(logo_size, Image.Resampling.LANCZOS)
                     image.paste(home_logo, (width // 4 - logo_size[0] // 2, logo_y), home_logo)
                 draw.text((width // 4, logo_y + logo_size[1] + 20), home_team, fill='white', font=team_font, anchor='mm')
 
                 # Draw away team logo and name
-                away_logo = self._load_team_logo(away_team, league)
+                away_logo = self._load_team_logo(away_team, league or 'NHL')  # Default to NHL if no league specified
                 if away_logo:
                     away_logo = away_logo.resize(logo_size, Image.Resampling.LANCZOS)
                     image.paste(away_logo, (3 * width // 4 - logo_size[0] // 2, logo_y), away_logo)
@@ -361,14 +364,15 @@ class BetSlipGenerator:
                         image=image,
                         draw=draw,
                         leg=leg,
-                        league=league,
+                        league=leg.get('league', league or 'NHL'),  # Use leg's league or default
                         width=width,
                         start_y=current_y,
                         team_font=team_font,
                         odds_font=details_font,
                         units_font=details_font,
                         emoji_font=ImageFont.truetype(self.emoji_font_path, 24) if self.emoji_font_path else team_font,
-                        draw_logos=True
+                        draw_logos=True,
+                        is_same_game=is_same_game
                     )
 
                 # Draw total parlay odds and units
@@ -453,7 +457,8 @@ class BetSlipGenerator:
         odds_font: ImageFont.FreeTypeFont,
         units_font: ImageFont.FreeTypeFont,
         emoji_font: ImageFont.FreeTypeFont,
-        draw_logos: bool = True
+        draw_logos: bool = True,
+        is_same_game: bool = False
     ) -> int:
         """Draw a single leg of a bet (used for both straight and parlay bets)."""
         # Handle both straight bet and parlay leg formats
@@ -464,7 +469,7 @@ class BetSlipGenerator:
         units = float(leg.get('units', 1.00))
 
         current_y = start_y
-        if draw_logos:
+        if draw_logos and is_same_game:  # Only draw logos for same-game parlays
             # Try to get logos from cache first
             home_logo = None
             away_logo = None
