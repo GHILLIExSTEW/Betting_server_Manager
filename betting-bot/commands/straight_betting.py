@@ -240,9 +240,11 @@ class BetDetailsModal(Modal):
             self.add_item(self.team)
             self.add_item(self.opponent)
 
-        if line_type == "player_prop" and not self.is_manual:
+        if line_type == "player_prop":
             self.player = TextInput(label="Player", required=True, max_length=100)
+            self.opponent = TextInput(label="Opponent", required=True, max_length=100)
             self.add_item(self.player)
+            self.add_item(self.opponent)
 
         self.line = TextInput(label="Line", required=True, max_length=100)
         self.odds = TextInput(
@@ -279,7 +281,7 @@ class BetDetailsModal(Modal):
             return
 
         self.view.bet_details['line'] = line
-        self.view.bet_details['odds_str'] = odds_input  # Store the user-provided odds
+        self.view.bet_details['odds_str'] = odds_input
 
         if self.is_manual:
             team = self.team.value.strip()
@@ -297,11 +299,13 @@ class BetDetailsModal(Modal):
                 self.view.bet_details['player'] = opponent
         elif self.line_type == "player_prop":
             player = self.player.value.strip()
-            if not player:
-                logger.warning("Modal submission failed: Missing player")
-                await interaction.response.send_message("Please provide a valid player.", ephemeral=True)
+            opponent = self.opponent.value.strip()
+            if not all([player, opponent]):
+                logger.warning("Modal submission failed: Missing player or opponent")
+                await interaction.response.send_message("Please provide both player and opponent.", ephemeral=True)
                 return
             self.view.bet_details['player'] = player
+            self.view.bet_details['opponent'] = opponent
 
         logger.debug(f"Bet details entered: {self.view.bet_details}")
         if not interaction.response.is_done():

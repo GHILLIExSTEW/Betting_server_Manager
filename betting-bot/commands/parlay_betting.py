@@ -234,15 +234,41 @@ class BetDetailsModal(Modal):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number} by user {interaction.user.id}")
         try:
             # Create leg details
-            leg = {
-                'team': self.team.value.strip(),
-                'opponent': self.opponent.value.strip(),
-                'line': self.line.value.strip(),
-                'odds_str': self.odds.value.strip(),
-                'units_str': '1.00',  # Default units
-                'bet_type': self.line_type,
-                'league': self.view.bet_details.get('league', 'NHL')
-            }
+            if self.is_manual:
+                leg = {
+                    'team': self.team.value.strip(),
+                    'opponent': self.opponent.value.strip(),
+                    'line': self.line.value.strip(),
+                    'odds_str': self.odds.value.strip(),
+                    'units_str': '1.00',  # Default units
+                    'bet_type': self.line_type,
+                    'league': self.view.bet_details.get('league', 'NHL')
+                }
+            elif self.line_type == "player_prop":
+                leg = {
+                    'team': self.player.value.strip(),
+                    'opponent': self.opponent.value.strip(),
+                    'line': self.line.value.strip(),
+                    'odds_str': self.odds.value.strip(),
+                    'units_str': '1.00',  # Default units
+                    'bet_type': self.line_type,
+                    'league': self.view.bet_details.get('league', 'NHL')
+                }
+            else:
+                leg = {
+                    'team': self.team.value.strip() if hasattr(self, 'team') else None,
+                    'opponent': self.opponent.value.strip() if hasattr(self, 'opponent') else None,
+                    'line': self.line.value.strip(),
+                    'odds_str': self.odds.value.strip(),
+                    'units_str': '1.00',  # Default units
+                    'bet_type': self.line_type,
+                    'league': self.view.bet_details.get('league', 'NHL')
+                }
+
+            # Validate required fields
+            if not all(leg[field].strip() if leg[field] else None for field in ['team', 'opponent', 'line', 'odds_str']):
+                await interaction.response.send_message("❌ All fields are required. Please fill them all.", ephemeral=True)
+                return
 
             # If this is the first leg, create the bet in the database
             if len(self.view.bet_details.get('legs', [])) == 0:
