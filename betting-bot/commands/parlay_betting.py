@@ -209,24 +209,38 @@ class BetDetailsModal(Modal):
         self.is_manual = is_manual
         self.leg_number = leg_number
 
-        if is_manual:
-            self.team = TextInput(label="Team", required=True, max_length=100)
-            self.opponent = TextInput(
-                label="Opponent" if line_type == "game_line" else "Player",
+        # Add team/player field based on bet type
+        if is_manual or line_type == "player_prop":
+            self.team = TextInput(
+                label="Team/Player",
                 required=True,
-                max_length=100
+                max_length=100,
+                placeholder="Enter team or player name"
             )
             self.add_item(self.team)
-            self.add_item(self.opponent)
 
-        if line_type == "player_prop":
-            self.player = TextInput(label="Player", required=True, max_length=100)
-            self.opponent = TextInput(label="Opponent", required=True, max_length=100)
-            self.add_item(self.player)
-            self.add_item(self.opponent)
+        # Add opponent field
+        self.opponent = TextInput(
+            label="Opponent",
+            required=True,
+            max_length=100,
+            placeholder="Enter opponent name"
+        )
+        self.add_item(self.opponent)
 
-        self.line = TextInput(label="Line", required=True, max_length=100)
-        self.odds = TextInput(label="Odds", required=True, max_length=100)
+        # Add line and odds fields
+        self.line = TextInput(
+            label="Line",
+            required=True,
+            max_length=100,
+            placeholder="Enter bet line"
+        )
+        self.odds = TextInput(
+            label="Odds",
+            required=True,
+            max_length=10,
+            placeholder="Enter odds (e.g., -110 or +200)"
+        )
         self.add_item(self.line)
         self.add_item(self.odds)
 
@@ -234,19 +248,9 @@ class BetDetailsModal(Modal):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual}, leg_number={self.leg_number} by user {interaction.user.id}")
         try:
             # Create leg details
-            if self.is_manual:
+            if self.is_manual or self.line_type == "player_prop":
                 leg = {
                     'team': self.team.value.strip(),
-                    'opponent': self.opponent.value.strip(),
-                    'line': self.line.value.strip(),
-                    'odds_str': self.odds.value.strip(),
-                    'units_str': '1.00',  # Default units
-                    'bet_type': self.line_type,
-                    'league': self.view.bet_details.get('league', 'NHL')
-                }
-            elif self.line_type == "player_prop":
-                leg = {
-                    'team': self.player.value.strip(),
                     'opponent': self.opponent.value.strip(),
                     'line': self.line.value.strip(),
                     'odds_str': self.odds.value.strip(),
@@ -257,7 +261,7 @@ class BetDetailsModal(Modal):
             else:
                 leg = {
                     'team': self.team.value.strip() if hasattr(self, 'team') else None,
-                    'opponent': self.opponent.value.strip() if hasattr(self, 'opponent') else None,
+                    'opponent': self.opponent.value.strip(),
                     'line': self.line.value.strip(),
                     'odds_str': self.odds.value.strip(),
                     'units_str': '1.00',  # Default units

@@ -230,35 +230,62 @@ class BetDetailsModal(Modal):
         self.line_type = line_type
         self.is_manual = is_manual
 
-        if self.is_manual:
-            self.team = TextInput(label="Team", required=True, max_length=100)
-            self.opponent = TextInput(
-                label="Opponent" if line_type == "game_line" else "Player",
+        # Add team field based on bet type
+        if is_manual or line_type == "player_prop":
+            self.team = TextInput(
+                label="Team",
                 required=True,
-                max_length=100
+                max_length=100,
+                placeholder="Enter team name"
             )
             self.add_item(self.team)
-            self.add_item(self.opponent)
 
+        # Add opponent field
+        self.opponent = TextInput(
+            label="Opponent",
+            required=True,
+            max_length=100,
+            placeholder="Enter opponent name"
+        )
+        self.add_item(self.opponent)
+
+        # Add player-line field for player props
         if line_type == "player_prop":
-            self.player = TextInput(label="Player", required=True, max_length=100)
-            self.opponent = TextInput(label="Opponent", required=True, max_length=100)
-            self.add_item(self.player)
-            self.add_item(self.opponent)
+            self.player_line = TextInput(
+                label="Player - Line",
+                required=True,
+                max_length=100,
+                placeholder="Enter Player - Line (e.g., Points Over 25.5)"
+            )
+            self.add_item(self.player_line)
+        else:
+            # Add line field for game lines
+            self.line = TextInput(
+                label="Line",
+                required=True,
+                max_length=100,
+                placeholder="Enter bet line"
+            )
+            self.add_item(self.line)
 
-        self.line = TextInput(label="Line", required=True, max_length=100)
+        # Add odds field
         self.odds = TextInput(
-            label="Odds (e.g., -110 or +200)",
+            label="Odds",
             required=True,
             max_length=10,
             placeholder="Enter odds (e.g., -110 or +200)"
         )
-        self.add_item(self.line)
         self.add_item(self.odds)
 
     async def on_submit(self, interaction: Interaction):
         logger.debug(f"BetDetailsModal submitted: line_type={self.line_type}, is_manual={self.is_manual} by user {interaction.user.id}")
-        line = self.line.value.strip()
+        
+        # Get line value based on bet type
+        if self.line_type == "player_prop":
+            line = self.player_line.value.strip()
+        else:
+            line = self.line.value.strip()
+            
         odds_input = self.odds.value.strip()
 
         if not line or not odds_input:
@@ -283,7 +310,7 @@ class BetDetailsModal(Modal):
         self.view.bet_details['line'] = line
         self.view.bet_details['odds_str'] = odds_input
 
-        if self.is_manual:
+        if self.is_manual or self.line_type == "player_prop":
             team = self.team.value.strip()
             opponent = self.opponent.value.strip()
             if not all([team, opponent]):
@@ -297,15 +324,6 @@ class BetDetailsModal(Modal):
                 self.view.bet_details['opponent'] = opponent
             else:
                 self.view.bet_details['player'] = opponent
-        elif self.line_type == "player_prop":
-            player = self.player.value.strip()
-            opponent = self.opponent.value.strip()
-            if not all([player, opponent]):
-                logger.warning("Modal submission failed: Missing player or opponent")
-                await interaction.response.send_message("Please provide both player and opponent.", ephemeral=True)
-                return
-            self.view.bet_details['player'] = player
-            self.view.bet_details['opponent'] = opponent
 
         logger.debug(f"Bet details entered: {self.view.bet_details}")
         if not interaction.response.is_done():
