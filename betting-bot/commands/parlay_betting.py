@@ -218,9 +218,11 @@ class BetDetailsModal(Modal):
             self.add_item(self.team)
             self.add_item(self.opponent)
 
-        if line_type == "player_prop" and not is_manual:
+        if line_type == "player_prop":
             self.player = TextInput(label="Player", required=True, max_length=100)
+            self.opponent = TextInput(label="Opponent", required=True, max_length=100)
             self.add_item(self.player)
+            self.add_item(self.opponent)
 
         self.line = TextInput(label="Line", required=True, max_length=100)
         self.add_item(self.line)
@@ -253,11 +255,13 @@ class BetDetailsModal(Modal):
                 leg['player'] = opponent
         elif self.line_type == "player_prop":
             player = self.player.value.strip()
-            if not player:
-                logger.warning("Modal submission failed: Missing player")
-                await interaction.response.send_message("Please provide a valid player.", ephemeral=True)
+            opponent = self.opponent.value.strip()
+            if not all([player, opponent]):
+                logger.warning("Modal submission failed: Missing player or opponent")
+                await interaction.response.send_message("Please provide a valid player and opponent.", ephemeral=True)
                 return
             leg['player'] = player
+            leg['opponent'] = opponent
 
         # Store team information for logo loading
         if 'team' in leg and 'opponent' in leg:
@@ -452,21 +456,6 @@ class ParlayBetWorkflowView(View):
         self.preview_image_bytes = None
         self.team_logos = {}  # Store team logos for each leg
 
-    async def _preload_team_logos(self, team1: str, team2: str, league: str):
-        """Preload team logos for a leg."""
-        try:
-            # Load and cache logos for both teams
-            logo1 = self.bet_slip_generator._load_team_logo(team1, league)
-            logo2 = self.bet_slip_generator._load_team_logo(team2, league)
-            
-            # Store logos in the cache
-            self.team_logos[f"{team1}_{league}"] = logo1
-            self.team_logos[f"{team2}_{league}"] = logo2
-            
-            logger.debug(f"Preloaded logos for {team1} and {team2} in {league}")
-        except Exception as e:
-            logger.error(f"Error preloading team logos: {e}")
-
     async def finalize_bet(self, interaction: Interaction):
         """Handle the finalization of the parlay bet."""
         try:
@@ -481,21 +470,13 @@ class ParlayBetWorkflowView(View):
             # Update bet details with final odds
             self.bet_details['total_odds_str'] = final_odds_modal.odds_value
 
-            # Generate preview
+            # Create parlay bet in database first
             try:
-                bet_serial = str(uuid.uuid4())  # Temporary ID for preview
-                self.bet_details['bet_serial'] = bet_serial
-                
                 legs = self.bet_details.get('legs', [])
                 if not legs:
                     await interaction.followup.send("❌ No bet legs found. Please start over.", ephemeral=True)
                     self.stop()
                     return
-
-                league = self.bet_details.get('league', 'NHL')
-                timestamp = datetime.now(timezone.utc)
-                game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
-                is_same_game = len(game_ids) == 1
 
                 # Create parlay legs with proper team names and odds
                 parlay_legs = []
@@ -508,9 +489,25 @@ class ParlayBetWorkflowView(View):
                         'units': float(leg.get('units_str', '1.00')),
                         'game_id': leg.get('game_id'),
                         'bet_type': leg.get('bet_type', 'ML'),
-                        'league': leg.get('league', league)
+                        'league': leg.get('league', self.bet_details.get('league', 'NHL'))
                     }
                     parlay_legs.append(leg_dict)
+
+                # Create the bet in the database and get the auto-generated serial
+                bet_serial = await self.bot.bet_service.create_parlay_bet(
+                    guild_id=interaction.guild_id,
+                    user_id=interaction.user.id,
+                    legs=parlay_legs,
+                    channel_id=None,
+                    league=self.bet_details.get('league', 'NHL')
+                )
+                self.bet_details['bet_serial'] = bet_serial
+
+                # Generate preview
+                league = self.bet_details.get('league', 'NHL')
+                timestamp = datetime.now(timezone.utc)
+                game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
+                is_same_game = len(game_ids) == 1
 
                 # Use first leg's teams for the main parameters
                 first_leg = legs[0]
@@ -532,7 +529,7 @@ class ParlayBetWorkflowView(View):
                     line=first_leg.get('line', 'ML'),
                     odds=total_odds,
                     units=total_units,
-                    bet_id=bet_serial,
+                    bet_id=str(bet_serial),
                     timestamp=timestamp,
                     bet_type="parlay",
                     parlay_legs=parlay_legs,
