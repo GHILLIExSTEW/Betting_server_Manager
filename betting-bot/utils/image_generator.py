@@ -297,13 +297,67 @@ class BetSlipGenerator:
                 logger.error(f"Error loading lock icon: {str(e)}")
         return self._lock_icon_cache
 
+    def _load_league_logo(self, league: str) -> Optional[Image.Image]:
+        """Load the league logo image."""
+        try:
+            cache_key = f"league_{league}"
+            current_time = time.time()
+            
+            # Check cache first
+            if cache_key in self._logo_cache:
+                logo, timestamp = self._logo_cache[cache_key]
+                if current_time - timestamp <= self._cache_expiry:
+                    return logo
+                else:
+                    del self._logo_cache[cache_key]
+
+            # Map league names to their logo filenames
+            league_name_map = {
+                "NHL": "nhl.png",
+                "NBA": "nba.png",
+                "NFL": "nfl.png",
+                "MLB": "mlb.png",
+                "NCAAB": "ncaab.png",
+                "NCAAF": "ncaaf.png",
+                "Soccer": "soccer.png",
+                "Tennis": "tennis.png",
+                "UFC/MMA": "ufc.png"
+            }
+            
+            # Get the logo filename
+            logo_filename = league_name_map.get(league.upper(), f"{league.lower()}.png")
+            logo_path = os.path.join(self.league_logo_base_dir, logo_filename)
+            
+            # Try to load the league logo
+            if os.path.exists(logo_path):
+                try:
+                    logo = Image.open(logo_path).convert("RGBA")
+                    logo = logo.resize((40, 40), Image.Resampling.LANCZOS)
+                    
+                    # Update cache
+                    self._cleanup_cache()
+                    if len(self._logo_cache) >= self._max_cache_size:
+                        oldest_key = min(self._logo_cache.items(), key=lambda x: x[1][1])[0]
+                        del self._logo_cache[oldest_key]
+                    
+                    self._logo_cache[cache_key] = (logo, current_time)
+                    return logo
+                except Exception as e:
+                    logger.error(f"Error loading league logo from {logo_path}: {str(e)}")
+            
+            logger.warning(f"No logo found for league {league}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in _load_league_logo for league {league}: {str(e)}")
+            return None
 
     def generate_bet_slip(
         self,
         home_team: str, away_team: str, league: Optional[str], line: str, odds: float,
         units: float, bet_id: str, timestamp: datetime, bet_type: str = "straight",
         parlay_legs: Optional[List[Dict[str, Any]]] = None, is_same_game: bool = False
-    ) -> Optional[Image.Image]: # Return PIL Image or None
+    ) -> Optional[Image.Image]:
         """Generate a bet slip image for straight or parlay bets."""
         logger.info(f"Generating bet slip - Type: {bet_type}, League: {league}, BetID: {bet_id}")
         try:
@@ -322,10 +376,24 @@ class BetSlipGenerator:
             image = Image.new('RGBA', (width, height), (40, 40, 40, 255))
             draw = ImageDraw.Draw(image)
 
-            # Draw header
+            # Draw header with league logo
             header_y = 30  # Adjusted header position
             header_text = f"{league.upper() if league else ''} - {'Straight Bet' if bet_type == 'straight' else 'Parlay'}"
             header_text = header_text.strip(" - ")
+            
+            # Load and draw league logo if available
+            if league:
+                league_logo = self._load_league_logo(league)
+                if league_logo:
+                    logo_x = (width - league_logo.width) // 2
+                    logo_y = header_y - 10
+                    if image.mode != 'RGBA': image = image.convert("RGBA")
+                    temp_layer = Image.new('RGBA', image.size, (0,0,0,0))
+                    temp_layer.paste(league_logo, (logo_x, logo_y), league_logo)
+                    image = Image.alpha_composite(image, temp_layer)
+                    draw = ImageDraw.Draw(image)
+                    header_y += league_logo.height + 10  # Adjust header text position
+
             bbox = draw.textbbox((0, 0), header_text, font=self.font_b_36)
             tw = bbox[2] - bbox[0]
             draw.text(((width - tw) / 2, header_y), header_text, fill='white', font=self.font_b_36)
