@@ -121,39 +121,27 @@ except Exception as e:
     # Optional: raise e # Re-raise if fonts are absolutely essential
 
 class BetSlipGenerator:
-    # __init__ now primarily sets dimensions and references global resources
-    def __init__(self, width=800, leg_height=120, header_height=100, footer_height=80, padding=20, logo_size=60):
-        self.width = width
-        self.leg_height = leg_height # Used for Y calculations
-        self.header_height = header_height # Used for Y calculations
-        self.footer_height = footer_height # Used for Y calculations
-        self.padding = padding
-        self.logo_size = logo_size # Used by _load_team_logo for thumbnailing
-        self.image = None # Instance variable for the image being built
-
-        # Use globally loaded fonts
-        self.font_m_18 = font_m_18
-        self.font_m_24 = font_m_24
-        self.font_b_18 = font_b_18
-        self.font_b_24 = font_b_24
-        self.font_b_36 = font_b_36
-        self.emoji_font_24 = emoji_font_24 # Use specific emoji font
-
-        # Use globally determined paths
-        self.assets_dir = _PATHS["ASSETS_DIR"]
-        self.league_team_base_dir = _PATHS["LEAGUE_TEAM_BASE_DIR"]
-        self.league_logo_base_dir = _PATHS["LEAGUE_LOGO_BASE_DIR"]
-        self.default_logo_path = _PATHS["DEFAULT_TEAM_LOGO_PATH"]
-        self.lock_icon_path = _PATHS["DEFAULT_LOCK_ICON_PATH"]
-
-        # Initialize caches (same as user file)
+    def __init__(self, font_path: Optional[str] = None, emoji_font_path: Optional[str] = None, assets_dir: str = "betting-bot/static/"):
+        self.font_path = font_path or self._get_default_font()
+        self.bold_font_path = self._get_default_bold_font()
+        self.emoji_font_path = emoji_font_path or self._get_default_emoji_font()
+        self.assets_dir = assets_dir
+        self.league_team_base_dir = os.path.join(self.assets_dir, "logos/teams")
+        self.league_logo_base_dir = os.path.join(self.assets_dir, "logos/leagues")
+        
+        # Ensure base directories exist
+        os.makedirs(self.league_team_base_dir, exist_ok=True)
+        os.makedirs(self.league_logo_base_dir, exist_ok=True)
+        
+        # Initialize caches
         self._logo_cache = {}
-        self._font_cache = {} # Font cache less critical now fonts are global
+        self._font_cache = {}
         self._lock_icon_cache = None
         self._max_cache_size = 100
         self._cache_expiry = 3600
         self._last_cache_cleanup = time.time()
-        logger.info(f"BetSlipGenerator Initialized. Assets Dir: {self.assets_dir}, Team Logo Base: {self.league_team_base_dir}")
+        
+        logger.info(f"BetSlipGenerator initialized with assets_dir: {self.assets_dir}")
 
     # Removed _get_default_*, _ensure_* methods as logic is now global
 
@@ -200,59 +188,68 @@ class BetSlipGenerator:
 
     def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
         """Load the team logo image based on team name and league with caching."""
-        # Using refined logic from previous step
-        if not team_name or not league:
-            logger.warning(f"Load logo called with missing team name ('{team_name}') or league ('{league}')")
-            return None
-
-        cache_key = f"{team_name}_{league}".lower()
-        current_time = time.time()
-
-        if cache_key in self._logo_cache:
-            logo, timestamp = self._logo_cache[cache_key]
-            if current_time - timestamp <= self._cache_expiry:
-                logger.debug(f"Cache HIT for logo: {cache_key}")
-                return logo.copy() # Return copy from cache
-            else: del self._logo_cache[cache_key]
-
-        logger.debug(f"Cache MISS for logo: {cache_key}")
         try:
+            cache_key = f"{team_name}_{league}"
+            current_time = time.time()
+            
+            # Check cache first
+            if cache_key in self._logo_cache:
+                logo, timestamp = self._logo_cache[cache_key]
+                if current_time - timestamp <= self._cache_expiry:
+                    return logo
+                else:
+                    del self._logo_cache[cache_key]
+
+            # Ensure league directory exists
             league_team_dir = self._ensure_team_dir_exists(league)
-            # Using the same simple map and formatting logic from user file
-            team_name_map = {"oilers": "edmonton_oilers", "bruins": "boston_bruins", "bengals": "cincinnati_bengals", "steelers": "pittsburgh_steelers"}
-            safe_team_name = team_name_map.get(team_name.lower(), team_name.lower().replace(" ", "_"))
-            logo_filename = f"{safe_team_name}.png"
+            
+            # Map team names to their logo filenames
+            team_name_map = {
+                "oilers": "edmonton_oilers",
+                "bruins": "boston_bruins",
+                "bengals": "cincinnati_bengals",
+                "steelers": "pittsburgh_steelers",
+                "lakers": "los_angeles_lakers",
+                "celtics": "boston_celtics"
+            }
+            
+            # Get the logo filename
+            logo_filename = team_name_map.get(team_name.lower(), team_name.lower().replace(" ", "_")) + ".png"
             logo_path = os.path.join(league_team_dir, logo_filename)
-            logger.debug(f"Attempting to load logo from path: {logo_path}")
-
-            final_path_to_load = None
+            
+            # Try to load the team logo
             if os.path.exists(logo_path):
-                final_path_to_load = logo_path
-            # Add fallback to base LOGO_DIR (not LEAGUE_TEAM_BASE_DIR) based on user file structure?
-            # User file didn't show this fallback, let's stick closer to that logic first.
-            # If specific path fails, try default logo path.
-            elif os.path.exists(self.default_logo_path):
-                final_path_to_load = self.default_logo_path
-                logger.warning(f"Logo not found for '{team_name}' at {logo_path}. Using default.")
-            else:
-                logger.error(f"Logo for '{team_name}' not found at {logo_path} AND default logo missing: {self.default_logo_path}")
-                return None
-
-            with Image.open(final_path_to_load) as logo:
-                logo = logo.convert("RGBA")
-                # Resize using self.logo_size from __init__
-                logo.thumbnail((self.logo_size, self.logo_size), Image.Resampling.LANCZOS)
-                # Cache update
-                self._cleanup_cache()
-                if len(self._logo_cache) >= self._max_cache_size:
-                    try: oldest_key = min(self._logo_cache.items(), key=lambda item: item[1][1])[0]; del self._logo_cache[oldest_key]
-                    except ValueError: pass
-                logo_copy = logo.copy() # Cache a copy
-                self._logo_cache[cache_key] = (logo_copy, current_time)
-                return logo_copy # Return the copy
-
+                try:
+                    logo = Image.open(logo_path).convert("RGBA")
+                    logo = logo.resize((100, 100), Image.Resampling.LANCZOS)
+                    
+                    # Update cache
+                    self._cleanup_cache()
+                    if len(self._logo_cache) >= self._max_cache_size:
+                        oldest_key = min(self._logo_cache.items(), key=lambda x: x[1][1])[0]
+                        del self._logo_cache[oldest_key]
+                    
+                    self._logo_cache[cache_key] = (logo, current_time)
+                    return logo
+                except Exception as e:
+                    logger.error(f"Error loading logo from {logo_path}: {str(e)}")
+            
+            # If team logo not found, try to load default logo
+            default_logo_path = os.path.join(self.assets_dir, "logos/default_logo.png")
+            if os.path.exists(default_logo_path):
+                try:
+                    default_logo = Image.open(default_logo_path).convert("RGBA")
+                    default_logo = default_logo.resize((100, 100), Image.Resampling.LANCZOS)
+                    logger.warning(f"Using default logo for team {team_name} (logo not found at {logo_path})")
+                    return default_logo
+                except Exception as e:
+                    logger.error(f"Error loading default logo from {default_logo_path}: {str(e)}")
+            
+            logger.warning(f"No logo found for team {team_name} and no default logo available")
+            return None
+            
         except Exception as e:
-            logger.error(f"Error loading logo for team '{team_name}' ({league}): {str(e)}", exc_info=True)
+            logger.error(f"Error in _load_team_logo for team {team_name}: {str(e)}")
             return None
 
     # _load_font removed - using globally loaded fonts
