@@ -267,8 +267,18 @@ class BetDetailsModal(Modal):
         if 'team' in leg and 'opponent' in leg:
             league = self.view.bet_details.get('league', 'NHL')
             leg['league'] = league
-            # Pre-load logos for this leg
-            await self.view._preload_team_logos(leg['team'], leg['opponent'], league)
+            # Pre-load logos for this leg if the method exists
+            try:
+                if hasattr(self.view, '_preload_team_logos'):
+                    await self.view._preload_team_logos(leg['team'], leg['opponent'], league)
+                else:
+                    # Store team names in the logos dict if not already present
+                    if hasattr(self.view, 'team_logos'):
+                        self.view.team_logos[f"{leg['team']}_{league}"] = None
+                        self.view.team_logos[f"{leg['opponent']}_{league}"] = None
+            except Exception as e:
+                logger.error(f"Error preloading team logos: {e}")
+                # Non-critical error, continue without logos
 
         if 'legs' not in self.view.bet_details:
             self.view.bet_details['legs'] = []
@@ -455,6 +465,16 @@ class ParlayBetWorkflowView(View):
         self.bet_slip_generator = BetSlipGenerator()
         self.preview_image_bytes = None
         self.team_logos = {}  # Store team logos for each leg
+
+    async def _preload_team_logos(self, team1: str, team2: str, league: str):
+        """Preload team logos for the bet slip generation."""
+        try:
+            # Store team names in the logos dict if not already present
+            self.team_logos[f"{team1}_{league}"] = None
+            self.team_logos[f"{team2}_{league}"] = None
+        except Exception as e:
+            logger.error(f"Error preloading team logos: {e}")
+            # Non-critical error, continue without logos
 
     async def finalize_bet(self, interaction: Interaction):
         """Handle the finalization of the parlay bet."""
