@@ -55,79 +55,103 @@ class BetService:
         """Remove expired pending bets from the database."""
         logger.debug("Checking for expired pending bets")
         try:
-            # Convert timestamp to MySQL DATETIME最好的格式
-            expiration_time = datetime.now(timezone.utc).timestamp() - (24 * 3600)  # 24 hours ago
-            expiration_datetime = datetime.fromtimestamp(expiration_time, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            # Convert timestamp to MySQL DATETIME format
+            # Using 24 hours as expiration
+            expiration_datetime = datetime.now(timezone.utc) - timezone.timedelta(hours=24)
+            # Using bet expiry time if set, otherwise created_at
             query = """
                 DELETE FROM bets
-                WHERE status = 'pending' AND created_at < %s
+                WHERE status = 'pending'
+                AND COALESCE(expiration_time, created_at) < %s
             """
-            await self.db_manager.execute(query, (expiration_datetime,))
-            logger.debug("Expired pending bets cleaned up")
+            result = await self.db_manager.execute(query, (expiration_datetime,))
+            rowcount = result[0] if result and result[0] is not None else 0
+            if rowcount > 0:
+                logger.info(f"Cleaned up {rowcount} expired pending bets.")
+            else:
+                logger.debug("No expired pending bets found to clean up.")
         except Exception as e:
             logger.error(f"Failed to clean up expired bets: {e}", exc_info=True)
-            raise BetServiceError(f"Could not clean up expired bets: {str(e)}")
+            # Avoid raising error here if cleanup is not critical path
+            # raise BetServiceError(f"Could not clean up expired bets: {str(e)}")
+
 
     async def cleanup_unconfirmed_bets(self):
         """Delete unconfirmed bets that are older than 5 minutes."""
         logger.info("Starting cleanup of unconfirmed bets")
         try:
+            cutoff_time = datetime.now(timezone.utc) - timezone.timedelta(minutes=5)
+
             # First get the bets that need to be cleaned up
-            query = """
-                SELECT bet_serial, guild_id, user_id 
-                FROM bets 
-                WHERE confirmed = 0 
-                AND created_at < NOW() - INTERVAL '5 minutes'
+            # Adjusted query for MySQL interval syntax
+            query_select = """
+                SELECT bet_serial, guild_id, user_id
+                FROM bets
+                WHERE confirmed = 0
+                AND created_at < %s
             """
-            expired_bets = await self.db_manager.fetch_all(query)
-            
+            expired_bets = await self.db_manager.fetch_all(query_select, (cutoff_time,))
+
             if not expired_bets:
                 logger.debug("No unconfirmed bets to clean up")
                 return
-                
+
             logger.info(f"Found {len(expired_bets)} unconfirmed bets to clean up")
-            
+
+            deleted_count = 0
             for bet in expired_bets:
+                bet_serial_int = int(bet['bet_serial']) # Ensure bet_serial is int if needed
+                logger.debug(f"Attempting to clean up unconfirmed bet: {bet_serial_int}")
                 try:
-                    # Clean up related records in a transaction
-                    async with self.db_manager.transaction():
-                        # Delete bet legs
-                        await self.db_manager.execute(
-                            "DELETE FROM bet_legs WHERE bet_serial = %s",
-                            (bet['bet_serial'],)
-                        )
-                        # Delete bet images
-                        await self.db_manager.execute(
-                            "DELETE FROM bet_images WHERE bet_serial = %s",
-                            (bet['bet_serial'],)
-                        )
-                        # Delete the bet itself
-                        await self.db_manager.execute(
-                            "DELETE FROM bets WHERE bet_serial = %s",
-                            (bet['bet_serial'],)
-                        )
-                    logger.info(f"Successfully cleaned up bet {bet['bet_serial']} for user {bet['user_id']} in guild {bet['guild_id']}")
+                    # Using the shared db_manager transaction context if available
+                    # If not, individual executes are fine with autocommit pool
+                    # Note: Assuming no separate bet_legs or bet_images tables based on schema provided
+
+                    # Delete the bet itself
+                    delete_query = "DELETE FROM bets WHERE bet_serial = %s AND confirmed = 0"
+                    rowcount, _ = await self.db_manager.execute(delete_query, (bet_serial_int,))
+
+                    if rowcount is not None and rowcount > 0:
+                        logger.info(f"Successfully cleaned up unconfirmed bet {bet_serial_int} for user {bet['user_id']} in guild {bet['guild_id']}")
+                        deleted_count += 1
+                    else:
+                        logger.warning(f"Did not delete bet {bet_serial_int}. It might have been confirmed or deleted already.")
+
                 except Exception as e:
-                    logger.error(f"Failed to clean up bet {bet['bet_serial']}: {e}")
-                    continue
-                    
+                    logger.error(f"Failed to clean up bet {bet_serial_int}: {e}")
+                    continue # Continue with the next bet
+
+            logger.info(f"Finished cleanup. Deleted {deleted_count} unconfirmed bets.")
+
         except Exception as e:
             logger.error(f"Error in cleanup_unconfirmed_bets: {e}", exc_info=True)
-            raise BetServiceError(f"Failed to clean up unconfirmed bets: {str(e)}")
+            # Avoid raising error if cleanup is background task
+            # raise BetServiceError(f"Failed to clean up unconfirmed bets: {str(e)}")
+
 
     async def confirm_bet(self, bet_serial: int, channel_id: int) -> bool:
         """Mark a bet as confirmed when the image is sent to a channel."""
         try:
             query = """
-                UPDATE bets 
-                SET confirmed = 1, 
-                    channel_id = %s 
-                WHERE bet_serial = %s
+                UPDATE bets
+                SET confirmed = 1,
+                    channel_id = %s
+                WHERE bet_serial = %s AND confirmed = 0
             """
-            result = await self.db_manager.execute(query, (channel_id, bet_serial))
-            return result is not None
+            rowcount, _ = await self.db_manager.execute(query, (channel_id, bet_serial))
+            if rowcount is not None and rowcount > 0:
+                logger.info(f"Bet {bet_serial} confirmed in channel {channel_id}.")
+                return True
+            else:
+                logger.warning(f"Failed to confirm bet {bet_serial}. Rowcount: {rowcount}. May already be confirmed or deleted.")
+                # Check if it was already confirmed
+                existing = await self.db_manager.fetch_one("SELECT confirmed, channel_id FROM bets WHERE bet_serial = %s", (bet_serial,))
+                if existing and existing['confirmed'] == 1 and existing['channel_id'] == channel_id:
+                    logger.info(f"Bet {bet_serial} was already confirmed in channel {channel_id}.")
+                    return True # Treat as success if already in desired state
+                return False
         except Exception as e:
-            logger.error(f"Error confirming bet {bet_serial}: {e}")
+            logger.error(f"Error confirming bet {bet_serial}: {e}", exc_info=True)
             return False
 
     async def create_straight_bet(
@@ -138,127 +162,179 @@ class BetService:
     ) -> Optional[int]:
         """Create a straight bet."""
         try:
-            bet_details = {
+            # Convert bet_details to JSON string
+            bet_details_dict = {
+                # Use consistent keys matching your data model
                 'game_id': game_id,
-                'bet_type': bet_type,
-                'team': team,
-                'opponent': opponent,
-                'line': line
+                'bet_type': bet_type, # e.g., 'moneyline', 'spread', 'total', 'player_prop'
+                'team': team,         # Team being bet on (or involved if total/prop)
+                'opponent': opponent, # Opponent team
+                'line': line          # Specific line (e.g., "-7.5", "Over 210.5", "Player X Points Over 20.5")
+                # Add player info if it's a player prop
             }
-            
+            bet_details_json = json.dumps(bet_details_dict)
+
             query = """
                 INSERT INTO bets (
-                    guild_id, user_id, league, bet_type,
-                    bet_details, units, odds, channel_id,
-                    confirmed
+                    guild_id, user_id, league, bet_type, bet_details,
+                    units, odds, channel_id, confirmed,
+                    status -- Set initial status
+                    -- bet_serial is auto_increment, no need to specify NULL unless required by strict SQL mode
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
             """
-            
-            result = await self.db_manager.execute(
+
+            # Execute and get rowcount and lastrowid directly
+            rowcount, last_id = await self.db_manager.execute(
                 query,
-                (
-                    guild_id, user_id, league, bet_type,
-                    json.dumps(bet_details), units, odds,
-                    channel_id, 1 if channel_id else 0
-                )
+                guild_id, user_id, league, bet_type, bet_details_json,
+                units, odds, channel_id,
+                1 if channel_id else 0, # confirmed status
+                'pending' # initial status
             )
-            
-            if result is not None:
-                # Get the last inserted ID
-                id_result = await self.db_manager.fetchval("SELECT LAST_INSERT_ID()")
-                return id_result
-            return None
-            
+
+            # Check if insert was successful AND we got a valid ID
+            if rowcount is not None and rowcount > 0 and last_id is not None and last_id > 0:
+                logger.info(f"Straight bet created successfully with bet_serial: {last_id}")
+                return last_id
+            else:
+                logger.error(f"Failed to create straight bet or retrieve valid ID. Rowcount: {rowcount}, Last ID: {last_id}")
+                # Optionally, query the table to see if the bet exists anyway (e.g., if LAST_INSERT_ID failed but insert succeeded)
+                return None
+
         except Exception as e:
-            logger.error(f"Error creating straight bet: {e}")
+            logger.exception(f"Error creating straight bet: {e}") # Use exception logger
             return None
 
     async def create_parlay_bet(
         self, guild_id: int, user_id: int, legs: List[Dict],
-        channel_id: Optional[int], league: str
+        channel_id: Optional[int], league: str # League here might be the primary league or need adjustment
     ) -> Optional[int]:
         """Create a parlay bet."""
         try:
-            bet_details = {
-                'legs': legs,
-                'total_odds': self._calculate_parlay_odds(legs)
+            # Calculate total odds from individual leg odds
+            # Ensure legs have 'odds' key
+            total_odds = self._calculate_parlay_odds([leg for leg in legs if 'odds' in leg])
+
+            # Determine total units (is it sum of leg units, or a fixed stake for the parlay?)
+            # Assuming a fixed stake for the whole parlay for now, adjust if needed.
+            # Use a default or perhaps require it as a parameter. Let's use 1.0 as default.
+            total_units = 1.0 # Placeholder: Define how parlay units/stake works
+
+            # Prepare bet_details JSON
+            bet_details_dict = {
+                'legs': legs, # Store individual leg details
+                # 'total_odds': total_odds # Redundant if storing in main odds column? Decide convention.
             }
-            
+            bet_details_json = json.dumps(bet_details_dict)
+
             query = """
                 INSERT INTO bets (
-                    guild_id, user_id, league, bet_type,
-                    bet_details, units, odds, channel_id,
-                    confirmed
+                    guild_id, user_id, league, bet_type, bet_details,
+                    units, odds, channel_id, confirmed,
+                    status, legs -- Store number of legs
+                    -- bet_serial is auto_increment
                 ) VALUES (
-                    %s, %s, %s, 'parlay', %s, %s, %s, %s, %s
+                    %s, %s, %s, 'parlay', %s, %s, %s, %s, %s, %s, %s
                 )
             """
-            
-            total_units = sum(float(leg.get('units', 1.0)) for leg in legs)
-            
-            result = await self.db_manager.execute(
+
+            rowcount, last_id = await self.db_manager.execute(
                 query,
-                (
-                    guild_id, user_id, league,
-                    json.dumps(bet_details), total_units,
-                    bet_details['total_odds'], channel_id,
-                    1 if channel_id else 0
-                )
+                guild_id, user_id, league, # Use the passed 'league' as the overall league?
+                bet_details_json, total_units, total_odds,
+                channel_id, 1 if channel_id else 0, # confirmed
+                'pending', # status
+                len(legs) # number of legs
             )
-            
-            if result is not None:
-                # Get the last inserted ID
-                id_result = await self.db_manager.fetchval("SELECT LAST_INSERT_ID()")
-                return id_result
-            return None
-            
+
+            if rowcount is not None and rowcount > 0 and last_id is not None and last_id > 0:
+                # Optional: If you need a separate table for legs, insert them here using last_id
+                # Example:
+                # for leg_data in legs:
+                #     await self.db_manager.execute(
+                #         "INSERT INTO bet_legs (bet_serial, league, team, line, odds, ...) VALUES (%s, %s, ...)",
+                #         last_id, leg_data.get('league'), leg_data.get('team'), ...
+                #     )
+                logger.info(f"Parlay bet created successfully with bet_serial: {last_id}")
+                return last_id
+            else:
+                logger.error(f"Failed to create parlay bet or retrieve valid ID. Rowcount: {rowcount}, Last ID: {last_id}")
+                return None
+
         except Exception as e:
-            logger.error(f"Error creating parlay bet: {e}")
+            logger.exception(f"Error creating parlay bet: {e}")
             return None
 
     def _calculate_parlay_odds(self, legs: List[Dict]) -> float:
-        """Calculate total odds for a parlay bet."""
-        total_odds = 1.0
-        for leg in legs:
-            odds = float(leg.get('odds', 0))
-            if odds > 0:
-                total_odds *= (odds / 100.0 + 1)
-            else:
-                total_odds *= (100.0 / abs(odds) + 1)
-        return round((total_odds - 1) * 100)
+        """Calculate total American odds for a parlay bet from American odds legs."""
+        if not legs:
+            return 0.0
 
-    async def update_straight_bet_channel(self, bet_serial: str, channel_id: int):
+        total_decimal_odds = 1.0
+        try:
+            for leg in legs:
+                odds = float(leg.get('odds', 0)) # Make sure odds key exists and is floatable
+                if odds == 0: continue # Skip legs with 0 odds? Or handle differently?
+
+                if odds > 0:
+                    decimal_leg = (odds / 100.0) + 1.0
+                else: # Negative odds
+                    decimal_leg = (100.0 / abs(odds)) + 1.0
+                total_decimal_odds *= decimal_leg
+
+            if total_decimal_odds == 1.0: # No valid legs or all odds were 0?
+                return 0.0 # Or handle as error
+
+            # Convert back to American odds
+            if total_decimal_odds >= 2.0:
+                american_odds = (total_decimal_odds - 1.0) * 100.0
+            else:
+                american_odds = -100.0 / (total_decimal_odds - 1.0)
+
+            return round(american_odds, 2) # Return rounded American odds
+
+        except (ValueError, TypeError) as e:
+             logger.error(f"Error calculating parlay odds: Invalid odds format in legs. {e}")
+             return 0.0 # Indicate error or invalid calculation
+
+    async def update_straight_bet_channel(self, bet_serial: int, channel_id: int):
         """
-        Update the channel ID for a straight bet.
+        Update the channel ID for a straight bet. (Type check added)
 
         Args:
-            bet_serial (str): Unique bet serial number.
+            bet_serial (int): Unique bet serial number.
             channel_id (int): ID of the channel to associate with the bet.
 
         Raises:
             BetServiceError: If the update fails.
         """
-        logger.debug(f"Updating channel_id for straight bet {bet_serial} to {channel_id}")
+        logger.debug(f"Updating channel_id for bet {bet_serial} to {channel_id}")
         try:
+            # Ensure bet_type is 'straight' if needed, or remove check if any bet can be updated
             query = """
                 UPDATE bets
-                SET channel_id = %s
-                WHERE bet_serial = %s AND bet_type = 'straight'
-            """
-            await self.db_manager.execute(query, (channel_id, bet_serial))
-            logger.debug(f"Straight bet {bet_serial} channel updated to {channel_id}")
+                SET channel_id = %s, confirmed = 1
+                WHERE bet_serial = %s
+            """ # Removed bet_type check for flexibility, added confirmed=1
+            rowcount, _ = await self.db_manager.execute(query, (channel_id, bet_serial))
+            if rowcount is not None and rowcount > 0:
+                 logger.debug(f"Bet {bet_serial} channel updated to {channel_id}")
+            else:
+                 logger.warning(f"Did not update channel for bet {bet_serial}. Rowcount: {rowcount}")
+
         except Exception as e:
             logger.error(f"Failed to update channel for bet {bet_serial}: {e}", exc_info=True)
             raise BetServiceError(f"Could not update channel for bet {bet_serial}: {str(e)}")
 
-    async def update_parlay_bet_channel(self, bet_serial: str, channel_id: int):
+
+    async def update_parlay_bet_channel(self, bet_serial: int, channel_id: int):
         """
-        Update the channel ID for a parlay bet.
+        Update the channel ID for a parlay bet. (Type check added)
 
         Args:
-            bet_serial (str): Unique bet serial number.
+            bet_serial (int): Unique bet serial number.
             channel_id (int): ID of the channel to associate with the bet.
 
         Raises:
@@ -268,41 +344,54 @@ class BetService:
         try:
             query = """
                 UPDATE bets
-                SET channel_id = %s
+                SET channel_id = %s, confirmed = 1
                 WHERE bet_serial = %s AND bet_type = 'parlay'
             """
-            await self.db_manager.execute(query, (channel_id, bet_serial))
-            logger.debug(f"Parlay bet {bet_serial} channel updated to {channel_id}")
+            rowcount, _ = await self.db_manager.execute(query, (channel_id, bet_serial))
+            if rowcount is not None and rowcount > 0:
+                logger.debug(f"Parlay bet {bet_serial} channel updated to {channel_id}")
+            else:
+                 logger.warning(f"Did not update channel for parlay bet {bet_serial}. Rowcount: {rowcount}")
+
         except Exception as e:
             logger.error(f"Failed to update channel for bet {bet_serial}: {e}", exc_info=True)
             raise BetServiceError(f"Could not update channel for bet {bet_serial}: {str(e)}")
 
-    async def delete_bet(self, bet_serial: str):
+    async def delete_bet(self, bet_serial: int):
         """
-        Delete a bet and its associated legs from the database.
+        Delete a bet and its associated data (reactions, unit_records) from the database.
 
         Args:
-            bet_serial (str): Unique bet serial number.
+            bet_serial (int): Unique bet serial number.
 
         Raises:
             BetServiceError: If the deletion fails.
         """
-        logger.debug(f"Deleting bet {bet_serial}")
+        logger.info(f"Attempting to delete bet {bet_serial} and associated data.")
         try:
-            # Delete legs (for parlay bets)
-            leg_query = "DELETE FROM bet_legs WHERE bet_serial = %s"
-            await self.db_manager.execute(leg_query, (bet_serial,))
+            # Use the shared db_manager transaction context if available
+            # Assuming CASCADE DELETE handles unit_records and bet_reactions based on schema FKs
 
-            # Delete bet
+            # Delete the bet itself (FKs should handle cascades)
             bet_query = "DELETE FROM bets WHERE bet_serial = %s"
-            await self.db_manager.execute(bet_query, (bet_serial,))
+            rowcount, _ = await self.db_manager.execute(bet_query, (bet_serial,))
 
-            # Remove from pending reactions
-            self.pending_reactions = {
-                msg_id: data for msg_id, data in self.pending_reactions.items()
-                if data.get('bet_serial') != bet_serial
-            }
-            logger.debug(f"Bet {bet_serial} deleted successfully")
+            if rowcount is not None and rowcount > 0:
+                # Remove from pending reactions cache
+                self.pending_reactions = {
+                    msg_id: data for msg_id, data in self.pending_reactions.items()
+                    if data.get('bet_serial') != bet_serial
+                }
+                logger.info(f"Bet {bet_serial} deleted successfully.")
+            else:
+                logger.warning(f"Bet {bet_serial} not found for deletion or delete failed. Rowcount: {rowcount}")
+                # Attempt to remove from cache anyway, in case DB state is inconsistent
+                self.pending_reactions = {
+                    msg_id: data for msg_id, data in self.pending_reactions.items()
+                    if data.get('bet_serial') != bet_serial
+                }
+
+
         except Exception as e:
             logger.error(f"Failed to delete bet {bet_serial}: {e}", exc_info=True)
             raise BetServiceError(f"Could not delete bet {bet_serial}: {str(e)}")
@@ -314,87 +403,150 @@ class BetService:
         Args:
             payload: The raw reaction event payload.
         """
-        logger.debug(f"Handling reaction add for message {payload.message_id} by user {payload.user_id}")
-        try:
-            if payload.message_id not in self.pending_reactions:
-                logger.debug(f"No pending reaction data for message {payload.message_id}")
-                return
+        # Ignore reactions from the bot itself
+        if payload.user_id == self.bot.user.id:
+            return
 
-            reaction_data = self.pending_reactions[payload.message_id]
+        message_id = payload.message_id
+        logger.debug(f"Handling reaction add for message {message_id} by user {payload.user_id}")
+
+        try:
+            # Check if this message ID is being tracked for reactions
+            if message_id not in self.pending_reactions:
+                # logger.debug(f"No pending reaction data for message {message_id}")
+                return # Silently ignore reactions on non-tracked messages
+
+            reaction_data = self.pending_reactions[message_id]
             bet_serial = reaction_data.get('bet_serial')
-            user_id = reaction_data.get('user_id')
+            original_user_id = reaction_data.get('user_id') # User who placed the bet
             guild_id = reaction_data.get('guild_id')
             channel_id = reaction_data.get('channel_id')
+            emoji_str = str(payload.emoji)
 
-            # Example: Log the reaction (customize based on your needs)
+            # --- Authorization Check (Example: Only original user or admin?) ---
+            # Add your own logic here if needed. E.g., check roles.
+            # For now, allow any user reaction on a tracked message.
+
             logger.info(
-                f"Reaction {payload.emoji} added to bet {bet_serial} by user {payload.user_id} "
+                f"Reaction '{emoji_str}' added to bet {bet_serial} by user {payload.user_id} "
                 f"in channel {channel_id} (guild {guild_id})"
             )
 
-            # Optional: Update database or perform actions based on reaction
-            # Example: Record reaction in a reactions table
-            query = """
-                INSERT INTO bet_reactions (
+            # --- Record Reaction in DB ---
+            # Use INSERT IGNORE or similar logic if you only want one reaction per user/emoji/bet
+            # Ensure emoji column supports utf8mb4
+            reaction_query = """
+                INSERT IGNORE INTO bet_reactions (
                     bet_serial, user_id, emoji, channel_id, message_id, created_at
                 ) VALUES (%s, %s, %s, %s, %s, %s)
             """
-            params = (
-                bet_serial, payload.user_id, str(payload.emoji), channel_id,
-                payload.message_id, datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            reaction_params = (
+                bet_serial, payload.user_id, emoji_str, channel_id,
+                message_id, datetime.now(timezone.utc) # Use DB's CURRENT_TIMESTAMP if preferred
             )
-            await self.db_manager.execute(query, params)
+            await self.db_manager.execute(reaction_query, reaction_params)
 
-            # Update unit records if the reaction is a win/loss
-            if str(payload.emoji) in ['✅', '❌']:  # Check for win/loss emojis
-                # Get bet details
-                bet_query = """
-                    SELECT guild_id, user_id, units, odds, status
+            # --- Handle Bet Resolution (Win/Loss/Push) ---
+            resolve_emoji_map = {
+                '✅': 'won',  # Check mark
+                '❌': 'lost', # Cross mark
+                '➖': 'push'  # Heavy minus sign (or choose another like 🅿️)
+            }
+
+            if emoji_str in resolve_emoji_map:
+                 # Add permission check: only original user or admin can resolve?
+                 # Example:
+                 # if payload.user_id != original_user_id and not payload.member.guild_permissions.administrator:
+                 #      logger.warning(f"User {payload.user_id} tried to resolve bet {bet_serial} placed by {original_user_id}")
+                 #      # Optionally notify user they can't resolve it
+                 #      return
+
+                 new_status = resolve_emoji_map[emoji_str]
+                 logger.info(f"Attempting to resolve bet {bet_serial} as '{new_status}' by user {payload.user_id}")
+
+                 # --- Fetch Bet Details for Calculation ---
+                 bet_query = """
+                    SELECT guild_id, user_id, units, odds, status, bet_details, league, bet_type
                     FROM bets
                     WHERE bet_serial = %s
-                """
-                bet_result = await self.db_manager.fetch_one(bet_query, (bet_serial,))
-                
-                if bet_result:
-                    guild_id = bet_result['guild_id']
-                    user_id = bet_result['user_id']
-                    units = bet_result['units']
-                    odds = bet_result['odds']
-                    
-                    # Calculate result value based on emoji
-                    result_value = units * (1 + odds/100) if str(payload.emoji) == '✅' else -units
-                    
-                    # Get current year and month
-                    now = datetime.now(timezone.utc)
-                    year = now.year
-                    month = now.month
-                    
-                    # Update unit records
-                    unit_query = """
-                        INSERT INTO unit_records (
-                            bet_serial, guild_id, user_id, year, month, units, odds, result_value, created_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            result_value = VALUES(result_value),
-                            created_at = VALUES(created_at)
-                    """
-                    unit_params = (
-                        bet_serial, guild_id, user_id, year, month, units, odds, result_value,
-                        datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-                    )
-                    await self.db_manager.execute(unit_query, unit_params)
-                    
-                    # Update bet status
-                    status_query = """
-                        UPDATE bets
-                        SET status = %s
-                        WHERE bet_serial = %s
-                    """
-                    status = 'won' if str(payload.emoji) == '✅' else 'lost'
-                    await self.db_manager.execute(status_query, (status, bet_serial))
+                 """
+                 bet_data = await self.db_manager.fetch_one(bet_query, (bet_serial,))
+
+                 if not bet_data:
+                      logger.error(f"Cannot resolve bet: Bet {bet_serial} not found in DB.")
+                      return
+                 if bet_data['status'] not in ['pending', 'live']: # Only resolve pending/live bets
+                      logger.warning(f"Bet {bet_serial} cannot be resolved. Current status: {bet_data['status']}")
+                      # Optionally remove the reaction if it's invalid state
+                      # await self.on_raw_reaction_remove(payload) # Be careful of loops
+                      return
+
+                 # --- Update Bet Status ---
+                 status_query = "UPDATE bets SET status = %s, updated_at = %s WHERE bet_serial = %s"
+                 update_time = datetime.now(timezone.utc)
+                 rowcount, _ = await self.db_manager.execute(status_query, (new_status, update_time, bet_serial))
+
+                 if rowcount is None or rowcount == 0:
+                      logger.error(f"Failed to update status for bet {bet_serial} to {new_status}.")
+                      return # Don't proceed if status update failed
+
+                 logger.info(f"Bet {bet_serial} status updated to '{new_status}'.")
+
+                 # --- Calculate Result and Update Unit Records ---
+                 units_staked = bet_data.get('units')
+                 odds = bet_data.get('odds')
+                 result_value = 0.0
+
+                 if new_status == 'won':
+                     if odds > 0:
+                         result_value = units_staked * (odds / 100.0)
+                     else: # Negative odds
+                         result_value = units_staked * (100.0 / abs(odds))
+                 elif new_status == 'lost':
+                     result_value = -units_staked
+                 # else: status is 'push', result_value remains 0.0
+
+                 # Ensure we have necessary data
+                 if units_staked is None or odds is None:
+                      logger.error(f"Missing units or odds for bet {bet_serial}. Cannot record result.")
+                      return
+
+                 # --- Update Unit Records Table ---
+                 now = datetime.now(timezone.utc)
+                 year = now.year
+                 month = now.month
+
+                 # Use INSERT ... ON DUPLICATE KEY UPDATE to handle existing records for the bet
+                 unit_query = """
+                     INSERT INTO unit_records (
+                         bet_serial, guild_id, user_id, year, month, units, odds, monthly_result_value, created_at
+                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     ON DUPLICATE KEY UPDATE
+                         monthly_result_value = VALUES(monthly_result_value),
+                         created_at = VALUES(created_at) # Update timestamp on resolve
+                 """
+                 unit_params = (
+                     bet_serial, bet_data['guild_id'], bet_data['user_id'], year, month,
+                     units_staked, odds, result_value,
+                     update_time # Use the same timestamp as status update
+                 )
+                 await self.db_manager.execute(unit_query, unit_params)
+                 logger.info(f"Unit record updated for bet {bet_serial}. Result Value: {result_value:.2f}")
+
+                 # --- Trigger Voice Channel Update ---
+                 if hasattr(self.bot, 'voice_service') and hasattr(self.bot.voice_service, 'update_on_bet_resolve'):
+                    # Run update in background task to avoid blocking reaction handler
+                    asyncio.create_task(self.bot.voice_service.update_on_bet_resolve(bet_data['guild_id']))
+                    logger.debug(f"Triggered voice channel update for guild {bet_data['guild_id']}")
+
+                 # Optional: Remove message from pending_reactions after resolution?
+                 # Depends if you want further reactions (e.g., comments) tracked.
+                 # if message_id in self.pending_reactions:
+                 #     del self.pending_reactions[message_id]
 
         except Exception as e:
-            logger.error(f"Failed to handle reaction add for message {payload.message_id}: {e}", exc_info=True)
+            logger.error(f"Failed to handle reaction add for message {message_id}: {e}", exc_info=True)
+
 
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
         """
@@ -403,31 +555,44 @@ class BetService:
         Args:
             payload: The raw reaction event payload.
         """
-        logger.debug(f"Handling reaction remove for message {payload.message_id} by user {payload.user_id}")
+        if payload.user_id == self.bot.user.id:
+            return
+
+        message_id = payload.message_id
+        logger.debug(f"Handling reaction remove for message {message_id} by user {payload.user_id}")
+
         try:
-            if payload.message_id not in self.pending_reactions:
-                logger.debug(f"No pending reaction data for message {payload.message_id}")
+            # Check if this message ID is being tracked
+            if message_id not in self.pending_reactions:
+                # logger.debug(f"No pending reaction data for message {message_id}")
                 return
 
-            reaction_data = self.pending_reactions[payload.message_id]
+            reaction_data = self.pending_reactions[message_id]
             bet_serial = reaction_data.get('bet_serial')
-            user_id = reaction_data.get('user_id')
             guild_id = reaction_data.get('guild_id')
             channel_id = reaction_data.get('channel_id')
+            emoji_str = str(payload.emoji)
 
             # Example: Log the reaction removal
             logger.info(
-                f"Reaction {payload.emoji} removed from bet {bet_serial} by user {payload.user_id} "
+                f"Reaction '{emoji_str}' removed from bet {bet_serial} by user {payload.user_id} "
                 f"in channel {channel_id} (guild {guild_id})"
             )
 
-            # Optional: Update database (e.g., remove reaction record)
+            # Remove the reaction record from the database
             query = """
                 DELETE FROM bet_reactions
                 WHERE bet_serial = %s AND user_id = %s AND emoji = %s AND message_id = %s
             """
-            params = (bet_serial, payload.user_id, str(payload.emoji), payload.message_id)
+            params = (bet_serial, payload.user_id, emoji_str, message_id)
             await self.db_manager.execute(query, params)
 
+            # --- Handle potential reversal of bet resolution (Optional/Complex) ---
+            # If a resolution emoji (✅, ❌, ➖) is removed, should the bet status revert?
+            # This adds complexity: Need to check if other resolution reactions exist.
+            # Generally, it's simpler *not* to revert status automatically on reaction removal.
+            # Admins might need a separate command to void/revert resolved bets if needed.
+            # For now, we only log and remove the DB record for the specific reaction.
+
         except Exception as e:
-            logger.error(f"Failed to handle reaction remove for message {payload.message_id}: {e}", exc_info=True)
+            logger.error(f"Failed to handle reaction remove for message {message_id}: {e}", exc_info=True)
