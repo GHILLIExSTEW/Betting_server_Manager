@@ -11,11 +11,11 @@ from datetime import datetime, timezone
 import io
 import os
 
-# Use relative imports if possible, otherwise adjust based on project structure
+# Use relative imports
 try:
     from ..utils.errors import BetServiceError, ValidationError, GameNotFoundError
-    from ..utils.image_generator import BetSlipGenerator
-    # No direct import of SPORT_CATEGORY_MAP needed here if GameService handles league mapping
+    from ..utils.image_generator import BetSlipGenerator 
+    # SPORT_CATEGORY_MAP from image_generator is not directly needed here if GameService handles league details
     from discord.ext import commands
 except ImportError:
     # Fallback for running script directly or different structure
@@ -75,10 +75,19 @@ class GameSelect(Select):
             away = game.get('away_team_name', 'Unknown Away')
             start_dt_obj = game.get('start_time')
             time_str = "Time N/A"
+
+            if isinstance(start_dt_obj, str): # Handle if start_time is string from DB
+                try:
+                    # Attempt to parse if it's a common ISO format, adjust as needed
+                    start_dt_obj = datetime.fromisoformat(start_dt_obj.replace('Z', '+00:00'))
+                except ValueError:
+                    logger.warning(f"Could not parse game start_time string: {start_dt_obj}")
+                    start_dt_obj = None # Could not parse
+            
             if isinstance(start_dt_obj, datetime):
                  time_str = start_dt_obj.strftime('%m/%d %H:%M %Z') 
             label = f"{away} @ {home} ({time_str})"
-            game_api_id = game.get('id') 
+            game_api_id = game.get('id') # Assuming 'id' is the API game ID or DB game ID
             if game_api_id is None:
                 logger.warning(f"Game missing 'id': {game}")
                 continue
@@ -177,7 +186,7 @@ class ManualEntryButton(Button):
         self.parent_view.bet_details['game_id'] = "Other" 
         self.disabled = True
         for item in self.parent_view.children:
-            if isinstance(item, CancelButton):
+            if isinstance(item, CancelButton): # Also disable cancel on this view
                 item.disabled = True 
 
         line_type = self.parent_view.bet_details.get('line_type', 'game_line') 
@@ -374,7 +383,7 @@ class BetDetailsModal(Modal):
                 self.view.stop()
                 return
             self.view.current_step = 4 
-            await self.view.edit_message(
+            await self.view.edit_message( # Use the modal's interaction for this edit
                 interaction,
                 content="Bet details entered. Processing next step...",
                 view=self.view 
@@ -383,7 +392,7 @@ class BetDetailsModal(Modal):
         except Exception as e:
             logger.exception(f"Error in BetDetailsModal on_submit: {e}")
             await interaction.followup.send("❌ Failed to process bet details. Please try again.", ephemeral=True)
-            self.view.stop()
+            if hasattr(self, 'view') and self.view: self.view.stop()
 
     async def on_error(self, interaction: Interaction, error: Exception) -> None:
          logger.error(f"Error in BetDetailsModal: {error}", exc_info=True)
@@ -394,15 +403,17 @@ class BetDetailsModal(Modal):
                    await interaction.followup.send('❌ An error occurred processing the bet details modal.', ephemeral=True)
          except discord.HTTPException:
              logger.warning("Could not send error followup for BetDetailsModal.")
-         if hasattr(self, 'view'):
-              self.view.stop()
+         if hasattr(self, 'view') and self.view: self.view.stop()
 
 class UnitsSelect(Select):
     def __init__(self, parent_view):
         self.parent_view = parent_view
         options = [
+            SelectOption(label="0.5 Units", value="0.5"),
             SelectOption(label="1 Unit", value="1.0"),
+            SelectOption(label="1.5 Units", value="1.5"),
             SelectOption(label="2 Units", value="2.0"),
+            SelectOption(label="2.5 Units", value="2.5"),
             SelectOption(label="3 Units", value="3.0")
         ]
         super().__init__(
@@ -413,7 +424,7 @@ class UnitsSelect(Select):
         )
 
     async def callback(self, interaction: Interaction):
-        self.parent_view.bet_details['units_str'] = self.values[0] # Corrected key
+        self.parent_view.bet_details['units_str'] = self.values[0]
         logger.debug(f"Units selected: {self.values[0]} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
@@ -537,24 +548,47 @@ class StraightBetWorkflowView(View):
         logger.debug(log_info)
         attachments = [file] if file else []
         try:
-            await target_interaction.edit_original_response(
-                content=content, embed=embed, view=view, attachments=attachments
-            )
-        except (discord.NotFound, discord.HTTPException) as e:
-            logger.warning(f"Failed to edit original interaction response: {e}. Trying stored message reference.")
-            if target_message and isinstance(target_message, discord.WebhookMessage):
-                try:
+            # Try to edit the original response of the interaction that caused this edit
+            # If it's a button/select callback, interaction.edit_original_response is the right target.
+            # If it's a modal submit, interaction.edit_original_response refers to the modal's ephemeral ack.
+            # We need to edit self.message in that case.
+            
+            # Check if the interaction is from a component (button/select) or modal submit
+            if interaction and interaction.type == discord.InteractionType.component:
+                 await interaction.response.edit_message(content=content, embed=embed, view=view, attachments=attachments)
+                 # Update self.message if needed, though usually component interactions edit the message they are attached to.
+                 if view is not None: # If view is being updated, original_response() might be the message
+                    try:
+                        self.message = await interaction.original_response()
+                    except discord.NotFound: # original_response might fail if already edited by defer() and then followup
+                        if self.message: pass # Keep existing self.message
+                        else: logger.warning("Could not get original_response to update self.message in component callback.")
+            elif target_message: # If it's likely from a modal (or initial message send) use self.message
+                if isinstance(target_message, discord.WebhookMessage):
                     await target_message.edit(content=content, embed=embed, view=view, attachments=attachments)
-                except (discord.NotFound, discord.HTTPException) as e2:
-                    logger.error(f"Failed to edit StraightBetWorkflowView message (fallback): {e2}")
-                    if interaction: 
-                         try: await interaction.followup.send("❌ Failed to update bet workflow display.", ephemeral=True)
-                         except discord.HTTPException: pass 
-            else:
-                logger.error("Failed to edit message: No valid interaction or message reference.")
-                if interaction:
-                    try: await interaction.followup.send("❌ Failed to update bet workflow display.", ephemeral=True)
-                    except discord.HTTPException: pass
+                elif isinstance(target_message, discord.InteractionMessage): # Should be WebhookMessage from followup
+                    await target_message.edit(content=content, embed=embed, view=view, attachments=attachments)
+                else: # Fallback to the original interaction if self.message isn't set or is of wrong type
+                    await self.original_interaction.edit_original_response(content=content, embed=embed, view=view, attachments=attachments)
+            else: # Last resort, should not happen if self.message is set on start_flow
+                 await self.original_interaction.edit_original_response(content=content, embed=embed, view=view, attachments=attachments)
+
+        except (discord.NotFound, discord.HTTPException) as e:
+            logger.warning(f"Failed to edit message: {e}. Interaction type: {interaction.type if interaction else 'N/A'}")
+            # If interaction edit failed, and we have a specific interaction that triggered this, try followup
+            if interaction and interaction.response.is_done():
+                try: 
+                    # Ensure content is not None for followup
+                    followup_content = content if content else "Updating display..."
+                    await interaction.followup.send(followup_content, ephemeral=True, view=view, files=attachments if attachments else None)
+                    # If followup is used, self.message needs to be updated if it's the first message
+                    if view is not None and self.current_step == 1: # Rough heuristic for initial message
+                        self.message = await interaction.original_response() # This might be the followup if we are here
+                except discord.HTTPException as fe:
+                    logger.error(f"Failed to send followup after message edit error: {fe}")
+            elif not interaction:
+                 logger.error("Failed to edit message: No valid interaction or message reference for followup.")
+
         except Exception as e:
             logger.exception(f"Unexpected error editing StraightBetWorkflowView message: {e}")
             if interaction:
@@ -597,6 +631,7 @@ class StraightBetWorkflowView(View):
                 if league != "Other" and hasattr(self.bot, 'game_service'):
                     try:
                         logger.debug(f"Fetching scheduled games for league: {league}, guild: {interaction.guild_id}")
+                        # CORRECTED CALL
                         self.games = await self.bot.game_service.get_league_games(
                             guild_id=interaction.guild_id,
                             league=league,
@@ -626,9 +661,13 @@ class StraightBetWorkflowView(View):
                      if not is_manual and hasattr(self.bot, 'game_service'):
                           home_players, away_players = [], []
                           try:
-                              players_data = await self.bot.game_service.get_game_players(game_id) 
-                              home_players = players_data.get('home_players', [])
-                              away_players = players_data.get('away_players', [])
+                              # Ensure get_game_players exists and is callable
+                              if hasattr(self.bot.game_service, 'get_game_players'):
+                                players_data = await self.bot.game_service.get_game_players(game_id) 
+                                home_players = players_data.get('home_players', [])
+                                away_players = players_data.get('away_players', [])
+                              else:
+                                logger.warning("GameService does not have 'get_game_players' method.")
                           except Exception as e:
                               logger.error(f"Failed to fetch players for game {game_id}: {e}")
                           home_team = self.bet_details.get('home_team_name', 'Home Team')
@@ -647,15 +686,15 @@ class StraightBetWorkflowView(View):
                 modal = BetDetailsModal(line_type=line_type, is_manual=is_manual)
                 modal.view = self 
                 try:
-                    if interaction.response.is_done():
-                         logger.warning("Interaction already responded to before sending modal. Stopping workflow.")
-                         await interaction.followup.send("❌ Workflow error. Please restart the /bet command.", ephemeral=True)
-                         self.stop()
-                         return
+                    # The interaction here is the one that triggered go_next (e.g., game select or line type select)
+                    # This interaction should still be valid for sending a modal.
                     await interaction.response.send_modal(modal)
                 except discord.HTTPException as e:
-                    logger.error(f"Failed to send BetDetailsModal: {e}")
-                    await interaction.followup.send("❌ Failed to open bet details form. Please try again.", ephemeral=True)
+                    logger.error(f"Failed to send BetDetailsModal: {e}. Interaction state: {interaction.response.is_done()}")
+                    # If send_modal fails, try followup on original_interaction as last resort for user feedback
+                    try:
+                        await self.original_interaction.followup.send("❌ Failed to open bet details form. Please try again.", ephemeral=True)
+                    except: pass # Ignore if followup also fails
                     self.stop()
                 self.is_processing = False 
                 return
@@ -682,9 +721,9 @@ class StraightBetWorkflowView(View):
                      home_team = self.bet_details.get('team', 'Unknown') 
                      is_manual = self.bet_details.get('game_id') == "Other"
                      opponent = self.bet_details.get('opponent', 'Unknown') 
-                     if not is_manual and 'away_team_name' in self.view.bet_details:
+                     if not is_manual and 'away_team_name' in self.bet_details:
                           opponent = self.bet_details.get('away_team_name')
-                          if 'home_team_name' in self.view.bet_details and home_team.lower() != self.bet_details['home_team_name'].lower():
+                          if 'home_team_name' in self.bet_details and home_team.lower() != self.bet_details['home_team_name'].lower():
                               home_team = self.bet_details['home_team_name']
                      bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                          home_team=home_team,
@@ -744,7 +783,7 @@ class StraightBetWorkflowView(View):
                  step_content += ": Review Bet & Select Channel to Post"
                  await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
             elif self.current_step == 7: 
-                 if not all(k in self.bet_details for k in ['bet_serial', 'channel_id', 'units_str', 'odds_str', 'line', 'team', 'league']): # Corrected units_str
+                 if not all(k in self.bet_details for k in ['bet_serial', 'channel_id', 'units_str', 'odds_str', 'line', 'team', 'league']):
                      logger.error(f"Missing bet details for confirmation: {self.bet_details}")
                      await self.edit_message(interaction, content="❌ Error: Bet details incomplete. Please restart.", view=None)
                      self.stop()
@@ -776,7 +815,6 @@ class StraightBetWorkflowView(View):
                 self.stop()
         except Exception as e:
             logger.exception(f"Error in straight bet workflow step {self.current_step}: {e}")
-            # Ensure interaction object is available for edit_message
             target_interaction_for_error = interaction or self.latest_interaction or self.original_interaction
             await self.edit_message(target_interaction_for_error, content="❌ An unexpected error occurred.", view=None)
             self.stop()
@@ -799,7 +837,7 @@ class StraightBetWorkflowView(View):
             if not post_channel or not isinstance(post_channel, TextChannel):
                 logger.error(f"Invalid or inaccessible channel {post_channel_id} for bet {bet_serial}")
                 raise ValueError(f"Could not find text channel <#{post_channel_id}> to post bet.")
-            units = float(details.get('units_str', 1.0)) # Corrected to use 'units_str'
+            units = float(details.get('units_str', 1.0)) 
             odds = float(details.get('odds', 0))
             update_query = """
                 UPDATE bets
@@ -816,7 +854,7 @@ class StraightBetWorkflowView(View):
                       logger.warning(f"Bet {bet_serial} was already confirmed. Proceeding with posting.")
                       post_channel_id = existing_bet['channel_id']
                       post_channel = self.bot.get_channel(post_channel_id) if post_channel_id else post_channel
-                      units = float(existing_bet['units'])
+                      units = float(existing_bet['units']) # Use potentially updated units
                  else:
                       logger.error(f"Failed to update bet {bet_serial} with units/channel. Rowcount: {rowcount}")
                       raise BetServiceError("Failed to confirm bet details in database.")
