@@ -4,20 +4,24 @@
 
 import logging
 from typing import Dict, List, Optional, Union
-from datetime import datetime, timezone
+# MODIFIED: Import timedelta from datetime
+from datetime import datetime, timezone, timedelta
 import uuid
 import discord
 import json
 
+# Use relative imports if possible
 try:
-    from utils.errors import BetServiceError, ValidationError
+    from ..utils.errors import BetServiceError, ValidationError
+    from ..data.db_manager import DatabaseManager # Added import for type hint if needed elsewhere
 except ImportError:
     from utils.errors import BetServiceError, ValidationError
+    from data.db_manager import DatabaseManager # Fallback
 
 logger = logging.getLogger(__name__)
 
 class BetService:
-    def __init__(self, bot, db_manager):
+    def __init__(self, bot, db_manager: DatabaseManager): # Added type hint
         """
         Initialize the BetService.
 
@@ -57,7 +61,8 @@ class BetService:
         try:
             # Convert timestamp to MySQL DATETIME format
             # Using 24 hours as expiration
-            expiration_datetime = datetime.now(timezone.utc) - timezone.timedelta(hours=24)
+            # MODIFIED: Use timedelta directly from datetime module
+            expiration_datetime = datetime.now(timezone.utc) - timedelta(hours=24)
             # Using bet expiry time if set, otherwise created_at
             query = """
                 DELETE FROM bets
@@ -65,6 +70,7 @@ class BetService:
                 AND COALESCE(expiration_time, created_at) < %s
             """
             result = await self.db_manager.execute(query, (expiration_datetime,))
+            # Assuming execute returns (rowcount, last_id) tuple
             rowcount = result[0] if result and result[0] is not None else 0
             if rowcount > 0:
                 logger.info(f"Cleaned up {rowcount} expired pending bets.")
@@ -80,7 +86,8 @@ class BetService:
         """Delete unconfirmed bets that are older than 5 minutes."""
         logger.info("Starting cleanup of unconfirmed bets")
         try:
-            cutoff_time = datetime.now(timezone.utc) - timezone.timedelta(minutes=5)
+            # MODIFIED: Use timedelta directly
+            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=5)
 
             # First get the bets that need to be cleaned up
             # Adjusted query for MySQL interval syntax
@@ -109,6 +116,7 @@ class BetService:
 
                     # Delete the bet itself
                     delete_query = "DELETE FROM bets WHERE bet_serial = %s AND confirmed = 0"
+                    # Assuming execute returns (rowcount, last_id) tuple
                     rowcount, _ = await self.db_manager.execute(delete_query, (bet_serial_int,))
 
                     if rowcount is not None and rowcount > 0:
@@ -186,6 +194,7 @@ class BetService:
             """
 
             # Execute and get rowcount and lastrowid directly
+            # Assuming execute returns (rowcount, last_id) tuple
             rowcount, last_id = await self.db_manager.execute(
                 query,
                 guild_id, user_id, league, bet_type, bet_details_json,
@@ -284,7 +293,7 @@ class BetService:
                     decimal_leg = (100.0 / abs(odds)) + 1.0
                 total_decimal_odds *= decimal_leg
 
-            if total_decimal_odds == 1.0: # No valid legs or all odds were 0?
+            if total_decimal_odds <= 1.0: # No valid legs or calculation error?
                 return 0.0 # Or handle as error
 
             # Convert back to American odds
@@ -293,9 +302,9 @@ class BetService:
             else:
                 american_odds = -100.0 / (total_decimal_odds - 1.0)
 
-            return round(american_odds, 2) # Return rounded American odds
+            return round(american_odds) # Return rounded integer American odds
 
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError, KeyError) as e:
              logger.error(f"Error calculating parlay odds: Invalid odds format in legs. {e}")
              return 0.0 # Indicate error or invalid calculation
 
@@ -498,11 +507,17 @@ class BetService:
                  result_value = 0.0
 
                  if new_status == 'won':
+                     if odds is None or units_staked is None:
+                         logger.error(f"Missing odds or units for winning bet {bet_serial}")
+                         return
                      if odds > 0:
                          result_value = units_staked * (odds / 100.0)
                      else: # Negative odds
                          result_value = units_staked * (100.0 / abs(odds))
                  elif new_status == 'lost':
+                     if units_staked is None:
+                         logger.error(f"Missing units for losing bet {bet_serial}")
+                         return
                      result_value = -units_staked
                  # else: status is 'push', result_value remains 0.0
 
