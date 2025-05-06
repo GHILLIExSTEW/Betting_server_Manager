@@ -14,13 +14,13 @@ import os
 # Use relative imports if possible, otherwise adjust based on project structure
 try:
     from ..utils.errors import BetServiceError, ValidationError, GameNotFoundError
-    from ..utils.image_generator import BetSlipGenerator
+    from ..utils.image_generator import BetSlipGenerator, SPORT_CATEGORY_MAP # MODIFIED: Import SPORT_CATEGORY_MAP
     # Import commands.Cog for bot.add_cog
     from discord.ext import commands
 except ImportError:
     # Fallback for running script directly or different structure
     from utils.errors import BetServiceError, ValidationError, GameNotFoundError
-    from utils.image_generator import BetSlipGenerator
+    from utils.image_generator import BetSlipGenerator, SPORT_CATEGORY_MAP # MODIFIED: Import SPORT_CATEGORY_MAP
     from discord.ext import commands
 
 logger = logging.getLogger(__name__)
@@ -710,7 +710,7 @@ class StraightBetWorkflowView(View):
                     try:
                         # Fetch upcoming games for the selected league
                         # Determine sport category if needed by game_service
-                        sport = self.bet_slip_generator.SPORT_CATEGORY_MAP.get(league.upper()) # Use map from generator
+                        sport = SPORT_CATEGORY_MAP.get(league.upper()) # MODIFIED: Use imported SPORT_CATEGORY_MAP
                         if sport:
                              # Assuming get_upcoming_games might need guild_id and potentially sport
                              # Adjust parameters as needed for your game_service implementation
@@ -912,7 +912,7 @@ class StraightBetWorkflowView(View):
 
             elif self.current_step == 7: # Confirmation Step (After Channel Selected)
                  # Validate essential details exist
-                 if not all(k in self.bet_details for k in ['bet_serial', 'channel_id', 'units', 'odds', 'line', 'team', 'league']):
+                 if not all(k in self.bet_details for k in ['bet_serial', 'channel_id', 'units_str', 'odds', 'line', 'team', 'league']): # MODIFIED: units to units_str
                      logger.error(f"Missing bet details for confirmation: {self.bet_details}")
                      await self.edit_message(interaction, content="❌ Error: Bet details incomplete. Please restart.", view=None)
                      self.stop()
