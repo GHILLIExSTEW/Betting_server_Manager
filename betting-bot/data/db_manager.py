@@ -278,6 +278,7 @@ class DatabaseManager:
                         await self._check_and_add_column(cursor, 'games', 'referee', "VARCHAR(100) NULL AFTER venue")
 
                     # --- Bets Table ---
+                    bets_table_created = False
                     if not await self.table_exists(conn, 'bets'):
                         # Use the schema provided by user
                         await cursor.execute('''
@@ -299,9 +300,9 @@ class DatabaseManager:
                                 odds decimal(10,2) DEFAULT NULL,
                                 units decimal(10,2) NOT NULL,
                                 legs int(11) DEFAULT NULL,
-                                bet_won tinyint(4) DEFAULT '0',
-                                bet_loss tinyint(4) DEFAULT '0',
-                                confirmed tinyint(4) DEFAULT '0',
+                                bet_won tinyint(4) DEFAULT 0,
+                                bet_loss tinyint(4) DEFAULT 0,
+                                confirmed tinyint(4) DEFAULT 0,
                                 created_at timestamp NULL DEFAULT CURRENT_TIMESTAMP,
                                 game_start datetime DEFAULT NULL,
                                 result_value decimal(15,2) DEFAULT NULL,
@@ -320,12 +321,13 @@ class DatabaseManager:
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         logger.info("Table 'bets' created using provided schema.")
+                        bets_table_created = True # Mark as newly created
                     else:
                         logger.info("Table 'bets' already exists.")
                         # Check specific columns from provided schema
                         await self._check_and_add_column(cursor, 'bets', 'bet_details', "longtext NOT NULL COMMENT 'JSON containing specific bet details'")
                         await self._check_and_add_column(cursor, 'bets', 'channel_id', "bigint(20) DEFAULT NULL COMMENT 'Channel where bet was posted'")
-                        # Verify game_id FK exists
+                        # Verify game_id FK exists if table wasn't just created
                         async with conn.cursor(aiomysql.DictCursor) as dict_cursor:
                              await dict_cursor.execute(
                                  "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE "
@@ -342,6 +344,7 @@ class DatabaseManager:
                                      logger.error(f"Failed to add foreign key constraint for bets.game_id: {fk_err}")
 
                     # --- Unit Records Table ---
+                    unit_records_created = False
                     if not await self.table_exists(conn, 'unit_records'):
                         await cursor.execute('''
                             CREATE TABLE unit_records (
@@ -358,28 +361,27 @@ class DatabaseManager:
                                 INDEX idx_unit_records_guild_user_ym (guild_id, user_id, year, month),
                                 INDEX idx_unit_records_year_month (year, month),
                                 INDEX idx_unit_records_user_id (user_id),
-                                INDEX idx_unit_records_guild_id (guild_id),
-                                FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE
+                                INDEX idx_unit_records_guild_id (guild_id)
+                                -- Foreign key added conditionally below --
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                         ''')
                         logger.info("Table 'unit_records' created.")
+                        unit_records_created = True # Mark as newly created
                     else:
                         logger.info("Table 'unit_records' already exists.")
-                        # Ensure FK exists
-                        async with conn.cursor(aiomysql.DictCursor) as dict_cursor:
-                             await dict_cursor.execute(
-                                 "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE "
-                                 "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'unit_records' AND COLUMN_NAME = 'bet_serial' AND REFERENCED_TABLE_NAME = 'bets'",
-                                 (self.db_name,)
-                             )
-                             fk_exists = await dict_cursor.fetchone()
-                             if not fk_exists:
-                                 logger.warning("Foreign key constraint for unit_records.bet_serial -> bets.bet_serial might be missing. Attempting to add.")
-                                 try:
-                                     await cursor.execute("ALTER TABLE unit_records ADD CONSTRAINT unit_records_ibfk_1 FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE")
-                                     logger.info("Added foreign key constraint for unit_records.bet_serial.")
-                                 except Exception as fk_err:
-                                     logger.error(f"Failed to add foreign key constraint for unit_records.bet_serial: {fk_err}")
+
+                    # MODIFIED: Only attempt to add FK if unit_records table was newly created
+                    if unit_records_created:
+                        logger.info("Attempting to add foreign key constraint for newly created 'unit_records' table...")
+                        try:
+                             await cursor.execute("ALTER TABLE unit_records ADD CONSTRAINT unit_records_ibfk_1 FOREIGN KEY (bet_serial) REFERENCES bets(bet_serial) ON DELETE CASCADE")
+                             logger.info("Added foreign key constraint for unit_records.bet_serial.")
+                        except Exception as fk_err:
+                             logger.error(f"Failed to add foreign key constraint for unit_records.bet_serial: {fk_err}. This might indicate orphaned records if the table existed before this run.", exc_info=True)
+                    else:
+                         logger.debug("Skipping foreign key check for 'unit_records' as table already existed.")
+                         # Optionally, could add a check here to see if the FK exists already if the table existed
+
 
                     # --- Guild Settings Table ---
                     if not await self.table_exists(conn, 'guild_settings'):
