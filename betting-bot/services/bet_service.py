@@ -125,7 +125,7 @@ class BetService:
                 WHERE bet_serial = %s
             """
             result = await self.db_manager.execute(query, (channel_id, bet_serial))
-            return result.rowcount > 0
+            return result is not None
         except Exception as e:
             logger.error(f"Error confirming bet {bet_serial}: {e}")
             return False
@@ -154,7 +154,6 @@ class BetService:
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
-                RETURNING bet_serial
             """
             
             result = await self.db_manager.execute(
@@ -166,8 +165,10 @@ class BetService:
                 )
             )
             
-            if result and result.rowcount > 0:
-                return result.fetchone()[0]
+            if result is not None:
+                # Get the last inserted ID
+                id_result = await self.db_manager.fetchval("SELECT LAST_INSERT_ID()")
+                return id_result
             return None
             
         except Exception as e:
@@ -193,7 +194,6 @@ class BetService:
                 ) VALUES (
                     %s, %s, %s, 'parlay', %s, %s, %s, %s, %s
                 )
-                RETURNING bet_serial
             """
             
             total_units = sum(float(leg.get('units', 1.0)) for leg in legs)
@@ -208,8 +208,10 @@ class BetService:
                 )
             )
             
-            if result and result.rowcount > 0:
-                return result.fetchone()[0]
+            if result is not None:
+                # Get the last inserted ID
+                id_result = await self.db_manager.fetchval("SELECT LAST_INSERT_ID()")
+                return id_result
             return None
             
         except Exception as e:
