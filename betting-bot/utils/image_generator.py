@@ -49,7 +49,6 @@ def _determine_asset_paths():
     elif os.path.isdir(potential_static_dir):
         final_assets_dir = potential_static_dir
     else:
-        # If neither is found relative to script, try using the default path
         if os.path.isdir(assets_dir_default):
              final_assets_dir = assets_dir_default
         else:
@@ -109,10 +108,8 @@ try:
                 if not _found: _emoji_font_path = _font_path
     logger.info(f"Using emoji font: {_emoji_font_path}")
 
-    font_m_18 = ImageFont.truetype(_font_path, 18)
-    font_m_24 = ImageFont.truetype(_font_path, 24)
-    font_b_18 = ImageFont.truetype(_bold_font_path, 18)
-    font_b_24 = ImageFont.truetype(_bold_font_path, 24)
+    font_m_18 = ImageFont.truetype(_font_path, 18); font_m_24 = ImageFont.truetype(_font_path, 24)
+    font_b_18 = ImageFont.truetype(_bold_font_path, 18); font_b_24 = ImageFont.truetype(_bold_font_path, 24)
     font_b_36 = ImageFont.truetype(_bold_font_path, 36)
     try: font_b_28 = ImageFont.truetype(_bold_font_path, 28)
     except IOError: font_b_28 = font_b_24
@@ -148,8 +145,7 @@ class BetSlipGenerator:
 
     def _format_odds_with_sign(self, odds: Optional[Any]) -> str:
         if odds is None: return "N/A"
-        try:
-            odds_num = int(float(odds)); return f"+{odds_num}" if odds_num > 0 else str(odds_num)
+        try: odds_num = int(float(odds)); return f"+{odds_num}" if odds_num > 0 else str(odds_num)
         except (ValueError, TypeError): return "N/A"
 
     def _ensure_team_dir_exists(self, league: str) -> str:
@@ -182,13 +178,14 @@ class BetSlipGenerator:
             fname_base=team_name.lower().replace(" ", "_")
             logo_path=os.path.join(team_dir, f"{fname_base}.png")
             ### START LOGGING ###
-            absolute_logo_path = os.path.abspath(logo_path)
-            file_exists = os.path.exists(absolute_logo_path)
-            logger.info(f"Attempting to load team logo: Path='{absolute_logo_path}', Exists={file_exists}") # Corrected Log Line
+            absolute_logo_path = os.path.abspath(logo_path) # Get absolute path
+            file_exists = os.path.exists(absolute_logo_path) # Check absolute path
+            # Log the check result HERE
+            logger.info(f"Attempting to load team logo: Path='{absolute_logo_path}', Exists={file_exists}") # Use absolute path in log
             ### END LOGGING ###
             logo=None
             if file_exists:
-                try: logo = Image.open(absolute_logo_path).convert("RGBA")
+                try: logo = Image.open(absolute_logo_path).convert("RGBA") # Open using absolute path
                 except Exception as e: logger.error(f"Err loading {absolute_logo_path}: {e}")
             if logo is None:
                 default_path = _PATHS["DEFAULT_TEAM_LOGO_PATH"]; abs_default = os.path.abspath(default_path)
@@ -229,14 +226,15 @@ class BetSlipGenerator:
             logo_path=os.path.join(logo_dir, fname)
             os.makedirs(logo_dir, exist_ok=True)
             ### START LOGGING ###
-            absolute_logo_path = os.path.abspath(logo_path)
-            file_exists = os.path.exists(absolute_logo_path)
-            logger.info(f"Attempting to load league logo: Path='{absolute_logo_path}', Exists={file_exists}") # Corrected Log Line
+            absolute_logo_path = os.path.abspath(logo_path) # Get absolute path
+            file_exists = os.path.exists(absolute_logo_path) # Check absolute path
+            # Log the check result HERE
+            logger.info(f"Attempting to load league logo: Path='{absolute_logo_path}', Exists={file_exists}") # Use absolute path in log
             ### END LOGGING ###
             logo=None
             if file_exists:
                 try:
-                    with Image.open(absolute_logo_path) as img: logo = img.convert('RGBA')
+                    with Image.open(absolute_logo_path) as img: logo = img.convert('RGBA') # Open using absolute path
                 except Exception as e: logger.error(f"Err loading {absolute_logo_path}: {e}")
             if logo:
                 self._cleanup_cache()
