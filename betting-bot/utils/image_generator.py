@@ -1,12 +1,13 @@
 # betting-bot/utils/image_generator.py
 
 import logging
-from PIL import Image, ImageDraw, ImageFont
 import os
+import time
+import io
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-import time
-import io # Make sure io is imported
+
+from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
@@ -14,59 +15,85 @@ logger = logging.getLogger(__name__)
 SPORT_CATEGORY_MAP = {
     "NBA": "BASKETBALL", "NCAAB": "BASKETBALL",
     "NFL": "FOOTBALL", "NCAAF": "FOOTBALL",
-    "MLB": "BASEBALL", "NCAAB_BASEBALL": "BASEBALL", # Added for consistency if used
+    "MLB": "BASEBALL", "NCAAB_BASEBALL": "BASEBALL",
     "NHL": "HOCKEY",
-    "MLS": "SOCCER", "EPL": "SOCCER", "LA LIGA": "SOCCER", "SERIE A": "SOCCER", "BUNDESLIGA": "SOCCER", "LIGUE 1": "SOCCER",
+    "MLS": "SOCCER", "EPL": "SOCCER", "LA LIGA": "SOCCER",
+    "SERIE A": "SOCCER", "BUNDESLIGA": "SOCCER", "LIGUE 1": "SOCCER",
     "TENNIS": "TENNIS",
     "UFC": "MMA", "MMA": "MMA",
-    "DARTS": "DARTS"
-    # Add other leagues/sports as needed
+    "DARTS": "DARTS",
 }
-DEFAULT_FALLBACK_SPORT_CATEGORY = "OTHER_SPORTS" # For leagues not in map
+DEFAULT_FALLBACK_SPORT_CATEGORY = "OTHER_SPORTS"
 
-# Helper function to get sport category for path construction
 def get_sport_category_for_path(league_name: str) -> str:
-    """Gets the sport category string for use in paths, using the global map."""
-    return SPORT_CATEGORY_MAP.get(str(league_name).upper(), DEFAULT_FALLBACK_SPORT_CATEGORY)
+    """Gets the sport category string for use in paths."""
+    return SPORT_CATEGORY_MAP.get(
+        str(league_name).upper(), DEFAULT_FALLBACK_SPORT_CATEGORY
+    )
 
-# --- Default Font/Asset Path Logic (Global Scope Helper) ---
+# --- Default Font/Asset Path Logic ---
 def _determine_asset_paths():
+    """Determine asset paths dynamically."""
     assets_dir_default = "betting-bot/static/"
     font_dir_name = 'fonts'
     logo_dir_name = 'logos'
     teams_subdir_name = 'teams'
     leagues_subdir_name = 'leagues'
 
-    script_dir = os.path.dirname(__file__)
-    parent_dir = os.path.dirname(script_dir)
-    potential_assets_dir = os.path.join(parent_dir, 'assets')
-    potential_static_dir = os.path.join(parent_dir, 'static')
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(script_dir)
+        potential_assets_dir = os.path.join(parent_dir, 'assets')
+        potential_static_dir = os.path.join(parent_dir, 'static')
+    except NameError: # Handle __file__ not defined if run interactively
+         script_dir = os.getcwd()
+         parent_dir = os.path.dirname(script_dir) # Adjust if needed
+         potential_assets_dir = os.path.join(parent_dir, 'betting-bot', 'assets')
+         potential_static_dir = os.path.join(parent_dir, 'betting-bot', 'static')
+
 
     final_assets_dir = None
-    # Check for 'assets' first, then 'static'
     if os.path.isdir(potential_assets_dir):
         final_assets_dir = potential_assets_dir
     elif os.path.isdir(potential_static_dir):
         final_assets_dir = potential_static_dir
+    elif os.path.isdir(assets_dir_default):
+        final_assets_dir = assets_dir_default
     else:
-        if os.path.isdir(assets_dir_default):
-             final_assets_dir = assets_dir_default
-        else:
-             final_assets_dir = os.path.join(os.getcwd(), 'assets')
-             logger.warning(f"Could not find 'assets' or 'static' relative to script or default path. Assuming assets path: {final_assets_dir}")
+        final_assets_dir = os.path.join(os.getcwd(), 'assets')
+        logger.warning(
+            "Could not find 'assets' or 'static'. Assuming path: %s",
+            final_assets_dir
+        )
 
-    logger.info(f"Path determination logic targeting base: {final_assets_dir}")
+    logger.info("Path determination targeting base: %s", final_assets_dir)
 
     paths = {
         "ASSETS_DIR": final_assets_dir,
-        "DEFAULT_FONT_PATH": os.path.join(final_assets_dir, font_dir_name, 'Roboto-Regular.ttf'),
-        "DEFAULT_BOLD_FONT_PATH": os.path.join(final_assets_dir, font_dir_name, 'Roboto-Bold.ttf'),
-        "DEFAULT_EMOJI_FONT_PATH_NOTO": os.path.join(final_assets_dir, font_dir_name, 'NotoEmoji-Regular.ttf'),
-        "DEFAULT_EMOJI_FONT_PATH_SEGOE": os.path.join(final_assets_dir, font_dir_name, 'SegoeUIEmoji.ttf'),
-        "LEAGUE_TEAM_BASE_DIR": os.path.join(final_assets_dir, logo_dir_name, teams_subdir_name),
-        "LEAGUE_LOGO_BASE_DIR": os.path.join(final_assets_dir, logo_dir_name, leagues_subdir_name),
-        "DEFAULT_LOCK_ICON_PATH": os.path.join(final_assets_dir, "lock_icon.png"),
-        "DEFAULT_TEAM_LOGO_PATH": os.path.join(final_assets_dir, logo_dir_name, 'default_logo.png')
+        "DEFAULT_FONT_PATH": os.path.join(
+            final_assets_dir, font_dir_name, 'Roboto-Regular.ttf'
+        ),
+        "DEFAULT_BOLD_FONT_PATH": os.path.join(
+            final_assets_dir, font_dir_name, 'Roboto-Bold.ttf'
+        ),
+        "DEFAULT_EMOJI_FONT_PATH_NOTO": os.path.join(
+            final_assets_dir, font_dir_name, 'NotoEmoji-Regular.ttf'
+        ),
+        "DEFAULT_EMOJI_FONT_PATH_SEGOE": os.path.join(
+            final_assets_dir, font_dir_name, 'SegoeUIEmoji.ttf'
+        ),
+        "LEAGUE_TEAM_BASE_DIR": os.path.join(
+            final_assets_dir, logo_dir_name, teams_subdir_name
+        ),
+        "LEAGUE_LOGO_BASE_DIR": os.path.join(
+            final_assets_dir, logo_dir_name, leagues_subdir_name
+        ),
+        "DEFAULT_LOCK_ICON_PATH": os.path.join(
+            final_assets_dir, "lock_icon.png"
+        ),
+        "DEFAULT_TEAM_LOGO_PATH": os.path.join(
+            final_assets_dir, logo_dir_name, 'default_logo.png'
+        ),
     }
     return paths
 
@@ -76,50 +103,45 @@ _PATHS = _determine_asset_paths()
 try:
     _font_path = _PATHS["DEFAULT_FONT_PATH"]
     if not os.path.exists(_font_path):
-        logger.warning(f"Default font '{_font_path}' not found. Falling back.")
-        if os.name == 'nt': _font_path = 'C:\\Windows\\Fonts\\arial.ttf'
-        else:
-            _found = False
-            for p in ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf']:
-                if os.path.exists(p): _font_path = p; _found=True; break
-            if not _found: _font_path = 'arial.ttf'
-    logger.info(f"Using regular font: {_font_path}")
+        logger.warning("Default font '%s' not found. Falling back.", _font_path)
+        _linux_fallbacks = [
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+        ]
+        _font_path = next((p for p in _linux_fallbacks if os.path.exists(p)), 'arial.ttf')
+    logger.info("Using regular font: %s", _font_path)
 
     _bold_font_path = _PATHS["DEFAULT_BOLD_FONT_PATH"]
     if not os.path.exists(_bold_font_path):
-        logger.warning(f"Default bold font '{_bold_font_path}' not found. Trying bold variant or falling back.")
-        _bold_font_path_try = _font_path.replace("Regular", "Bold").replace(".ttf", "-Bold.ttf")
-        if not os.path.exists(_bold_font_path_try): _bold_font_path_try = _font_path.replace(".ttf", "bd.ttf")
-        if not os.path.exists(_bold_font_path_try): _bold_font_path_try = _font_path.replace(".ttf", "-Bold.otf")
-        if os.path.exists(_bold_font_path_try): _bold_font_path = _bold_font_path_try
-        else: _bold_font_path = _font_path; logger.info("Using regular font as bold fallback.")
-    logger.info(f"Using bold font: {_bold_font_path}")
+        logger.warning("Default bold font '%s' not found. Falling back.", _bold_font_path)
+        _bold_font_path = _font_path
+    logger.info("Using bold font: %s", _bold_font_path)
 
     _emoji_font_path = _PATHS["DEFAULT_EMOJI_FONT_PATH_NOTO"]
     if not os.path.exists(_emoji_font_path):
-        _emoji_font_path = _PATHS["DEFAULT_EMOJI_FONT_PATH_SEGOE"]
-        if not os.path.exists(_emoji_font_path):
-            logger.warning(f"Default Noto/Segoe emoji fonts not found. Falling back.")
-            if os.name == 'nt': _emoji_font_path = 'C:\\Windows\\Fonts\\seguiemj.ttf'
-            else:
-                _found = False
-                for p in ['/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', '/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf']:
-                     if os.path.exists(p): _emoji_font_path = p; _found=True; break
-                if not _found: _emoji_font_path = _font_path
-    logger.info(f"Using emoji font: {_emoji_font_path}")
+         _emoji_font_path = _PATHS["DEFAULT_EMOJI_FONT_PATH_SEGOE"]
+    if not os.path.exists(_emoji_font_path):
+        logger.warning("Default Noto/Segoe emoji fonts not found. Falling back.")
+        _linux_emoji_fallbacks = [
+            '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf',
+            '/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf'
+            ]
+        _emoji_font_path = next((p for p in _linux_emoji_fallbacks if os.path.exists(p)), _font_path)
+    logger.info("Using emoji font: %s", _emoji_font_path)
 
-    font_m_18 = ImageFont.truetype(_font_path, 18); font_m_24 = ImageFont.truetype(_font_path, 24)
-    font_b_18 = ImageFont.truetype(_bold_font_path, 18); font_b_24 = ImageFont.truetype(_bold_font_path, 24)
+    font_m_18 = ImageFont.truetype(_font_path, 18)
+    font_m_24 = ImageFont.truetype(_font_path, 24)
+    font_b_18 = ImageFont.truetype(_bold_font_path, 18)
+    font_b_24 = ImageFont.truetype(_bold_font_path, 24)
     font_b_36 = ImageFont.truetype(_bold_font_path, 36)
     try: font_b_28 = ImageFont.truetype(_bold_font_path, 28)
-    except IOError: font_b_28 = font_b_24
+    except IOError: font_b_28 = font_b_24; logger.warning("Using size 24 bold font as 28 fallback.")
     try: emoji_font_24 = ImageFont.truetype(_emoji_font_path, 24)
-    except IOError: emoji_font_24 = font_m_24
-    logger.info("Successfully loaded fonts globally for image_generator.")
+    except IOError: emoji_font_24 = font_m_24; logger.warning("Using regular font as emoji fallback.")
+    logger.info("Fonts loaded globally.")
 except Exception as e:
-    logger.critical(f"CRITICAL: Error loading required fonts: {e}", exc_info=True)
-    font_m_18=font_m_24=font_b_18=font_b_24=font_b_36=font_b_28=emoji_font_24 = ImageFont.load_default()
-
+    logger.critical("CRITICAL: Error loading fonts: %s", e, exc_info=True)
+    font_m_18=font_m_24=font_b_18=font_b_24=font_b_36=font_b_28=emoji_font_24=ImageFont.load_default()
 
 class BetSlipGenerator:
     def __init__(self, font_path: Optional[str] = None, emoji_font_path: Optional[str] = None, assets_dir: Optional[str] = None):
@@ -141,22 +163,22 @@ class BetSlipGenerator:
         self.padding = 20; self.logo_size = 60; self.image = None
         self.font_m_18=font_m_18; self.font_m_24=font_m_24; self.font_b_18=font_b_18; self.font_b_24=font_b_24
         self.font_b_28=font_b_28; self.font_b_36=font_b_36; self.emoji_font_24=emoji_font_24
-        logger.info(f"BetSlipGenerator initialized with determined assets_dir: {self.assets_dir}")
+        logger.info("BetSlipGenerator initialized with assets_dir: %s", self.assets_dir)
 
     def _format_odds_with_sign(self, odds: Optional[Any]) -> str:
         if odds is None: return "N/A"
         try: odds_num = int(float(odds)); return f"+{odds_num}" if odds_num > 0 else str(odds_num)
-        except (ValueError, TypeError): return "N/A"
+        except (ValueError, TypeError): logger.warning("Invalid odds format: %s", odds); return "N/A"
 
     def _ensure_team_dir_exists(self, league: str) -> str:
         league_upper = league.upper()
         if league_upper.startswith("NCAA"):
-            specific_sport = get_sport_category_for_path(league_upper)
-            if specific_sport == DEFAULT_FALLBACK_SPORT_CATEGORY: specific_sport = "UNKNOWN_NCAA_SPORT"
-            team_dir = os.path.join(self.league_team_base_dir, "NCAA", specific_sport)
+            sport = get_sport_category_for_path(league_upper)
+            if sport == DEFAULT_FALLBACK_SPORT_CATEGORY: sport = "UNKNOWN_NCAA_SPORT"
+            team_dir = os.path.join(self.league_team_base_dir, "NCAA", sport)
         else:
-            sport_category = get_sport_category_for_path(league_upper)
-            team_dir = os.path.join(self.league_team_base_dir, sport_category, league_upper)
+            sport = get_sport_category_for_path(league_upper)
+            team_dir = os.path.join(self.league_team_base_dir, sport, league_upper)
         os.makedirs(team_dir, exist_ok=True); return team_dir
 
     def _cleanup_cache(self):
@@ -177,30 +199,32 @@ class BetSlipGenerator:
             team_dir=self._ensure_team_dir_exists(league)
             fname_base=team_name.lower().replace(" ", "_")
             logo_path=os.path.join(team_dir, f"{fname_base}.png")
-            ### START LOGGING ###
-            absolute_logo_path = os.path.abspath(logo_path) # Get absolute path
-            file_exists = os.path.exists(absolute_logo_path) # Check absolute path
-            # Log the check result HERE
-            logger.info(f"Attempting to load team logo: Path='{absolute_logo_path}', Exists={file_exists}") # Use absolute path in log
+            ### START LOGGING (Corrected Version) ###
+            absolute_logo_path = os.path.abspath(logo_path)
+            file_exists = os.path.exists(absolute_logo_path)
+            logger.info(
+                "Attempting to load team logo: Path='%s', Exists=%s",
+                absolute_logo_path, file_exists
+            )
             ### END LOGGING ###
             logo=None
             if file_exists:
-                try: logo = Image.open(absolute_logo_path).convert("RGBA") # Open using absolute path
-                except Exception as e: logger.error(f"Err loading {absolute_logo_path}: {e}")
+                try: logo = Image.open(absolute_logo_path).convert("RGBA")
+                except Exception as e: logger.error("Err loading %s: %s", absolute_logo_path, e)
             if logo is None:
                 default_path = _PATHS["DEFAULT_TEAM_LOGO_PATH"]; abs_default = os.path.abspath(default_path)
                 if os.path.exists(abs_default):
-                    try: logo = Image.open(abs_default).convert("RGBA"); logger.warning(f"Using default logo for {team_name} (path: {absolute_logo_path})")
-                    except Exception as e: logger.error(f"Err loading default {abs_default}: {e}")
-                else: logger.warning(f"Default team logo not found: {abs_default}")
+                    try: logo = Image.open(abs_default).convert("RGBA"); logger.warning("Using default logo for %s (path: %s)", team_name, absolute_logo_path)
+                    except Exception as e: logger.error("Err loading default %s: %s", abs_default, e)
+                else: logger.warning("Default team logo not found: %s", abs_default)
             if logo:
                 self._cleanup_cache()
                 if len(self._logo_cache) >= self._max_cache_size: self._logo_cache.pop(min(self._logo_cache, key=lambda k: self._logo_cache[k][1]), None)
                 self._logo_cache[cache_key] = (logo, now)
                 return logo
-            logger.warning(f"Final: No logo loaded for {team_name} ({league}) path: {absolute_logo_path}")
+            logger.warning("Final: No logo loaded for %s (%s) path: %s", team_name, league, absolute_logo_path)
             return None
-        except Exception as e: logger.error(f"Err _load_team_logo {team_name} ({league}): {e}", exc_info=True); return None
+        except Exception as e: logger.error("Err _load_team_logo %s (%s): %s", team_name, league, e, exc_info=True); return None
 
     def _load_lock_icon(self) -> Optional[Image.Image]:
         if self._lock_icon_cache is None:
@@ -208,8 +232,8 @@ class BetSlipGenerator:
                 path = _PATHS["DEFAULT_LOCK_ICON_PATH"]; abs_path = os.path.abspath(path)
                 if os.path.exists(abs_path):
                     with Image.open(abs_path) as lock: self._lock_icon_cache = lock.convert("RGBA").resize((30, 30), Image.Resampling.LANCZOS).copy()
-                else: logger.warning(f"Lock icon not found: {abs_path}")
-            except Exception as e: logger.error(f"Err loading lock icon: {e}")
+                else: logger.warning("Lock icon not found: %s", abs_path)
+            except Exception as e: logger.error("Err loading lock icon: %s", e)
         return self._lock_icon_cache
 
     def _load_league_logo(self, league: str) -> Optional[Image.Image]:
@@ -225,36 +249,38 @@ class BetSlipGenerator:
             logo_dir=os.path.join(self.league_logo_base_dir, sport)
             logo_path=os.path.join(logo_dir, fname)
             os.makedirs(logo_dir, exist_ok=True)
-            ### START LOGGING ###
-            absolute_logo_path = os.path.abspath(logo_path) # Get absolute path
-            file_exists = os.path.exists(absolute_logo_path) # Check absolute path
-            # Log the check result HERE
-            logger.info(f"Attempting to load league logo: Path='{absolute_logo_path}', Exists={file_exists}") # Use absolute path in log
+            ### START LOGGING (Corrected Version) ###
+            absolute_logo_path = os.path.abspath(logo_path)
+            file_exists = os.path.exists(absolute_logo_path)
+            logger.info(
+                "Attempting to load league logo: Path='%s', Exists=%s",
+                 absolute_logo_path, file_exists
+            )
             ### END LOGGING ###
             logo=None
             if file_exists:
                 try:
-                    with Image.open(absolute_logo_path) as img: logo = img.convert('RGBA') # Open using absolute path
-                except Exception as e: logger.error(f"Err loading {absolute_logo_path}: {e}")
+                    with Image.open(absolute_logo_path) as img: logo = img.convert('RGBA')
+                except Exception as e: logger.error("Err loading %s: %s", absolute_logo_path, e)
             if logo:
                 self._cleanup_cache()
                 if len(self._logo_cache) >= self._max_cache_size: self._logo_cache.pop(min(self._logo_cache, key=lambda k: self._logo_cache[k][1]), None)
                 self._logo_cache[cache_key] = (logo.copy(), now)
                 return logo
-            logger.warning(f"No logo found for league {league} (path: {absolute_logo_path})")
+            logger.warning("No logo found for league %s (path: %s)", league, absolute_logo_path)
             return None
-        except Exception as e: logger.error(f"Err _load_league_logo {league}: {e}", exc_info=True); return None
+        except Exception as e: logger.error("Err _load_league_logo %s: %s", league, e, exc_info=True); return None
 
     def generate_bet_slip(
         self, home_team: str, away_team: str, league: Optional[str], line: str, odds: float,
         units: float, bet_id: str, timestamp: datetime, bet_type: str = "straight",
         parlay_legs: Optional[List[Dict[str, Any]]] = None, is_same_game: bool = False
     ) -> Optional[Image.Image]:
-        eff_league=league or "UNKNOWN"; logger.info(f"Gen slip: {bet_type}, Lg: {eff_league}, ID: {bet_id}")
+        eff_league=league or "UNKNOWN"; logger.info("Gen slip: %s, Lg: %s, ID: %s", bet_type, eff_league, bet_id)
         try:
             width=800; header_h=100; footer_h=80; leg_h=180; num_legs=len(parlay_legs) if parlay_legs else 1
-            if bet_type=="parlay" and parlay_legs: content_h=num_legs*leg_h; parlay_tot_h=120
-            else: content_h=400; parlay_tot_h=0
+            content_h = num_legs * leg_h if bet_type=="parlay" and parlay_legs else 400
+            parlay_tot_h = 120 if bet_type=="parlay" else 0
             height = header_h + content_h + parlay_tot_h + footer_h
             img=Image.new('RGBA', (width, height), (40,40,40,255)); draw=ImageDraw.Draw(img)
             # Header
@@ -305,31 +331,31 @@ class BetSlipGenerator:
             # Footer
             f_y=height-footer_h//2; id_txt=f"Bet #{bet_id}"; ts_txt=timestamp.strftime('%Y-%m-%d %H:%M UTC')
             draw.text((self.padding,f_y),id_txt,(150,150,150),self.font_m_18,'lm'); draw.text((width-self.padding,f_y),ts_txt,(150,150,150),self.font_m_18,'rm')
-            logger.info(f"Bet slip generated OK: {bet_id}"); return img.convert("RGB")
-        except Exception as e:
-            logger.exception(f"Error generating bet slip {bet_id}: {e}")
-            err_img=Image.new('RGB',(800,200),(40,40,40)); draw=ImageDraw.Draw(err_img); font=self.font_m_24
-            draw.text((400,100),"Error Generating Slip",'red',font,"mm"); return err_img
+            logger.info("Bet slip generated OK: %s", bet_id); return img.convert("RGB")
+    except Exception as e:
+        logger.exception("Error generating bet slip %s: %s", bet_id, e)
+        err_img=Image.new('RGB',(800,200),(40,40,40)); draw=ImageDraw.Draw(err_img); font=self.font_m_24
+        draw.text((400,100),"Error Generating Slip",'red',font,"mm"); return err_img
 
-    def _draw_parlay_leg_internal(
-        self, image: Image.Image, draw: ImageDraw.Draw, leg: Dict[str, Any], league: Optional[str],
-        width: int, start_y: int, is_same_game: bool, leg_height: int
-    ) -> int:
-        leg_home=leg.get('home_team',leg.get('team','Unk')); leg_away=leg.get('opponent','Unk')
-        leg_line=leg.get('line','N/A'); leg_odds=leg.get('odds',0); leg_lg=leg.get('league',league or 'UNK')
-        logo_y=start_y+10; l_sz=(50,50); txt_x=40; team_logo=None
-        team_show=leg.get('team',leg_home)
-        if team_show!='Unknown': team_logo=self._load_team_logo(team_show,leg_lg)
-        if team_logo:
-            lx=40; disp=team_logo.resize(l_sz,Image.Resampling.LANCZOS);
-            if image.mode!='RGBA': image=image.convert("RGBA"); tmp=Image.new('RGBA',image.size,(0,0,0,0)); tmp.paste(disp,(lx,logo_y),disp); image=Image.alpha_composite(image,tmp); draw=ImageDraw.Draw(image); txt_x=lx+l_sz[0]+15
-        draw.text((txt_x,logo_y+5),leg_line,'white',self.font_m_24)
-        h=leg.get('home_team',leg_home); a=leg.get('opponent',leg_away); parts=[]
-        if h!='Unknown': parts.append(h)
-        if a!='Unknown' and a!=h: parts.append(f"vs {a}")
-        matchup=" ".join(parts) if parts else team_show
-        draw.text((txt_x,logo_y+40),f"{leg_lg} - {matchup}",(180,180,180),self.font_m_18)
-        odds_txt=self._format_odds_with_sign(leg_odds); bbox=draw.textbbox((0,0),odds_txt,self.font_b_28)
-        tw=bbox[2]-bbox[0]; th=bbox[3]-bbox[1]; odds_y=start_y+(leg_height/2)-(th/2)
-        draw.text((width-40-tw,int(odds_y)),odds_txt,'white',self.font_b_28)
-        return start_y+leg_height
+def _draw_parlay_leg_internal(
+    self, image: Image.Image, draw: ImageDraw.Draw, leg: Dict[str, Any], league: Optional[str],
+    width: int, start_y: int, is_same_game: bool, leg_height: int
+) -> int:
+    leg_home=leg.get('home_team',leg.get('team','Unk')); leg_away=leg.get('opponent','Unk')
+    leg_line=leg.get('line','N/A'); leg_odds=leg.get('odds',0); leg_lg=leg.get('league',league or 'UNK')
+    logo_y=start_y+10; l_sz=(50,50); txt_x=40; team_logo=None
+    team_show=leg.get('team',leg_home)
+    if team_show!='Unknown': team_logo=self._load_team_logo(team_show,leg_lg)
+    if team_logo:
+        lx=40; disp=team_logo.resize(l_sz,Image.Resampling.LANCZOS);
+        if image.mode!='RGBA': image=image.convert("RGBA"); tmp=Image.new('RGBA',image.size,(0,0,0,0)); tmp.paste(disp,(lx,logo_y),disp); image=Image.alpha_composite(image,tmp); draw=ImageDraw.Draw(image); txt_x=lx+l_sz[0]+15
+    draw.text((txt_x,logo_y+5),leg_line,'white',self.font_m_24)
+    h=leg.get('home_team',leg_home); a=leg.get('opponent',leg_away); parts=[]
+    if h!='Unknown': parts.append(h)
+    if a!='Unknown' and a!=h: parts.append(f"vs {a}")
+    matchup=" ".join(parts) if parts else team_show
+    draw.text((txt_x,logo_y+40),f"{leg_lg} - {matchup}",(180,180,180),self.font_m_18)
+    odds_txt=self._format_odds_with_sign(leg_odds); bbox=draw.textbbox((0,0),odds_txt,self.font_b_28)
+    tw=bbox[2]-bbox[0]; th=bbox[3]-bbox[1]; odds_y=start_y+(leg_height/2)-(th/2)
+    draw.text((width-40-tw,int(odds_y)),odds_txt,'white',self.font_b_28)
+    return start_y+leg_height
