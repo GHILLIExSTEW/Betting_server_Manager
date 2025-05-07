@@ -208,28 +208,34 @@ class BetSlipGenerator:
             # and NCAA/SPORT for NCAA thanks to the updated _ensure_team_dir_exists
             league_team_dir = self._ensure_team_dir_exists(league) # league is e.g. "NHL", "NCAAF"
 
-            team_name_map = { # This map is very limited, direct naming is preferred
+            team_name_map = { # This map is very limited, direct naming preferred
                 "oilers": "edmonton_oilers",
                 "bruins": "boston_bruins",
                 "bengals": "cincinnati_bengals",
                 "steelers": "pittsburgh_steelers",
                 "lakers": "los_angeles_lakers",
                 "celtics": "boston_celtics"
+                # Use normalized name if team_name is not in map
             }
 
+            # Use normalized name (lowercase, spaces to underscores) as the base filename
             logo_filename_base = team_name_map.get(team_name.lower(), team_name.lower().replace(" ", "_"))
-            logo_filename = f"{logo_filename_base}.png"
+            logo_filename = f"{logo_filename_base}.png" # Assume PNG format
             logo_path = os.path.join(league_team_dir, logo_filename)
 
-            # --- START MODIFIED LOGGING ---
-            file_exists = os.path.exists(logo_path)
-            logger.info(f"Attempting to load team logo: Path='{logo_path}', Exists={file_exists}")
-            # --- END MODIFIED LOGGING ---
+            # --- START REFINED LOGGING ---
+            # Log the absolute path to remove ambiguity about the base directory
+            absolute_logo_path = os.path.abspath(logo_path)
+            file_exists = os.path.exists(absolute_logo_path)
+            logger.info(f"Attempting to load team logo: Path='{absolute_logo_path}', Exists={file_exists}")
+            # --- END REFINED LOGGING ---
 
             if file_exists: # Use the checked variable
                 try:
-                    logo = Image.open(logo_path).convert("RGBA")
-                    logo = logo.resize((100, 100), Image.Resampling.LANCZOS) # Consider resizing only if needed
+                    # Use the absolute path for opening the file
+                    logo = Image.open(absolute_logo_path).convert("RGBA")
+                    # Resize only if needed for consistency or performance, maybe store original?
+                    # logo = logo.resize((100, 100), Image.Resampling.LANCZOS)
 
                     self._cleanup_cache()
                     if len(self._logo_cache) >= self._max_cache_size:
@@ -239,7 +245,7 @@ class BetSlipGenerator:
                     self._logo_cache[cache_key] = (logo, current_time)
                     return logo
                 except Exception as e:
-                    logger.error(f"Error loading logo from existing path {logo_path}: {str(e)}")
+                    logger.error(f"Error loading logo from existing path {absolute_logo_path}: {str(e)}")
                     # Fall through to default logo logic
 
             # If file didn't exist or failed to load, try default
@@ -247,14 +253,14 @@ class BetSlipGenerator:
             if os.path.exists(default_logo_path):
                 try:
                     default_logo = Image.open(default_logo_path).convert("RGBA")
-                    default_logo = default_logo.resize((100, 100), Image.Resampling.LANCZOS) # Consider resizing only if needed
-                    logger.warning(f"Using default logo for team {team_name} (logo not found or failed to load at {logo_path})")
+                    # default_logo = default_logo.resize((100, 100), Image.Resampling.LANCZOS)
+                    logger.warning(f"Using default logo for team {team_name} (logo not found or failed to load at {absolute_logo_path})")
                     # Optionally cache the default logo reference for this team?
                     return default_logo
                 except Exception as e:
                     logger.error(f"Error loading default logo from {default_logo_path}: {str(e)}")
 
-            logger.warning(f"No logo found for team '{team_name}' in league '{league}' (path: {logo_path}) and no default logo available/loadable.")
+            logger.warning(f"No logo found for team '{team_name}' in league '{league}' (path: {absolute_logo_path}) and no default logo available/loadable.")
             return None
 
         except Exception as e:
@@ -300,14 +306,16 @@ class BetSlipGenerator:
             # Ensure sport category directory under leagues exists
             os.makedirs(logo_dir, exist_ok=True)
 
-            # --- START MODIFIED LOGGING ---
-            file_exists = os.path.exists(logo_path)
-            logger.info(f"Attempting to load league logo: Path='{logo_path}', Exists={file_exists}")
-            # --- END MODIFIED LOGGING ---
+            # --- START REFINED LOGGING ---
+            absolute_logo_path = os.path.abspath(logo_path)
+            file_exists = os.path.exists(absolute_logo_path)
+            logger.info(f"Attempting to load league logo: Path='{absolute_logo_path}', Exists={file_exists}")
+            # --- END REFINED LOGGING ---
 
             if file_exists: # Use the checked variable
                 try:
-                    with Image.open(logo_path) as img:
+                    # Use absolute path for opening
+                    with Image.open(absolute_logo_path) as img:
                         logo = img.convert('RGBA')
                         # Update cache
                         self._cleanup_cache()
@@ -317,10 +325,10 @@ class BetSlipGenerator:
                         self._logo_cache[cache_key] = (logo.copy(), current_time) # Cache a copy
                         return logo
                 except Exception as e:
-                    logger.error(f"Error loading league logo from existing path {logo_path}: {str(e)}")
+                    logger.error(f"Error loading league logo from existing path {absolute_logo_path}: {str(e)}")
                     # Fall through to warning
 
-            logger.warning(f"No logo found for league {league} (path: {logo_path})")
+            logger.warning(f"No logo found for league {league} (path: {absolute_logo_path})")
             return None
 
         except Exception as e:
@@ -342,86 +350,101 @@ class BetSlipGenerator:
             width = 800
             header_h = 100
             footer_h = 80
-            leg_draw_height = 180
+            leg_draw_height = 180 # Height allocated per leg in parlay section
             num_legs = len(parlay_legs) if parlay_legs else 1
-            parlay_extra_height = (num_legs - 1) * leg_draw_height if bet_type == "parlay" and parlay_legs else 0
-            parlay_total_section_height = 120 if bet_type == "parlay" else 0
-            base_content_height = 400
-            height = header_h + (base_content_height if bet_type == 'straight' else parlay_extra_height + leg_draw_height) + parlay_total_section_height + footer_h
+            # Calculate dynamic height based on bet type
+            if bet_type == "parlay" and parlay_legs:
+                content_height = num_legs * leg_draw_height # Height for all legs
+                parlay_total_section_height = 120 # Extra space for total odds/stake
+            else: # Straight bet
+                content_height = 400 # Fixed height for straight bet content
+                parlay_total_section_height = 0
+
+            height = header_h + content_height + parlay_total_section_height + footer_h
 
             image = Image.new('RGBA', (width, height), (40, 40, 40, 255))
             draw = ImageDraw.Draw(image)
 
-            header_y = 30
-            # Modified title generation based on user memory
+            # --- Header ---
+            header_y = 30 # Initial Y position for header content
+            # Title logic based on user preference and bet type
             if bet_type == 'parlay':
                 header_text_base = f"{effective_league.upper()} - {'Same Game Parlay' if is_same_game else 'Multi-Team Parlay Bet'}"
             else: # straight or other
-                header_text_base = f"{effective_league.upper()} - {'Straight Bet'}"
+                header_text_base = f"{effective_league.upper()} - Straight Bet"
 
             header_text = header_text_base.strip(" - ")
 
+            # Draw League Logo if available
             league_logo_img = self._load_league_logo(effective_league)
             if league_logo_img:
-                # Resize league logo for header
                 max_league_logo_h = 60
                 ratio = max_league_logo_h / league_logo_img.height
                 new_w = int(league_logo_img.width * ratio)
                 league_logo_disp = league_logo_img.resize((new_w, max_league_logo_h), Image.Resampling.LANCZOS)
-
                 logo_x = (width - league_logo_disp.width) // 2
-                logo_y = header_y - 10
+                logo_y = header_y - 10 # Position logo slightly above text baseline
                 if image.mode != 'RGBA': image = image.convert("RGBA")
                 temp_layer = Image.new('RGBA', image.size, (0,0,0,0))
                 temp_layer.paste(league_logo_disp, (logo_x, logo_y), league_logo_disp)
                 image = Image.alpha_composite(image, temp_layer)
-                draw = ImageDraw.Draw(image)
-                header_y += league_logo_disp.height + 5
+                draw = ImageDraw.Draw(image) # Recreate draw object after image modification
+                header_y += league_logo_disp.height + 5 # Move text baseline down
             else:
-                header_y += 10 # Adjust if no logo to center text a bit
+                header_y += 10 # Add padding if no logo
 
+            # Draw Header Text
             bbox = draw.textbbox((0, 0), header_text, font=self.font_b_36)
             tw = bbox[2] - bbox[0]
             draw.text(((width - tw) / 2, header_y), header_text, fill='white', font=self.font_b_36)
 
-            if bet_type == "straight":
-                logo_y_start = header_h + 60
-                logo_size = (120, 120)
+            # --- Content Section ---
+            content_start_y = header_h + 10 # Start content below header
 
+            if bet_type == "straight":
+                logo_y_start = content_start_y + 40 # Y position for team logos
+                logo_size = (120, 120) # Target size for team logos
+
+                # Load team logos
                 home_logo = self._load_team_logo(home_team, effective_league)
                 away_logo = self._load_team_logo(away_team, effective_league)
 
+                # Draw Home Team Logo and Name
                 if home_logo:
                     home_logo_disp = home_logo.resize(logo_size, Image.Resampling.LANCZOS)
                     if image.mode != 'RGBA': image = image.convert("RGBA")
                     temp_layer_home = Image.new('RGBA', image.size, (0,0,0,0))
+                    # Center logo in the left quarter
                     temp_layer_home.paste(home_logo_disp, (width // 4 - logo_size[0] // 2, logo_y_start), home_logo_disp)
                     image = Image.alpha_composite(image, temp_layer_home)
                     draw = ImageDraw.Draw(image)
                 draw.text((width // 4, logo_y_start + logo_size[1] + 20), home_team, fill='white', font=self.font_b_24, anchor='mm')
 
+                # Draw Away Team Logo and Name
                 if away_logo:
                     away_logo_disp = away_logo.resize(logo_size, Image.Resampling.LANCZOS)
                     if image.mode != 'RGBA': image = image.convert("RGBA")
                     temp_layer_away = Image.new('RGBA', image.size, (0,0,0,0))
+                    # Center logo in the right quarter
                     temp_layer_away.paste(away_logo_disp, (3 * width // 4 - logo_size[0] // 2, logo_y_start), away_logo_disp)
                     image = Image.alpha_composite(image, temp_layer_away)
                     draw = ImageDraw.Draw(image)
                 draw.text((3 * width // 4, logo_y_start + logo_size[1] + 20), away_team, fill='white', font=self.font_b_24, anchor='mm')
 
-                details_y = logo_y_start + logo_size[1] + 80
-                bet_text = f"{home_team}: {line}"
+                # Draw Bet Details (Line, Odds, Units)
+                details_y = logo_y_start + logo_size[1] + 80 # Start drawing details below names
+                bet_text = f"{home_team}: {line}" # Example, adjust based on actual line format
                 draw.text((width // 2, details_y), bet_text, fill='white', font=self.font_m_24, anchor='mm')
 
                 separator_y = details_y + 40
                 draw.line([(20, separator_y), (width - 20, separator_y)], fill='white', width=2)
 
                 odds_y = separator_y + 30
-                odds_text_display = self._format_odds_with_sign(odds) # Use original odds
+                odds_text_display = self._format_odds_with_sign(odds)
                 draw.text((width // 2, odds_y), odds_text_display, fill='white', font=self.font_b_24, anchor='mm')
 
                 units_y = odds_y + 50
-                units_text = f"To Win {units:.2f} Units"
+                units_text = f"To Win {units:.2f} Units" # Use 'units' which should be the calculated win amount
                 units_bbox = draw.textbbox((0, 0), units_text, font=self.font_b_24)
                 units_width = units_bbox[2] - units_bbox[0]
 
@@ -433,38 +456,43 @@ class BetSlipGenerator:
 
                     if image.mode != 'RGBA': image = image.convert('RGBA')
                     temp_lock_l = Image.new('RGBA', image.size, (0,0,0,0))
-                    temp_lock_l.paste(lock_icon, (start_x, units_y - lock_icon.height // 2), lock_icon)
+                    temp_lock_l.paste(lock_icon, (start_x, int(units_y - lock_icon.height / 2)), lock_icon)
                     image = Image.alpha_composite(image, temp_lock_l)
+                    draw = ImageDraw.Draw(image) # Recreate draw object
 
-                    draw = ImageDraw.Draw(image)
                     text_x = start_x + lock_icon.width + lock_spacing
-                    draw.text((text_x + units_width / 2, units_y), units_text, fill=(255, 215, 0), font=self.font_b_24, anchor="mm") # Centered text
+                    draw.text((text_x + units_width / 2, units_y), units_text, fill=(255, 215, 0), font=self.font_b_24, anchor="mm")
 
                     temp_lock_r = Image.new('RGBA', image.size, (0,0,0,0))
-                    temp_lock_r.paste(lock_icon, (text_x + units_width + lock_spacing, units_y - lock_icon.height // 2), lock_icon)
+                    temp_lock_r.paste(lock_icon, (int(text_x + units_width + lock_spacing), int(units_y - lock_icon.height / 2)), lock_icon)
                     image = Image.alpha_composite(image, temp_lock_r)
-                    draw = ImageDraw.Draw(image)
+                    draw = ImageDraw.Draw(image) # Recreate draw object
                 else:
                     draw.text((width // 2, units_y), units_text, fill=(255, 215, 0), font=self.font_b_24, anchor='mm')
 
             elif bet_type == "parlay" and parlay_legs:
-                current_y_parlay = header_h + 10 # Renamed variable
+                current_y_parlay = content_start_y
                 for i, leg_data in enumerate(parlay_legs):
                     if i > 0:
                         separator_y = current_y_parlay
                         draw.line([(40, separator_y), (width - 40, separator_y)], fill=(100, 100, 100), width=1)
-                        current_y_parlay += 20
+                        current_y_parlay += 20 # Space after separator
 
-                    # Use the leg's own league if available, else default to main parlay league
                     leg_effective_league = leg_data.get('league', effective_league)
-                    current_y_parlay = self._draw_parlay_leg_internal(
+                    # Draw the leg, returns the y-coord for the start of the *next* leg
+                    next_leg_start_y = self._draw_parlay_leg_internal(
                         image=image, draw=draw, leg=leg_data, league=leg_effective_league,
                         width=width, start_y=current_y_parlay,
-                        is_same_game=is_same_game, leg_height=leg_draw_height
+                        is_same_game=is_same_game, leg_height=leg_draw_height # Pass allocated height
                     )
-                    draw = ImageDraw.Draw(image) # Recreate draw object after potential image modification
+                    # IMPORTANT: Update the main image and draw object if the helper modified them
+                    # (The helper should ideally return the modified image/draw, or modify in place carefully)
+                    # Assuming _draw_parlay_leg_internal modifies 'image' and 'draw' in place for now
+                    draw = ImageDraw.Draw(image) # Recreate draw object just in case
+                    current_y_parlay = next_leg_start_y # Move cursor down
 
-                total_y = current_y_parlay + 20
+                # Draw Total Odds and Stake below the legs
+                total_y = current_y_parlay # Start right after the last leg's allocated space
                 draw.line([(40, total_y), (width - 40, total_y)], fill='white', width=2)
                 total_y += 30
 
@@ -472,8 +500,7 @@ class BetSlipGenerator:
                 draw.text((width // 2, total_y), total_odds_text, fill='white', font=self.font_b_28, anchor='mm')
                 total_y += 40
 
-                # Parlay units here refers to the stake on the whole parlay.
-                units_text = f"Stake: {units:.2f} Units"
+                units_text = f"Stake: {units:.2f} Units" # 'units' for parlay is the stake amount
                 units_bbox = draw.textbbox((0, 0), units_text, font=self.font_b_24)
                 units_width = units_bbox[2] - units_bbox[0]
                 lock_icon = self._load_lock_icon()
@@ -483,40 +510,37 @@ class BetSlipGenerator:
                     lock_x_left = (width - (units_width + 2 * lock_icon.width + 2 * lock_spacing)) // 2
                     if image.mode != 'RGBA': image = image.convert("RGBA")
 
-                    temp_lock_l_parlay = Image.new('RGBA', image.size, (0,0,0,0)) # Unique name
-                    temp_lock_l_parlay.paste(lock_icon, (lock_x_left, total_y - lock_icon.height // 2), lock_icon)
+                    temp_lock_l_parlay = Image.new('RGBA', image.size, (0,0,0,0))
+                    temp_lock_l_parlay.paste(lock_icon, (lock_x_left, int(total_y - lock_icon.height / 2)), lock_icon)
                     image = Image.alpha_composite(image, temp_lock_l_parlay)
+                    draw = ImageDraw.Draw(image)
 
-                    draw = ImageDraw.Draw(image) # Recreate draw after paste
-                    text_x_parlay = lock_x_left + lock_icon.width + lock_spacing # For text positioning
-                    draw.text((text_x_parlay + units_width / 2, total_y), units_text, fill=(255, 215, 0), font=self.font_b_24, anchor='mm') # Centered text
+                    text_x_parlay = lock_x_left + lock_icon.width + lock_spacing
+                    draw.text((text_x_parlay + units_width / 2, total_y), units_text, fill=(255, 215, 0), font=self.font_b_24, anchor='mm')
 
-                    temp_lock_r_parlay = Image.new('RGBA', image.size, (0,0,0,0)) # Unique name
+                    temp_lock_r_parlay = Image.new('RGBA', image.size, (0,0,0,0))
                     lock_x_right = text_x_parlay + units_width + lock_spacing
-                    temp_lock_r_parlay.paste(lock_icon, (lock_x_right, total_y - lock_icon.height // 2), lock_icon)
+                    temp_lock_r_parlay.paste(lock_icon, (lock_x_right, int(total_y - lock_icon.height / 2)), lock_icon)
                     image = Image.alpha_composite(image, temp_lock_r_parlay)
-                    draw = ImageDraw.Draw(image) # Recreate draw after paste
+                    draw = ImageDraw.Draw(image)
                 else:
-                    draw.text((width // 2, total_y), f"🔒 {units_text} 🔒", # Fallback with unicode emoji
+                    draw.text((width // 2, total_y), f"🔒 {units_text} 🔒", # Fallback
                               fill=(255, 215, 0), font=self.emoji_font_24, anchor='mm')
-
-
             else:
-                 header_font_fallback = self.font_b_36 # Use an available font
+                 # Handle unexpected bet_type or missing parlay_legs if needed
+                 header_font_fallback = self.font_b_36
                  draw.text((width // 2, height // 2), "Invalid Bet Data", fill='red', font=header_font_fallback, anchor='mm')
 
-            footer_y_pos = height - footer_h // 2 # Adjusted for vertical centering
+            # --- Footer ---
+            footer_y_pos = height - footer_h // 2 # Center vertically in footer area
             bet_id_text = f"Bet #{bet_id}"
             timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M UTC')
-
-            bet_id_bbox = draw.textbbox((0, 0), bet_id_text, font=self.font_m_18)
-            ts_bbox = draw.textbbox((0, 0), timestamp_text, font=self.font_m_18)
 
             draw.text((self.padding, footer_y_pos), bet_id_text, fill=(150, 150, 150), font=self.font_m_18, anchor='lm')
             draw.text((width - self.padding, footer_y_pos), timestamp_text, fill=(150, 150, 150), font=self.font_m_18, anchor='rm')
 
             logger.info(f"Bet slip PIL image generated successfully for Bet ID: {bet_id}")
-            return image.convert("RGB")
+            return image.convert("RGB") # Convert to RGB before returning (e.g., for saving as JPG)
 
         except Exception as e:
             logger.exception(f"Error generating bet slip image for Bet ID {bet_id}: {str(e)}")
@@ -537,58 +561,61 @@ class BetSlipGenerator:
         width: int, start_y: int, is_same_game: bool, leg_height: int
     ) -> int:
         """Helper to draw a single leg of a parlay. Returns the y-coordinate for the next leg."""
-        leg_home = leg.get('home_team', leg.get('team', 'Unknown'))
+        leg_home = leg.get('home_team', leg.get('team', 'Unknown')) # Prioritize specific team if available
         leg_away = leg.get('opponent', 'Unknown')
         leg_line = leg.get('line', 'N/A')
         leg_odds = leg.get('odds', 0)
-        # Use the leg's specific league if provided, otherwise the parlay's main league
-        leg_league_display = leg.get('league', league or 'UNKNOWN')
+        leg_league_display = leg.get('league', league or 'UNKNOWN') # Use leg's league if specified
 
-        current_y = start_y
-        logo_y = current_y + 10
+        logo_y = start_y + 10 # Position logo near the top of the leg space
         logo_disp_size = (50, 50)
         text_start_x = 40
 
-        # Team logo for the leg (usually the team bet on, or home team for totals)
-        team_bet_on_for_logo = leg.get('team', leg_home) # Prioritize 'team' if explicitly set
-
-        draw_logos = True # Simpler: always try if team_bet_on_for_logo is known
+        # Team logo logic
+        team_bet_on_for_logo = leg.get('team', leg_home) # Which team's logo to show? Default to home/first team.
+        draw_logos = True # Always attempt to draw logo for the leg
 
         if draw_logos and team_bet_on_for_logo != 'Unknown':
-            # Pass the leg's specific league to _load_team_logo
             team_logo = self._load_team_logo(team_bet_on_for_logo, leg_league_display)
             if team_logo:
                 logo_x = 40
+                # Resize logo for the leg section
                 team_logo_disp = team_logo.resize(logo_disp_size, Image.Resampling.LANCZOS)
                 if image.mode != 'RGBA': image = image.convert("RGBA")
                 temp_layer = Image.new('RGBA', image.size, (0,0,0,0))
                 temp_layer.paste(team_logo_disp, (logo_x, logo_y), team_logo_disp)
                 image = Image.alpha_composite(image, temp_layer)
-                # IMPORTANT: Recreate Draw object after modifying the image outside Draw
-                draw = ImageDraw.Draw(image)
-                text_start_x = logo_x + logo_disp_size[0] + 15
+                draw = ImageDraw.Draw(image) # Recreate Draw object after pasting
+                text_start_x = logo_x + logo_disp_size[0] + 15 # Indent text next to logo
             else:
                 logger.debug(f"Parlay leg logo not found for {team_bet_on_for_logo} in league {leg_league_display}")
 
+        # Draw Leg Line (e.g., "Moneyline", "Over 2.5 Goals")
         draw.text((text_start_x, logo_y + 5), leg_line, fill='white', font=self.font_m_24)
 
+        # Draw Matchup/Context (e.g., "NHL - Edmonton Oilers vs Boston Bruins")
         matchup_text_parts = []
-        if leg_home != 'Unknown': matchup_text_parts.append(leg_home)
-        if leg_away != 'Unknown' and leg_away != leg_home : matchup_text_parts.append(f"vs {leg_away}")
-        matchup_display = " ".join(matchup_text_parts) if matchup_text_parts else team_bet_on_for_logo # Fallback
+        # Use specific home/away if available in leg data, otherwise use the derived ones
+        actual_home = leg.get('home_team', leg_home)
+        actual_away = leg.get('opponent', leg_away)
+        if actual_home != 'Unknown': matchup_text_parts.append(actual_home)
+        if actual_away != 'Unknown' and actual_away != actual_home: matchup_text_parts.append(f"vs {actual_away}")
+        # If player prop, 'line' usually contains the player info, so matchup is less critical
+        matchup_display = " ".join(matchup_text_parts) if matchup_text_parts else team_bet_on_for_logo
 
         draw.text((text_start_x, logo_y + 40), f"{leg_league_display} - {matchup_display}", fill=(180, 180, 180), font=self.font_m_18)
 
-        leg_odds_text = self._format_odds_with_sign(leg_odds) # Leg's specific odds
-
-        bbox_leg_odds = draw.textbbox((0,0), leg_odds_text, font=self.font_b_28) # Using font_b_28
+        # Draw Leg Odds
+        leg_odds_text = self._format_odds_with_sign(leg_odds)
+        bbox_leg_odds = draw.textbbox((0,0), leg_odds_text, font=self.font_b_28)
         tw_leg_odds = bbox_leg_odds[2]-bbox_leg_odds[0]
         th_leg_odds = bbox_leg_odds[3]-bbox_leg_odds[1]
 
-        # Calculate Y to center within the available leg_height block starting at `start_y`
+        # Calculate Y to center odds within the allocated leg_height block
         odds_y_centered = start_y + (leg_height / 2) - (th_leg_odds / 2)
 
-        draw.text((width - 40 - tw_leg_odds, odds_y_centered), leg_odds_text, fill='white', font=self.font_b_28)
+        # Position odds on the right side
+        draw.text((width - 40 - tw_leg_odds, int(odds_y_centered)), leg_odds_text, fill='white', font=self.font_b_28)
 
         # Return the y-coordinate where the next leg should start
-        return start_y + leg_height
+        return start_y + leg_height # Each leg takes up the full allocated height
