@@ -4,22 +4,38 @@ import os
 import sys
 import logging
 import discord
-from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
-import time
 from typing import Optional
 
 # --- Path Setup ---
-dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
-if os.path.exists(dotenv_path):
-    load_dotenv(dotenv_path=dotenv_path)
-    print(f"Loaded environment variables from: {dotenv_path}")
+# Determine the directory where main.py is located
+# This assumes main.py is in the 'betting-bot' root directory.
+# If it's nested (e.g., in a 'src' folder), this path needs adjustment.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOTENV_PATH = os.path.join(BASE_DIR, '.env')
+
+if os.path.exists(DOTENV_PATH):
+    load_dotenv(dotenv_path=DOTENV_PATH)
+    print(f"Loaded environment variables from: {DOTENV_PATH}")
 else:
-    print(f"WARNING: .env file not found at {dotenv_path}")
+    # Attempt to load from one level up if .env is in the parent of betting-bot
+    PARENT_DOTENV_PATH = os.path.join(os.path.dirname(BASE_DIR), '.env')
+    if os.path.exists(PARENT_DOTENV_PATH):
+        load_dotenv(dotenv_path=PARENT_DOTENV_PATH)
+        print(f"Loaded environment variables from: {PARENT_DOTENV_PATH}")
+    else:
+        print(f"WARNING: .env file not found at {DOTENV_PATH} or {PARENT_DOTENV_PATH}")
+
 
 # --- Imports ---
+# Ensure these imports match your project structure
+# If 'data' and 'services' are subdirectories of 'betting-bot',
+# and 'main.py' is in 'betting-bot', then direct imports should work if
+# 'betting-bot' is in PYTHONPATH or you're running from 'betting-bot's parent.
+# For more robust imports within a package, consider using relative imports
+# if main.py is part of the 'betting_bot' package itself.
 try:
     from data.db_manager import DatabaseManager
     from services.game_service import GameService
@@ -29,29 +45,39 @@ try:
     from services.user_service import UserService
     from services.voice_service import VoiceService
     from services.data_sync_service import DataSyncService
+    # Ensure commands also has an __init__.py to be a package
+    # Cogs will be loaded by name e.g., 'commands.admin'
 except ImportError as e:
-    print(f"Import Error: {e}. Check that all service/data modules exist and Python can find them.")
-    print("Ensure you are running Python from the 'betting-bot' directory or have set up PYTHONPATH.")
+    print(f"Import Error: {e}. Check module paths and __init__.py files.")
+    print(
+        "Ensure you are running Python from the directory containing 'betting-bot' "
+        "or have set up PYTHONPATH correctly."
+    )
     sys.exit(1)
 
 # --- Logging Setup ---
 log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
-log_format = os.getenv('LOG_FORMAT', '%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-log_file = os.getenv('LOG_FILE', 'bot_activity.log')
+log_format = os.getenv(
+    'LOG_FORMAT', '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+)
+log_file_path = os.getenv('LOG_FILE', 'bot_activity.log')
 
-os.makedirs(os.path.dirname(log_file), exist_ok=True)
+# Ensure log directory exists if LOG_FILE includes a path
+log_dir = os.path.dirname(log_file_path)
+if log_dir and not os.path.exists(log_dir):
+    os.makedirs(log_dir, exist_ok=True)
 
 logging.basicConfig(
     level=log_level,
     format=log_format,
     handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
+        logging.FileHandler(log_file_path, encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
 discord_logger = logging.getLogger('discord')
-discord_logger.setLevel(logging.WARNING)
+discord_logger.setLevel(logging.WARNING) # Reduce discord.py's own verbosity
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +86,10 @@ BOT_TOKEN = os.getenv('DISCORD_TOKEN')
 
 # --- Bot Token Check ---
 if not BOT_TOKEN:
-    logger.critical("FATAL: DISCORD_TOKEN not found in environment variables! Make sure it's in your .env file.")
+    logger.critical(
+        "FATAL: DISCORD_TOKEN not found in environment variables! "
+        "Make sure it's in your .env file."
+    )
     sys.exit("Missing DISCORD_TOKEN")
 
 # --- Bot Definition ---
@@ -69,11 +98,14 @@ class BettingBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
-        intents.reactions = True
+        intents.reactions = True # Needed for on_raw_reaction_add/remove
 
-        super().__init__(command_prefix=commands.when_mentioned_or("/"), intents=intents)
-        logger.debug(f"Bot initialized with intents: {intents}")
+        super().__init__(
+            command_prefix=commands.when_mentioned_or("/"), intents=intents
+        )
+        logger.debug("Bot initialized with intents: %s", intents)
 
+        # Initialize managers and services
         self.db_manager = DatabaseManager()
         self.admin_service = AdminService(self, self.db_manager)
         self.analytics_service = AnalyticsService(self, self.db_manager)
@@ -81,58 +113,102 @@ class BettingBot(commands.Bot):
         self.game_service = GameService(self, self.db_manager)
         self.user_service = UserService(self, self.db_manager)
         self.voice_service = VoiceService(self, self.db_manager)
-        self.data_sync_service = DataSyncService(self.game_service, self.db_manager)
+        self.data_sync_service = DataSyncService(
+            self.game_service, self.db_manager
+        )
 
     async def load_extensions(self):
         """Loads all cogs from the commands directory."""
-        commands_dir = os.path.join(os.path.dirname(__file__), 'commands')
-        logger.info(f"Loading extensions from: {commands_dir}")
+        # Assuming 'commands' is a sub-directory of where main.py is
+        commands_dir = os.path.join(BASE_DIR, 'commands')
+        logger.info("Loading extensions from: %s", commands_dir)
         loaded_count = 0
         failed_count = 0
-        for filename in os.listdir(commands_dir):
-            if filename.endswith('.py') and not filename.startswith('__'):
+
+        # List of actual cog files (those containing a setup function)
+        # Exclude utility modules like straight_betting.py or parlay_betting.py
+        # if they don't have their own setup() for cogs.
+        cog_files = [
+            'admin.py',
+            'betting.py', # This is the main cog for betting commands
+            'load_logos.py',
+            'remove_user.py',
+            'setid.py',
+            'stats.py',
+            # Add other actual cog files here
+        ]
+
+        for filename in cog_files:
+            # Check if file exists, then try to load
+            if os.path.exists(os.path.join(commands_dir, filename)):
                 extension = f'commands.{filename[:-3]}'
                 try:
                     await self.load_extension(extension)
-                    logger.info(f'Successfully loaded extension: {extension}')
+                    logger.info('Successfully loaded extension: %s', extension)
                     loaded_count += 1
                 except commands.ExtensionNotFound:
-                    logger.error(f'Extension not found: {extension}. Ensure the file exists and path is correct.')
+                    logger.error(
+                        "Extension not found: %s. Check path/name.", extension
+                    )
                     failed_count += 1
                 except commands.ExtensionAlreadyLoaded:
-                    logger.warning(f'Extension already loaded: {extension}')
+                    logger.warning("Extension already loaded: %s", extension)
                 except commands.NoEntryPointError:
-                    logger.error(f'Extension {extension} has no setup function.')
+                    logger.error("Extension %s has no setup function.", extension)
                     failed_count += 1
                 except commands.ExtensionFailed as e:
-                    logger.error(f'Extension {extension} failed to load: {e.__cause__}', exc_info=True)
+                    logger.error(
+                        "Extension %s failed to load: %s", extension, e.__cause__,
+                        exc_info=True
+                    )
                     failed_count += 1
                 except Exception as e:
-                    logger.error(f'Failed to load extension {extension}: {e}', exc_info=True)
+                    logger.error(
+                        "Failed to load extension %s: %s", extension, e,
+                        exc_info=True
+                    )
                     failed_count += 1
-        logger.info(f"Extension loading complete. Loaded: {loaded_count}, Failed: {failed_count}")
-        if failed_count > 0:
-            logger.warning("Some command extensions failed to load. Check logs above.")
+            else:
+                logger.warning("Cog file %s not found in %s, skipping.", filename, commands_dir)
 
-    async def sync_commands_with_retry(self, guild: Optional[discord.Guild] = None, retries: int = 3, delay: int = 5):
-        """Syncs commands with retries to handle Discord rate limits or network issues."""
+
+        logger.info(
+            "Extension loading complete. Loaded: %d, Failed: %d",
+            loaded_count, failed_count
+        )
+        if failed_count > 0:
+            logger.warning("Some command extensions failed to load. Check logs.")
+
+    async def sync_commands_with_retry(
+        self, guild: Optional[discord.Guild] = None,
+        retries: int = 3, delay: int = 5
+    ):
+        """Syncs commands with retries."""
         for attempt in range(1, retries + 1):
             try:
                 if guild:
                     guild_obj = discord.Object(id=guild.id)
                     self.tree.copy_global_to(guild=guild_obj)
                     synced = await self.tree.sync(guild=guild_obj)
-                    logger.info(f"Commands synced to guild {guild.id}: {[cmd.name for cmd in synced]}")
+                    logger.info(
+                        "Commands synced to guild %s: %s",
+                        guild.id, [cmd.name for cmd in synced]
+                    )
                 else:
                     synced = await self.tree.sync()
-                    logger.info(f"Global commands synced: {[cmd.name for cmd in synced]}")
+                    logger.info(
+                        "Global commands synced: %s", [cmd.name for cmd in synced]
+                    )
                 return True
             except discord.HTTPException as e:
-                logger.error(f"Sync attempt {attempt}/{retries} failed: {e}", exc_info=True)
+                logger.error(
+                    "Sync attempt %d/%d failed: %s", attempt, retries, e,
+                    exc_info=True
+                )
                 if attempt < retries:
-                    logger.info(f"Retrying sync in {delay} seconds...")
+                    logger.info("Retrying sync in %d seconds...", delay)
                     await asyncio.sleep(delay)
-        logger.error(f"Failed to sync commands after {retries} attempts.")
+        logger.error("Failed to sync commands after %d attempts.", retries)
         return False
 
     async def setup_hook(self):
@@ -140,165 +216,139 @@ class BettingBot(commands.Bot):
         logger.info("Starting setup_hook...")
         try:
             await self.db_manager.connect()
-            if not self.db_manager._pool:
-                logger.critical("Database connection pool failed to initialize. Bot cannot continue.")
+            if not self.db_manager._pool: # pylint: disable=protected-access
+                logger.critical(
+                    "Database connection pool failed to initialize. Bot cannot continue."
+                )
                 await self.close()
                 sys.exit("Database connection failed.")
-            logger.info("Database pool connected and schema initialized/verified.")
+            logger.info("DB pool connected and schema initialized/verified.")
 
             await self.load_extensions()
 
-            # Log all commands before syncing
-            commands = [cmd.name for cmd in self.tree.get_commands()]
-            logger.info(f"Registered commands before syncing: {commands}")
+            commands_list = [cmd.name for cmd in self.tree.get_commands()]
+            logger.info("Registered commands before syncing: %s", commands_list)
 
             logger.info("Starting services...")
-            service_starts = []
-            if hasattr(self.game_service, 'start'): service_starts.append(self.game_service.start())
-            if hasattr(self.bet_service, 'start'): service_starts.append(self.bet_service.start())
-            if hasattr(self.user_service, 'start'): service_starts.append(self.user_service.start())
-            if hasattr(self.voice_service, 'start'): service_starts.append(self.voice_service.start())
-            if hasattr(self.data_sync_service, 'start'): service_starts.append(self.data_sync_service.start())
+            service_starts = [
+                self.admin_service.start(),
+                self.analytics_service.start(), # Added analytics service start
+                self.bet_service.start(),
+                self.game_service.start(),
+                self.user_service.start(),
+                self.voice_service.start(),
+                self.data_sync_service.start(),
+            ]
 
-            if service_starts:
-                results = await asyncio.gather(*service_starts, return_exceptions=True)
-                for i, result in enumerate(results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Error starting service {i}: {result}", exc_info=True)
+            results = await asyncio.gather(*service_starts, return_exceptions=True)
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    # Log which service failed if possible, by correlating index with service_starts order
+                    service_name = service_starts[i].__self__.__class__.__name__ if hasattr(service_starts[i], '__self__') else f"Service {i}"
+                    logger.error(
+                        "Error starting %s: %s", service_name, result, exc_info=True
+                    )
             logger.info("Services startup initiated.")
-
             logger.info("Bot setup_hook completed successfully.")
 
         except Exception as e:
-            logger.critical(f"CRITICAL ERROR during setup_hook: {e}", exc_info=True)
+            logger.critical("CRITICAL ERROR during setup_hook: %s", e, exc_info=True)
             if self.db_manager:
                 await self.db_manager.close()
-            await super().close()
+            await super().close() # Call parent's close
             sys.exit("Critical error during bot setup.")
 
     async def on_ready(self):
         """Called when the bot is fully connected and ready."""
-        logger.info(f'Logged in as {self.user.name} ({self.user.id})')
-        logger.info(f"discord.py API version: {discord.__version__}")
-        logger.info(f"Python version: {sys.version}")
-        logger.info(f"Connected to {len(self.guilds)} guilds.")
+        logger.info('Logged in as %s (%s)', self.user.name, self.user.id)
+        logger.info("discord.py API version: %s", discord.__version__)
+        logger.info("Python version: %s", sys.version)
+        logger.info("Connected to %d guilds.", len(self.guilds))
         for guild in self.guilds:
-            logger.debug(f"- {guild.name} ({guild.id})")
-        logger.info(f"Latency: {self.latency*1000:.2f} ms")
+            logger.debug("- %s (%s)", guild.name, guild.id)
+        logger.info("Latency: %.2f ms", self.latency * 1000)
 
-        # Sync commands
         try:
-            # Sync globally
-            await self.sync_commands_with_retry()
-            # Sync to each guild with a small delay to avoid rate limits
+            await self.sync_commands_with_retry() # Sync globally first
+            # Sync to each guild with a small delay
             for guild in self.guilds:
                 await self.sync_commands_with_retry(guild=guild)
-                await asyncio.sleep(1)  # Small delay to prevent rate limiting
-            commands = [cmd.name for cmd in self.tree.get_commands()]
-            logger.info(f"Commands available after sync: {commands}")
+                await asyncio.sleep(1) # Rate limit prevention
+            commands_list = [cmd.name for cmd in self.tree.get_commands()]
+            logger.info("Commands available after sync: %s", commands_list)
         except Exception as e:
-            logger.error(f"Failed to sync command tree: {e}", exc_info=True)
+            logger.error("Failed to sync command tree: %s", e, exc_info=True)
 
         logger.info('------ Bot is Ready ------')
 
     async def on_guild_join(self, guild: discord.Guild):
         """Called when the bot joins a new guild."""
-        logger.info(f"Joined new guild: {guild.name} ({guild.id})")
+        logger.info("Joined new guild: %s (%s)", guild.name, guild.id)
         await self.sync_commands_with_retry(guild=guild)
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
-        """Pass raw reaction events to BetService for bot-generated messages only."""
-        logger.debug(f"Received raw reaction add: message_id={payload.message_id}, user_id={payload.user_id}")
+        """Pass raw reaction events to BetService."""
         if payload.user_id == self.user.id:
             return
-        if not hasattr(self, 'bet_service') or not hasattr(self.bet_service, 'pending_reactions'):
-            logger.debug("BetService or pending_reactions not ready during raw_reaction_add")
-            return
-        if payload.message_id not in self.bet_service.pending_reactions:
-            logger.debug(f"Ignoring reaction on non-bot message {payload.message_id}")
-            return
-        logger.debug(
-            f"Processing reaction added: {payload.emoji} by user {payload.user_id} on bot message {payload.message_id} "
-            f"in channel {payload.channel_id} (guild {payload.guild_id})"
-        )
-        if hasattr(self.bet_service, 'on_raw_reaction_add'):
-            asyncio.create_task(self.bet_service.on_raw_reaction_add(payload))
+        if hasattr(self, 'bet_service') and \
+           hasattr(self.bet_service, 'pending_reactions') and \
+           payload.message_id in self.bet_service.pending_reactions:
+            logger.debug(
+                "Processing reaction add: %s by %s on bot message %s in channel %s (guild %s)",
+                payload.emoji, payload.user_id, payload.message_id,
+                payload.channel_id, payload.guild_id
+            )
+            if hasattr(self.bet_service, 'on_raw_reaction_add'):
+                asyncio.create_task(self.bet_service.on_raw_reaction_add(payload))
+        # else:
+            # logger.debug("Ignoring reaction on non-tracked message %s", payload.message_id)
+
 
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
-        """Pass raw reaction removal events to BetService for bot-generated messages only."""
-        logger.debug(f"Received raw reaction remove: message_id={payload.message_id}, user_id={payload.user_id}")
+        """Pass raw reaction removal events to BetService."""
         if payload.user_id == self.user.id:
             return
-        if not hasattr(self, 'bet_service') or not hasattr(self.bet_service, 'pending_reactions'):
-            logger.debug("BetService or pending_reactions not ready during raw_reaction_remove")
-            return
-        if payload.message_id not in self.bet_service.pending_reactions:
-            logger.debug(f"Ignoring reaction removal on non-bot message {payload.message_id}")
-            return
-        logger.debug(
-            f"Processing reaction removed: {payload.emoji} by user {payload.user_id} on bot message {payload.message_id} "
-            f"in channel {payload.channel_id} (guild {payload.guild_id})"
-        )
-        if hasattr(self.bet_service, 'on_raw_reaction_remove'):
-            asyncio.create_task(self.bet_service.on_raw_reaction_remove(payload))
+        if hasattr(self, 'bet_service') and \
+           hasattr(self.bet_service, 'pending_reactions') and \
+           payload.message_id in self.bet_service.pending_reactions:
+            logger.debug(
+                "Processing reaction remove: %s by %s on bot message %s",
+                payload.emoji, payload.user_id, payload.message_id
+            )
+            if hasattr(self.bet_service, 'on_raw_reaction_remove'):
+                asyncio.create_task(self.bet_service.on_raw_reaction_remove(payload))
 
     async def on_interaction(self, interaction: discord.Interaction):
-        """Log all interactions for debugging."""
+        """Log all interactions."""
+        command_name = interaction.command.name if interaction.command else 'N/A'
         logger.debug(
-            f"Interaction received: type={interaction.type}, command={interaction.command.name if interaction.command else 'N/A'}, "
-            f"user={interaction.user} (ID: {interaction.user.id}), guild={interaction.guild_id}, channel={interaction.channel_id}"
+            "Interaction: type=%s, cmd=%s, user=%s(ID:%s), guild=%s, ch=%s",
+            interaction.type, command_name, interaction.user,
+            interaction.user.id, interaction.guild_id, interaction.channel_id
         )
-        try:
-            # Check permissions
-            if interaction.guild:
-                guild = interaction.guild
-                bot_member = guild.get_member(self.user.id)
-                if not bot_member:
-                    logger.error(f"Bot not found in guild {guild.id}")
-                    await interaction.response.send_message(
-                        "❌ Bot is not a member of this guild.", ephemeral=True
-                    )
-                    return
-                perms = interaction.channel.permissions_for(bot_member)
-                if not perms.use_application_commands:
-                    logger.warning(f"Bot lacks Use Application Commands permission in channel {interaction.channel_id}")
-                    await interaction.response.send_message(
-                        "❌ Bot lacks permission to use application commands in this channel.", ephemeral=True
-                    )
-                    return
-                if not perms.send_messages:
-                    logger.warning(f"Bot lacks Send Messages permission in channel {interaction.channel_id}")
-                    await interaction.response.send_message(
-                        "❌ Bot lacks permission to send messages in this channel.", ephemeral=True
-                    )
-                    return
-            # Process the interaction
-            logger.debug(f"Processing interaction for command: {interaction.command.name if interaction.command else 'N/A'}")
-        except Exception as e:
-            logger.error(f"Error processing interaction for user {interaction.user}: {e}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    f"❌ An error occurred while processing the interaction: {str(e)}",
-                    ephemeral=True
-                )
+        # Default interaction processing is handled by the library
+        # await self.process_application_commands(interaction) # This is done by the lib
 
     async def close(self):
         """Gracefully close services and connections before shutdown."""
         logger.info("Initiating graceful shutdown...")
         try:
             logger.info("Stopping services...")
-            stop_tasks = []
-            if hasattr(self, 'data_sync_service') and hasattr(self.data_sync_service, 'stop'): stop_tasks.append(self.data_sync_service.stop())
-            if hasattr(self, 'voice_service') and hasattr(self.voice_service, 'stop'): stop_tasks.append(self.voice_service.stop())
-            if hasattr(self, 'bet_service') and hasattr(self.bet_service, 'stop'): stop_tasks.append(self.bet_service.stop())
-            if hasattr(self, 'game_service') and hasattr(self.game_service, 'stop'): stop_tasks.append(self.game_service.stop())
-            if hasattr(self, 'user_service') and hasattr(self.user_service, 'stop'): stop_tasks.append(self.user_service.stop())
-
-            if stop_tasks:
-                results = await asyncio.gather(*stop_tasks, return_exceptions=True)
-                for i, result in enumerate(results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Error stopping service {i}: {result}", exc_info=True)
+            stop_tasks = [
+                self.data_sync_service.stop(),
+                self.voice_service.stop(),
+                self.bet_service.stop(),
+                self.game_service.stop(),
+                self.user_service.stop(),
+                self.admin_service.stop() # Ensure admin service also has stop
+            ]
+            results = await asyncio.gather(*stop_tasks, return_exceptions=True)
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    service_name = stop_tasks[i].__self__.__class__.__name__ if hasattr(stop_tasks[i], '__self__') else f"Service {i}"
+                    logger.error(
+                        "Error stopping %s: %s", service_name, result, exc_info=True
+                    )
             logger.info("Services stopped.")
 
             if hasattr(self, 'db_manager') and self.db_manager:
@@ -307,61 +357,87 @@ class BettingBot(commands.Bot):
                 logger.info("Database connection pool closed.")
 
         except Exception as e:
-            logger.exception(f"Error during service/DB shutdown: {e}")
+            logger.exception("Error during service/DB shutdown: %s", e)
         finally:
             logger.info("Closing Discord client connection...")
             await super().close()
             logger.info("Bot shutdown complete.")
 
-# --- Manual Sync Command ---
+
+# --- Manual Sync Command (as a Cog) ---
 class SyncCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: BettingBot): # Type hint bot as BettingBot
         self.bot = bot
 
-    @app_commands.command(name="sync", description="Manually sync bot commands (admin only)")
+    @app_commands.command(
+        name="sync", description="Manually sync bot commands (admin only)"
+    )
     @app_commands.checks.has_permissions(administrator=True)
     async def sync_command(self, interaction: discord.Interaction):
-        logger.info(f"Manual sync initiated by {interaction.user} in guild {interaction.guild_id}")
+        logger.info(
+            "Manual sync initiated by %s in guild %s",
+            interaction.user, interaction.guild_id
+        )
         try:
-            commands = [cmd.name for cmd in self.bot.tree.get_commands()]
-            logger.debug(f"Commands to sync: {commands}")
-            # Sync globally
-            await self.bot.sync_commands_with_retry()
-            # Sync to each guild
-            for guild in self.bot.guilds:
-                await self.bot.sync_commands_with_retry(guild=guild)
-                await asyncio.sleep(1)  # Small delay to prevent rate limiting
-            await interaction.response.send_message("Commands synced successfully!", ephemeral=True)
-        except Exception as e:
-            logger.error(f"Failed to sync commands: {e}", exc_info=True)
-            await interaction.response.send_message(f"Failed to sync commands: {e}", ephemeral=True)
+            await interaction.response.defer(ephemeral=True)
+            commands_list = [cmd.name for cmd in self.bot.tree.get_commands()]
+            logger.debug("Commands to sync: %s", commands_list)
 
-async def setup_sync(bot: commands.Bot):
+            await self.bot.sync_commands_with_retry() # Global sync
+            for guild in self.bot.guilds: # Sync to all guilds
+                await self.bot.sync_commands_with_retry(guild=guild)
+                await asyncio.sleep(0.5) # Small delay
+
+            await interaction.followup.send(
+                "Commands synced successfully!", ephemeral=True
+            )
+        except Exception as e:
+            logger.error("Failed to sync commands: %s", e, exc_info=True)
+            if not interaction.response.is_done():
+                 await interaction.response.send_message(f"Failed to sync commands: {e}",ephemeral=True)
+            else:
+                 await interaction.followup.send(f"Failed to sync commands: {e}",ephemeral=True)
+
+
+async def setup_sync_cog(bot: BettingBot): # Type hint bot
+    """Setup function to register the SyncCog."""
     await bot.add_cog(SyncCog(bot))
     logger.info("SyncCog loaded")
+
 
 # --- Main Execution ---
 def main():
     """Main function to create and run the bot."""
     bot = BettingBot()
 
-    # Add SyncCog manually
-    async def setup_bot():
-        await setup_sync(bot)
+    async def run_bot():
+        await setup_sync_cog(bot) # Load the SyncCog
         await bot.start(BOT_TOKEN)
 
     try:
         logger.info("Starting bot...")
-        asyncio.run(setup_bot())
+        asyncio.run(run_bot())
     except discord.LoginFailure:
-        logger.critical("Login failed: Invalid Discord token provided in .env file.")
+        logger.critical(
+            "Login failed: Invalid Discord token provided in .env file."
+        )
     except discord.PrivilegedIntentsRequired as e:
-        logger.critical(f"Privileged Intents ({e.shard_id or 'default'}) are required but not enabled in the Discord Developer Portal for the bot application.")
-        logger.critical("Please enable 'Presence Intent', 'Server Members Intent', and potentially 'Message Content Intent' under the 'Privileged Gateway Intents' section of your bot's settings page.")
+        shard_id_info = f" (Shard ID: {e.shard_id})" if e.shard_id else ""
+        logger.critical(
+            "Privileged Intents%s are required but not enabled in the Discord Developer Portal.",
+            shard_id_info
+        )
+        logger.critical(
+            "Enable 'Presence Intent', 'Server Members Intent', and 'Message Content Intent'."
+        )
     except Exception as e:
-        logger.critical(f"An unexpected error occurred while running the bot: {e}", exc_info=True)
+        logger.critical(
+            "An unexpected error occurred while running the bot: %s", e,
+            exc_info=True
+        )
     finally:
         logger.info("Bot process finished.")
+
 
 if __name__ == '__main__':
     main()
