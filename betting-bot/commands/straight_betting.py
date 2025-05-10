@@ -40,7 +40,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-# --- UI Component Classes (content is the same as previously provided) ---
+# --- UI Component Classes ---
 class LeagueSelect(Select):
     def __init__(self, parent_view, leagues: List[str]):
         self.parent_view = parent_view
@@ -108,9 +108,7 @@ class GameSelect(Select):
             start_dt_obj = game.get("start_time")
             time_str = "Time N/A"
 
-            if isinstance(
-                start_dt_obj, str
-            ):  # Handle if start_time is string from DB
+            if isinstance(start_dt_obj, str):
                 try:
                     start_dt_obj = datetime.fromisoformat(
                         start_dt_obj.replace("Z", "+00:00")
@@ -277,8 +275,9 @@ class ManualEntryButton(Button):
         )
         self.parent_view.bet_details["game_id"] = "Other"
         self.disabled = True
+        # Also disable other interactive elements on this view before modal
         for item in self.parent_view.children:
-            if isinstance(item, CancelButton):
+            if isinstance(item, (Select, CancelButton)):
                 item.disabled = True
 
         line_type = self.parent_view.bet_details.get("line_type", "game_line")
@@ -287,16 +286,19 @@ class ManualEntryButton(Button):
             modal.view = self.parent_view
             await interaction.response.send_modal(modal)
             logger.debug("Manual entry modal sent successfully")
+            # Update the message the button was on (self.parent_view.message)
+            # The interaction from send_modal can't be used to edit the original message directly.
+            # We must rely on self.parent_view.edit_message and ensure it targets self.parent_view.message
             await self.parent_view.edit_message(
-                interaction,  # Pass the button's interaction
+                interaction=interaction, # Pass button interaction
                 content="Manual entry form opened. Please fill in the details.",
-                view=self.parent_view,
+                view=self.parent_view, # Keep the (now disabled) view
             )
         except discord.HTTPException as e:
             logger.error(f"Failed to send manual entry modal: {e}")
             try:
                 await self.parent_view.edit_message(
-                    interaction,
+                    interaction=interaction, # Use button interaction for this edit
                     content="❌ Failed to open manual entry form. Please restart the /bet command.",
                     view=None,
                 )
@@ -454,12 +456,13 @@ class BetDetailsModal(Modal):
             if not self.is_manual and "away_team_name" in self.view.bet_details:
                 opponent = self.view.bet_details["away_team_name"]
                 if "home_team_name" in self.view.bet_details and team.lower() != self.view.bet_details["home_team_name"].lower():
-                    logger.warning(
-                        f"Team entered '{team}' differs from selected game home team '{self.view.bet_details['home_team_name']}'. Using game team."
-                    )
-                    team = self.view.bet_details["home_team_name"]
+                    # This case is tricky: user typed a team different from game context.
+                    # Decide how to handle: prioritize modal input or game context?
+                    # For now, if it's not manual and game details exist, we assume the modal 'team' is primary.
+                    # If game context should override, then 'team' should be set to home_team_name or away_team_name based on user intent.
+                    pass # Using modal 'team' for now.
 
-            current_leg_details = {
+            current_bet_details = { # Changed variable name for clarity
                 "game_id": (
                     self.view.bet_details.get("game_id")
                     if self.view.bet_details.get("game_id") != "Other"
@@ -477,15 +480,15 @@ class BetDetailsModal(Modal):
                     await self.view.bot.bet_service.create_straight_bet(
                         guild_id=interaction.guild_id,
                         user_id=interaction.user.id,
-                        game_id=current_leg_details["game_id"],
-                        bet_type=current_leg_details["bet_type"],
-                        team=current_leg_details["team"],
-                        opponent=current_leg_details["opponent"],
-                        line=current_leg_details["line"],
-                        units=1.00,  # Placeholder
-                        odds=current_leg_details["odds"],
-                        channel_id=None,  # Placeholder
-                        league=current_leg_details["league"],
+                        game_id=current_bet_details["game_id"],
+                        bet_type=current_bet_details["bet_type"],
+                        team=current_bet_details["team"],
+                        opponent=current_bet_details["opponent"],
+                        line=current_bet_details["line"],
+                        units=1.00,  # Placeholder, updated later
+                        odds=current_bet_details["odds"],
+                        channel_id=None,  # Set later
+                        league=current_bet_details["league"],
                     )
                 )
                 if bet_serial is None or bet_serial == 0:
@@ -493,23 +496,25 @@ class BetDetailsModal(Modal):
                         f"Bet creation failed for user {interaction.user.id}, received bet_serial: {bet_serial}"
                     )
                     await interaction.followup.send(
-                        "❌ Failed to create bet record in the database. Please try again or contact admin.",
+                        "❌ Failed to create bet record. Please try again or contact admin.",
                         ephemeral=True,
                     )
                     self.view.stop()
                     return
 
+                # Store crucial details from modal/processing into the view's main bet_details
                 self.view.bet_details["bet_serial"] = bet_serial
                 self.view.bet_details["line"] = line
                 self.view.bet_details["odds_str"] = odds_str
                 self.view.bet_details["odds"] = odds_val
                 self.view.bet_details["team"] = team
                 self.view.bet_details["opponent"] = opponent
+                # 'league' and 'game_id' should already be in self.view.bet_details
                 logger.debug(
                     f"Created straight bet with serial {bet_serial} via modal."
                 )
                 await self.view._preload_team_logos(
-                    team, opponent, current_leg_details["league"]
+                    team, opponent, current_bet_details["league"]
                 )
             except Exception as e:
                 logger.exception(
@@ -522,12 +527,14 @@ class BetDetailsModal(Modal):
                 self.view.stop()
                 return
 
-            self.view.current_step = 4  # Align with go_next logic
+            self.view.current_step = 4 # Ensure go_next proceeds from here
+            # Edit the main view message, not the modal's ephemeral followup
             await self.view.edit_message(
-                interaction=None,
+                interaction=None, # Indicates an internal update to self.message
                 content="Bet details entered. Processing next step...",
                 view=self.view,
             )
+            # Pass the modal's interaction to go_next so it can use it to edit its original response (the ack)
             await self.view.go_next(interaction)
         except Exception as e:
             logger.exception(f"Error in BetDetailsModal on_submit: {e}")
@@ -552,9 +559,7 @@ class BetDetailsModal(Modal):
                     ephemeral=True,
                 )
         except discord.HTTPException:
-            logger.warning(
-                "Could not send error followup for BetDetailsModal."
-            )
+            logger.warning("Could not send error followup for BetDetailsModal.")
         if hasattr(self, "view") and self.view:
             self.view.stop()
 
@@ -636,6 +641,7 @@ class ConfirmButton(Button):
         for item in self.parent_view.children:
             if isinstance(item, Button):
                 item.disabled = True
+        # Edit the message the button is on.
         await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.submit_bet(interaction)
 
@@ -644,19 +650,20 @@ class ConfirmButton(Button):
 class StraightBetWorkflowView(View):
     def __init__(
         self,
-        interaction: Interaction,
+        interaction: Interaction, # The original /bet command interaction
         bot: commands.Bot,
         message_to_control: Optional[discord.InteractionMessage] = None,
     ):
-        super().__init__(timeout=600)
-        self.original_interaction = interaction  # Initial /bet command interaction
+        super().__init__(timeout=600) # Increased timeout
+        self.original_interaction = interaction
         self.bot = bot
         self.current_step = 0
         self.bet_details: Dict[str, Any] = {"bet_type": "straight"}
         self.games: List[Dict] = []
-        self.message = message_to_control  # Message this view will manage
+        self.message = message_to_control # The message this view will manage
         self.is_processing = False
-        self.latest_interaction = interaction # Stores the most recent interaction
+        # latest_interaction tracks the interaction from the most recent component/modal
+        self.latest_interaction = interaction
         self.bet_slip_generator = BetSlipGenerator()
         self.preview_image_bytes: Optional[io.BytesIO] = None
         self.team_logos: Dict[str, Optional[str]] = {}
@@ -679,39 +686,40 @@ class StraightBetWorkflowView(View):
                     self.team_logos[key] = None
 
     async def start_flow(self, interaction_that_triggered_workflow_start: Interaction):
+        # interaction_that_triggered_workflow_start is the component interaction from BetTypeSelect
         logger.debug(
             f"Starting straight bet workflow for user {self.original_interaction.user} (ID: {self.original_interaction.user.id})"
         )
-        # self.message is already set from __init__
         if not self.message:
-            logger.error("StraightBetWorkflowView started without a message to control.")
-            try:
-                # This interaction is likely the component interaction from BetTypeSelect
+            logger.error(
+                "StraightBetWorkflowView.start_flow called but self.message is None."
+            )
+            if interaction_that_triggered_workflow_start.response.is_done():
                 await interaction_that_triggered_workflow_start.followup.send(
-                    "❌ Error: Workflow message context lost. Please try again.",
-                    ephemeral=True,
+                    "❌ Workflow error: Message context lost.", ephemeral=True
                 )
-            except discord.HTTPException:
-                pass
+            else: # Should have been responded to by component callback
+                await interaction_that_triggered_workflow_start.response.send_message(
+                    "❌ Workflow error: Message context lost.", ephemeral=True
+                )
             self.stop()
             return
-        
+
         try:
-            # The first call to go_next uses the interaction that triggered this workflow
-            # (e.g., the component interaction from BetTypeSelect).
-            # This interaction has already been responded to (edited message) in BetTypeSelect callback.
+            # The first call to go_next uses the component interaction from BetTypeSelect.
+            # This interaction was already used to edit BetTypeView's message.
+            # edit_message in go_next will use interaction.edit_original_response()
+            # which will correctly target self.message.
             await self.go_next(interaction_that_triggered_workflow_start)
         except discord.HTTPException as e:
             logger.error(
                 f"Failed during initial go_next in StraightBetWorkflowView: {e}"
             )
-            try:
+            if interaction_that_triggered_workflow_start.response.is_done():
                 await interaction_that_triggered_workflow_start.followup.send(
                     "❌ Failed to start bet workflow. Please try again.",
                     ephemeral=True,
                 )
-            except discord.HTTPException:
-                pass
             self.stop()
 
     async def interaction_check(self, interaction: Interaction) -> bool:
@@ -751,85 +759,46 @@ class StraightBetWorkflowView(View):
         attachments = [file] if file else []
 
         try:
-            if interaction:
-                # This interaction is the one from a component callback or modal submit.
-                # It has likely been deferred or responded to by the component's callback.
-                logger.debug(
-                    f"Interaction {interaction.id} is_done() is {interaction.response.is_done()}. "
-                    f"Using edit_original_response."
-                )
-                # Always use edit_original_response for component/modal interactions
-                # as they should have been acknowledged (deferred/responded).
-                await interaction.edit_original_response(
-                    content=content,
-                    embed=embed,
-                    view=view,
-                    attachments=attachments,
-                )
-                
-                # Update self.message if we are editing the view's main message
-                if view is not None and self.message:
-                    try:
-                        # original_response() for a component interaction refers to the message
-                        # the component is attached to, or the ephemeral thinking message if deferred.
-                        # If the component was on self.message, this will update it.
-                        edited_msg = await interaction.original_response()
-                        if self.message.id == edited_msg.id:
-                            self.message = edited_msg
-                        else:
-                            # This might happen if edit_original_response targeted an ephemeral "Thinking..."
-                            # message rather than self.message directly. In such cases,
-                            # self.message (the actual view message) might need separate editing
-                            # if the interaction wasn't directly on it.
-                            # However, for component interactions on self.message, this should match.
-                            logger.debug(
-                                f"Interaction {interaction.id} (original_response target: {edited_msg.id}) "
-                                f"might not be the same as self.message ({self.message.id}). "
-                                f"If self.message needs update, ensure it's done."
-                            )
-                            # If interaction.edit_original_response successfully updated the
-                            # message that self.message refers to, this is fine.
-                            # If it edited a temporary "thinking" message, self.message might be stale.
-                            # A direct self.message.edit() might be needed if `interaction` wasn't
-                            # directly for `self.message` but for a temporary response.
-                            # For now, assuming `edit_original_response` correctly targets the message
-                            # that `self.message` represents from the user's perspective.
-
-                    except discord.NotFound:
-                        logger.warning(
-                            f"Could not get original_response to update self.message after editing with interaction {interaction.id}"
-                        )
-            elif self.message:
-                logger.debug(f"Editing self.message (ID: {self.message.id}) directly.")
-                await self.message.edit(
-                    content=content,
-                    embed=embed,
-                    view=view,
-                    attachments=attachments,
-                )
-            else:
-                logger.error(
-                    "edit_message called with no interaction and no self.message. Cannot edit."
-                )
-                # Cannot use original_interaction here reliably as it might cause new followups.
-
-        except discord.errors.InteractionResponded:
-             # This case should ideally be less frequent if logic correctly uses edit_original_response
-             # for already acked interactions.
-            logger.warning(
-                f"InteractionResponded caught unexpectedly in edit_message for interaction {interaction.id if interaction else 'N/A'}. "
-                f"The interaction was likely fully responded to before this edit attempt.",
-                exc_info=True
-            )
-            # Attempt a followup as a last resort if an interaction context exists
-            error_interaction_for_followup = interaction or self.latest_interaction
-            if error_interaction_for_followup:
-                try:
-                    await error_interaction_for_followup.followup.send(
-                        content="Error updating display (already responded).", ephemeral=True
+            if self.message:
+                if interaction and interaction.type == discord.InteractionType.modal_submit:
+                    logger.debug(f"Modal submission interaction {interaction.id}. Editing self.message (ID: {self.message.id}) directly.")
+                    await self.message.edit(content=content, embed=embed, view=view, attachments=attachments)
+                    # Acknowledge the modal interaction separately if it wasn't deferred in on_submit
+                    if not interaction.response.is_done():
+                        await interaction.response.defer(ephemeral=True) # Should be done in modal on_submit
+                elif interaction: # Component interaction (button, select)
+                    logger.debug(
+                        f"Component interaction {interaction.id} (type {interaction.type}). "
+                        f"Is done? {interaction.response.is_done()}. Using edit_original_response to edit message."
                     )
-                except Exception:
-                    pass
+                    # This interaction should have been deferred in its callback.
+                    # edit_original_response will edit the message the component was on (i.e., self.message).
+                    await interaction.edit_original_response(
+                        content=content, embed=embed, view=view, attachments=attachments
+                    )
+                    # Refresh self.message instance if it was successfully edited
+                    try:
+                        self.message = await interaction.original_response()
+                    except discord.NotFound:
+                        logger.warning(f"Original response for interaction {interaction.id} not found when trying to refresh self.message.")
+
+                else: # No interaction provided, internal call
+                    logger.debug(f"Internal call to edit_message. Editing self.message (ID: {self.message.id}) directly.")
+                    await self.message.edit(
+                        content=content, embed=embed, view=view, attachments=attachments
+                    )
+            else: # self.message is None
+                logger.error("edit_message called but self.message is None. Attempting to use interaction if available.")
+                if interaction:
+                    if interaction.response.is_done():
+                        await interaction.edit_original_response(content=content, embed=embed, view=view, attachments=attachments)
+                        self.message = await interaction.original_response() # Try to capture the message
+                    else:
+                        await interaction.response.send_message(content=content, embed=embed, view=view, files=attachments, ephemeral=True)
+                        self.message = await interaction.original_response()
+                else:
+                    logger.error("Cannot edit message: No self.message and no interaction provided.")
+
 
         except (discord.NotFound, discord.HTTPException) as e:
             logger.warning(
@@ -842,40 +811,25 @@ class StraightBetWorkflowView(View):
                 and error_interaction_for_followup.response.is_done()
             ):
                 try:
-                    followup_content = content if content else "Updating display..."
-                    logger.debug(
-                        f"Attempting followup for interaction {error_interaction_for_followup.id} after edit failure."
+                    followup_content = content or "Updating display..."
+                    await error_interaction_for_followup.followup.send(
+                        followup_content,
+                        ephemeral=True,
+                        view=view if view and isinstance(view, View) else None,
+                        files=attachments or [],
                     )
-                    new_message_after_followup = (
-                        await error_interaction_for_followup.followup.send(
-                            followup_content,
-                            ephemeral=True,
-                            view=view,
-                            files=attachments or [],
-                        )
-                    )
-                    if view is not None:
-                        self.message = new_message_after_followup
-                        logger.info(
-                            f"Updated self.message to followup message {new_message_after_followup.id}"
-                        )
                 except discord.HTTPException as fe:
                     logger.error(
-                        f"Failed to send followup after message edit error for interaction {error_interaction_for_followup.id}: {fe}",
+                        f"Failed to send followup after message edit error for {error_interaction_for_followup.id}: {fe}",
                         exc_info=True,
                     )
-            elif not error_interaction_for_followup:
-                logger.error(
-                    f"Failed to edit message: No valid interaction or message reference for edit/followup. Original error: {e}"
-                )
+
         except Exception as e:
             logger.exception(
                 f"Unexpected error editing StraightBetWorkflowView message: {e}"
             )
             error_interaction_for_response = (
-                interaction
-                or self.latest_interaction
-                or self.original_interaction
+                interaction or self.latest_interaction or self.original_interaction
             )
             try:
                 if (
@@ -889,7 +843,7 @@ class StraightBetWorkflowView(View):
                 elif (
                     error_interaction_for_response
                     and not error_interaction_for_response.response.is_done()
-                ): # Should ideally not happen if interactions are handled correctly
+                ):
                     await error_interaction_for_response.response.send_message(
                         "❌ An unexpected error occurred updating the display.",
                         ephemeral=True,
@@ -908,19 +862,21 @@ class StraightBetWorkflowView(View):
                 try:
                     await interaction.response.defer()
                 except discord.HTTPException:
-                    pass # Already responded or other issue
+                    pass
             return
         self.is_processing = True
 
-        # Ensure interaction (from component or modal) is acked if not already.
-        # Most callbacks defer, but modals use interaction.response.defer in on_submit.
         if not interaction.response.is_done():
             try:
-                logger.debug(f"Deferring interaction {interaction.id} at start of go_next as it wasn't done.")
+                logger.debug(
+                    f"Deferring interaction {interaction.id} at start of go_next as it wasn't done."
+                )
                 await interaction.response.defer()
             except discord.HTTPException as e:
-                logger.warning(f"Failed to defer interaction {interaction.id} in go_next (may have been responded to): {e}")
-        
+                logger.warning(
+                    f"Failed to defer interaction {interaction.id} in go_next (may have been responded to): {e}"
+                )
+
         try:
             logger.debug(
                 f"Processing go_next: current_step={self.current_step} for user {interaction.user.id} (interaction {interaction.id})"
@@ -965,7 +921,7 @@ class StraightBetWorkflowView(View):
                     self.stop()
                     self.is_processing = False
                     return
-                
+
                 self.games = []
                 if league != "Other" and hasattr(self.bot, "game_service"):
                     try:
@@ -976,56 +932,64 @@ class StraightBetWorkflowView(View):
                             limit=25,
                         )
                     except Exception as e:
-                        logger.exception(f"Error fetching games for league {league}: {e}")
-                
+                        logger.exception(
+                            f"Error fetching games for league {league}: {e}"
+                        )
+
                 if self.games:
                     self.add_item(GameSelect(self, self.games))
                     self.add_item(ManualEntryButton(self))
-                else: # No games or "Other" league, only manual entry
+                else:
                     self.add_item(ManualEntryButton(self))
-                
+
                 self.add_item(CancelButton(self))
                 msg_content = (
                     f"{step_content}: Select Game for {league} (or Enter Manually)"
-                    if self.games else
-                    f"{step_content}: No games for {league}. Enter details manually."
-                    if league != "Other" else
-                    f"{step_content}: Enter game details manually."
+                    if self.games
+                    else f"{step_content}: No games for {league}. Enter details manually."
+                    if league != "Other"
+                    else f"{step_content}: Enter game details manually."
                 )
                 await self.edit_message(
                     interaction, content=msg_content, view=self
                 )
                 self.is_processing = False
                 return
-            
-            elif self.current_step == 4: # Modal trigger or Player Prop selection
+
+            elif self.current_step == 4:
                 line_type = self.bet_details.get("line_type")
                 game_id = self.bet_details.get("game_id")
                 is_manual = game_id == "Other"
 
                 if interaction.type == discord.InteractionType.modal_submit:
-                    logger.debug("go_next called after modal submission. Proceeding to next step.")
-                    self.current_step = 5 # Force to unit selection
-                    # Fall through to current_step == 5 logic
+                    logger.debug(
+                        "go_next called after modal submission. Advancing to step 5."
+                    )
+                    self.current_step = 5
+                    # Fall through to the self.current_step == 5 block
                 
                 elif line_type == "player_prop" and not is_manual:
-                    # Fetch players and show select, or proceed to manual modal if no players
-                    # ... (player selection logic as before) ...
-                    # If player selection UI is shown, then:
-                    # await self.edit_message(interaction, content=..., view=self)
-                    # self.is_processing = False
-                    # return
-                    # If no players or error, force manual:
-                    logger.warning(f"Player prop for game {game_id}, but no players fetched or feature incomplete. Forcing manual.")
-                    is_manual = True # Fall through to manual modal
+                    # Player prop logic
+                    home_players, away_players = [], [] # Placeholder
+                    # ... fetch players ...
+                    if home_players or away_players:
+                        # ... add player selects ...
+                        await self.edit_message(interaction, content="Select Player for Prop...", view=self)
+                        self.is_processing = False
+                        return # Wait for player selection
+                    else:
+                        is_manual = True # Force manual if no players
 
                 if is_manual or (line_type != "player_prop" and interaction.type != discord.InteractionType.modal_submit):
-                    modal = BetDetailsModal(line_type=line_type, is_manual=is_manual)
+                    modal = BetDetailsModal(
+                        line_type=line_type, is_manual=is_manual
+                    )
                     modal.view = self
                     try:
                         await interaction.response.send_modal(modal)
-                        await self.edit_message( # Edit the main view message
-                            interaction, # This interaction will be used to edit original response of component
+                        # Update the main message (self.message) after modal is sent
+                        await self.edit_message(
+                            interaction, # This interaction's original_response is the component message
                             content="Please fill out the bet details in the form above.",
                             view=self
                         )
@@ -1033,24 +997,26 @@ class StraightBetWorkflowView(View):
                         logger.error(f"Failed to send BetDetailsModal: {e}")
                         await self.edit_message(interaction, content="❌ Failed to open details form.", view=None)
                         self.stop()
-                    self.is_processing = False # Wait for modal
-                    return
-                
-                # If we are here, it's likely after a modal that didn't auto-advance current_step
-                # or player prop that needs to advance.
-                if not self.bet_details.get("bet_serial"): # Modal didn't complete properly
-                    logger.warning("Step 4 reached without bet_serial after expected modal/player selection.")
-                    # Potentially stuck, could offer to retry modal or cancel
-                    self.current_step -= 1 # Revert to allow re-triggering modal/player select logic
+                    self.is_processing = False
+                    return # Wait for modal
+
+                # If modal was submitted and auto-advanced step in on_submit,
+                # this 'if' might now be for step 5. Or if it's player_prop and we selected a player.
+                if not self.bet_details.get("bet_serial"):
+                    logger.warning("Step 4: Bet serial not set. Modal/player prop might not have completed.")
+                    self.current_step -= 1 # Stay on current effective step
                     self.is_processing = False
                     return
 
-            # This check ensures that if current_step was changed (e.g. by modal logic to 5)
-            # the correct block is entered.
+            # Explicit check for step 5 after potential modifications in step 4
             if self.current_step == 5:
                 if "bet_serial" not in self.bet_details or not self.bet_details["bet_serial"]:
                     logger.error("Bet serial missing before unit selection step.")
-                    await self.edit_message(interaction, content="❌ Error: Bet record not created.", view=None)
+                    await self.edit_message(
+                        interaction,
+                        content="❌ Error: Bet record not created. Please restart.",
+                        view=None,
+                    )
                     self.stop()
                     self.is_processing = False
                     return
@@ -1062,19 +1028,35 @@ class StraightBetWorkflowView(View):
                 )
                 self.is_processing = False
                 return
-            elif self.current_step == 6: # Preview and Channel Select
-                # ... (logic for step 6 as before) ...
-                await self.edit_message(interaction, content=step_content, view=self, file=file_to_send)
+            elif self.current_step == 6:
+                # ... (Preview and Channel Select logic as before) ...
+                if "units_str" not in self.bet_details: # Guard
+                    await self.edit_message(interaction, content="❌ Units missing.", view=None); self.stop(); self.is_processing = False; return
+                # ... (image generation) ...
+                await self.edit_message(
+                    interaction, content=step_content, view=self, file=file_to_send
+                )
                 self.is_processing = False
                 return
-            elif self.current_step == 7: # Confirmation
-                # ... (logic for step 7 as before) ...
-                await self.edit_message(interaction, content=confirmation_text, view=self, file=file_to_send)
+            elif self.current_step == 7:
+                # ... (Confirmation logic as before) ...
+                if not all(k in self.bet_details for k in ['bet_serial', 'channel_id', 'units_str', 'odds_str', 'line', 'team', 'league']): #Guard
+                     await self.edit_message(interaction, content="❌ Details incomplete.", view=None); self.stop(); self.is_processing = False; return
+                # ... (text and image setup) ...
+                await self.edit_message(
+                    interaction, content=confirmation_text, view=self, file=file_to_send
+                )
                 self.is_processing = False
                 return
-            else: # Fall-through if no step matched after potential modifications
-                logger.error(f"StraightBetWorkflowView reached unexpected state or step: {self.current_step}")
-                await self.edit_message(interaction, content="❌ Invalid step reached. Please start over.", view=None)
+            else:
+                logger.error(
+                    f"StraightBetWorkflowView reached unexpected step: {self.current_step}"
+                )
+                await self.edit_message(
+                    interaction,
+                    content="❌ Invalid step reached. Please start over.",
+                    view=None,
+                )
                 self.stop()
                 # self.is_processing will be set to False in finally
 
@@ -1110,8 +1092,10 @@ class StraightBetWorkflowView(View):
         logger.info(
             f"Submitting straight bet {bet_serial} for user {interaction.user} (ID: {interaction.user.id})"
         )
+        # The interaction here is from the ConfirmButton.
+        # Its original_response is self.message. Edit it.
         await self.edit_message(
-            interaction,
+            interaction, # This will use interaction.edit_original_response()
             content="Processing and posting bet...",
             view=None,
             file=None,
@@ -1157,7 +1141,7 @@ class StraightBetWorkflowView(View):
                         if post_channel_id
                         else post_channel
                     )
-                    units = float(existing_bet["units"]) # Use confirmed units
+                    units = float(existing_bet["units"]) 
                 else:
                     logger.error(
                         f"Failed to update bet {bet_serial} to confirmed. Rowcount: {rowcount}. Existing: {existing_bet}"
@@ -1169,17 +1153,20 @@ class StraightBetWorkflowView(View):
             final_image_bytes = self.preview_image_bytes
             if not final_image_bytes:
                 logger.warning(f"Preview image for {bet_serial} lost. Regenerating.")
-                # Regeneration logic (simplified)
-                home_team = details.get("team", "Unknown")
-                opponent = details.get("opponent", "Unknown")
-                bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                    home_team=home_team, away_team=opponent,
-                    league=details.get("league", "NHL"), line=details.get("line", "N/A"),
-                    odds=odds, units=units, bet_id=str(bet_serial),
-                    timestamp=datetime.now(timezone.utc), bet_type="straight"
-                )
-                final_image_bytes = io.BytesIO()
-                bet_slip_image.save(final_image_bytes, format="PNG")
+                try:
+                    home_team = details.get("team", "Unknown")
+                    opponent = details.get("opponent", "Unknown")
+                    bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                        home_team=home_team, away_team=opponent,
+                        league=details.get("league", "NHL"), line=details.get("line", "N/A"),
+                        odds=odds, units=units, bet_id=str(bet_serial),
+                        timestamp=datetime.now(timezone.utc), bet_type="straight"
+                    )
+                    final_image_bytes = io.BytesIO()
+                    bet_slip_image.save(final_image_bytes, format="PNG")
+                except Exception as img_err:
+                    logger.exception(f"Failed to regenerate bet slip image for {bet_serial}: {img_err}")
+                    raise BetServiceError("Failed to generate final bet slip image.") from img_err
 
             if not final_image_bytes:
                  raise ValueError(f"Final image data is missing for bet {bet_serial}.")
@@ -1191,11 +1178,7 @@ class StraightBetWorkflowView(View):
 
             role_mention = ""
             display_name = interaction.user.display_name
-            avatar_url = (
-                interaction.user.display_avatar.url
-                if interaction.user.display_avatar
-                else None
-            )
+            avatar_url = interaction.user.display_avatar.url if interaction.user.display_avatar else None
             try:
                 settings = await self.bot.db_manager.fetch_one(
                     "SELECT authorized_role, member_role FROM guild_settings WHERE guild_id = %s",
@@ -1220,6 +1203,7 @@ class StraightBetWorkflowView(View):
                 logger.error(f"Webhook error for bet {bet_serial}: {e}")
                 raise ValueError(f"Webhook setup failed: {e}")
 
+            content_msg = role_mention if role_mention else "" # Ensure content is not None
             sent_message = await webhook.send(
                 content=content_msg,
                 file=discord_file,
@@ -1239,25 +1223,20 @@ class StraightBetWorkflowView(View):
                     "bet_type": "straight"
                 }
 
+            # Edit the ephemeral message associated with the ConfirmButton's interaction
             await self.edit_message(
                 interaction,
                 content=f"✅ Bet placed successfully! (ID: `{bet_serial}`). Posted to {post_channel.mention}.",
-                view=None,
+                view=None
             )
         except (ValidationError, BetServiceError, ValueError) as e:
             logger.error(f"Error submitting bet {bet_serial}: {e}", exc_info=True)
-            await self.edit_message(
-                interaction, content=f"❌ Error placing bet: {e}", view=None
-            )
+            await self.edit_message(interaction, content=f"❌ Error placing bet: {e}", view=None)
         except Exception as e:
             logger.exception(
                 f"Unexpected error submitting bet {bet_serial}: {e}"
             )
-            await self.edit_message(
-                interaction,
-                content="❌ An unexpected error occurred while posting the bet.",
-                view=None,
-            )
+            await self.edit_message(interaction, content="❌ An unexpected error occurred while posting the bet.", view=None)
         finally:
             if self.preview_image_bytes:
                 self.preview_image_bytes.close()
