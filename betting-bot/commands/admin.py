@@ -226,17 +226,17 @@ class GuildSettingsView(discord.ui.View):
             step = self.SETUP_STEPS[self.current_step]
             select_class = step['select']
             
-            # Call the options lambda function directly instead of awaiting it
-            options = step['options'](interaction.guild)
+            # Get the appropriate items based on the step type
+            if select_class == ChannelSelect:
+                items = interaction.guild.text_channels
+            else:  # RoleSelect
+                items = interaction.guild.roles
 
-            if not options:
+            if not items:
                 await interaction.followup.send(f"No {step['name'].lower()} found. Please create one and try again.", ephemeral=True)
                 return
 
-            if select_class == ChannelSelect:
-                select = select_class(options, f"Select a {step['name']}", step['setting_key'])
-            else:
-                select = select_class(options, f"Select a {step['name']}", step['setting_key'])
+            select = select_class(items, f"Select a {step['name']}", step['setting_key'])
 
             view = discord.ui.View(timeout=300)
             view.add_item(select)
