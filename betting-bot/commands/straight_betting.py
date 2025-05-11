@@ -449,7 +449,7 @@ class BetDetailsModal(Modal):
 
                 # Generate bet slip image
                 try:
-                    bet_slip_generator = await self.view.get_bet_slip_generator()
+                    bet_slip_generator = await self.view.bot.get_bet_slip_generator(self.view.original_interaction.guild_id)
                     bet_slip_image = bet_slip_generator.generate_bet_slip(
                         home_team=team,
                         away_team=opponent,
@@ -464,6 +464,7 @@ class BetDetailsModal(Modal):
                     if bet_slip_image:
                         self.view.preview_image_bytes = io.BytesIO()
                         bet_slip_image.save(self.view.preview_image_bytes, format='PNG')
+                        self.view.preview_image_bytes.seek(0)
                         logger.debug(f"Bet slip image generated for bet {bet_serial}")
                     else:
                         logger.warning(f"Failed to generate bet slip image for bet {bet_serial}")
