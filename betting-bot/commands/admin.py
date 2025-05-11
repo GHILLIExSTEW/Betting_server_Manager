@@ -59,6 +59,13 @@ class ChannelSelect(discord.ui.Select):
              await interaction.response.defer() # Acknowledge but do nothing else
              return
 
+        # For embed channels, track the selection
+        if self.setting_key == 'embed_channel_id':
+            if selected_value in self.view.embed_channels:
+                await interaction.response.send_message("This channel has already been selected as an embed channel.", ephemeral=True)
+                return
+            self.view.embed_channels.append(selected_value)
+
         self.view.settings[self.setting_key] = selected_value
         await interaction.response.defer()
 
@@ -161,7 +168,8 @@ class GuildSettingsView(discord.ui.View):
             'name': 'Embed Channel',
             'select': ChannelSelect,
             'options': lambda guild: [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels],
-            'setting_key': 'embed_channel_id'
+            'setting_key': 'embed_channel_id',
+            'max_count': 2  # Maximum number of embed channels allowed
         },
         {
             'name': 'Command Channel',
@@ -204,6 +212,7 @@ class GuildSettingsView(discord.ui.View):
         self.current_step = 0
         self.settings = {}
         self.is_paid = is_paid
+        self.embed_channels = []  # Track selected embed channels
 
     async def start_selection(self):
         """Start the selection process"""
@@ -243,7 +252,17 @@ class GuildSettingsView(discord.ui.View):
             view = GuildSettingsView(self.bot, interaction.guild, self.admin_service, self.original_interaction, self.is_paid)
             view.current_step = self.current_step
             view.settings = self.settings.copy()  # Copy the current settings
+            view.embed_channels = self.embed_channels.copy()  # Copy embed channels list
             
+            # For embed channels, check if we've reached the limit
+            if step['setting_key'] == 'embed_channel_id':
+                if len(self.embed_channels) >= step.get('max_count', 2):
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message("You have already selected the maximum number of embed channels (2).", ephemeral=True)
+                    else:
+                        await interaction.followup.send("You have already selected the maximum number of embed channels (2).", ephemeral=True)
+                    return
+
             select = select_class(items, f"Select a {step['name']}", step['setting_key'])
             view.add_item(select)
             
