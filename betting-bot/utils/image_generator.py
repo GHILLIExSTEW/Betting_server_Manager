@@ -6,6 +6,7 @@ import time
 import io
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
+import traceback
 
 from PIL import Image, ImageDraw, ImageFont
 from config.asset_paths import (
@@ -242,80 +243,45 @@ class BetSlipGenerator:
             # Don't raise, just log the error and continue with empty dict
 
     def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
-        """Load a team logo with caching."""
-        if not team_name or not league:
-            return None
-            
+        """Load a team logo from the static directory."""
         try:
-            cache_key = f"team_{team_name}_{league}"
-            now = time.time()
-            
-            # Check cache first
-            if cache_key in self._logo_cache:
-                logo, ts = self._logo_cache[cache_key]
-                if now - ts <= self._cache_expiry:
-                    return logo
-                else:
-                    del self._logo_cache[cache_key]
-            
-            # Get the team directory
+            # Get the sport from the league
+            sport = self._get_sport_from_league(league)
+            if not sport:
+                logger.error(f"Could not determine sport for league: {league}")
+                return None
+
+            # Ensure team directory exists
             team_dir = self._ensure_team_dir_exists(league)
-            normalized_name = self._normalize_team_name(team_name)
-            logo_path = os.path.join(team_dir, f"{normalized_name}.png")
-            
-            # Log the attempt
-            absolute_logo_path = os.path.abspath(logo_path)
-            file_exists = os.path.exists(absolute_logo_path)
-            logger.info(
-                "Loading team logo - Team: '%s', Normalized: '%s', League: '%s', Path: '%s', Exists: %s",
-                team_name, normalized_name, league, absolute_logo_path, file_exists
-            )
-            
-            # Try to load the logo
-            logo = None
-            if file_exists:
-                try:
-                    logo = Image.open(absolute_logo_path).convert("RGBA")
-                except Exception as e:
-                    logger.error("Error loading team logo %s: %s", absolute_logo_path, e)
-            
-            # Fallback to default logo if needed
-            if logo is None:
-                default_path = self.DEFAULT_LOGO_PATH
-                abs_default = os.path.abspath(default_path)
-                if os.path.exists(abs_default):
-                    try:
-                        logo = Image.open(abs_default).convert("RGBA")
-                        logger.warning(
-                            "Using default logo for %s (path: %s)",
-                            team_name, absolute_logo_path
-                        )
-                    except Exception as e:
-                        logger.error("Error loading default logo %s: %s", abs_default, e)
-                else:
-                    logger.warning("Default team logo not found: %s", abs_default)
-            
-            # Cache the logo if we have one
-            if logo:
-                self._cleanup_cache()
-                if len(self._logo_cache) >= self._max_cache_size:
-                    # Remove oldest entry if cache is full
-                    oldest_key = min(self._logo_cache, key=lambda k: self._logo_cache[k][1])
-                    del self._logo_cache[oldest_key]
-                self._logo_cache[cache_key] = (logo.copy(), now)
-                return logo
-                
-            logger.warning(
-                "No logo loaded for %s (%s) path: %s",
-                team_name, league, absolute_logo_path
-            )
-            return None
-            
+            if not team_dir:
+                return None
+
+            # Load the team logo
+            logo_path = os.path.join(team_dir, f"{team_name.lower()}.png")
+            if os.path.exists(logo_path):
+                return Image.open(logo_path)
+            else:
+                logger.warning(f"Team logo not found: {logo_path}")
+                return None
         except Exception as e:
-            logger.error(
-                "Error in _load_team_logo for %s (%s): %s",
-                team_name, league, e, exc_info=True
-            )
+            logger.error(f"Error in _load_team_logo for {team_name} ({league}): {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+
+    def _ensure_team_dir_exists(self, league: str) -> Optional[str]:
+        """Ensure the team directory exists and return its path."""
+        try:
+            sport = self._get_sport_from_league(league)
+            if not sport:
+                logger.error(f"Could not determine sport for league: {league}")
+                return None
+
+            team_dir = os.path.join(self.static_dir, "logos", "teams", sport, league)
+            os.makedirs(team_dir, exist_ok=True)
+            return team_dir
+        except Exception as e:
+            logger.error(f"Error ensuring team directory exists for {league}: {str(e)}")
+            logger.error(traceback.format_exc())
             return None
 
     def _load_lock_icon(self) -> Optional[Image.Image]:
