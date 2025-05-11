@@ -123,9 +123,27 @@ def load_fonts():
     """Load fonts with proper fallbacks."""
     fonts = {}
     try:
-        # Get absolute paths
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        assets_dir = os.path.join(base_dir, "assets")
+        # Try multiple possible base directories
+        possible_base_dirs = [
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # Current working directory
+            '/home/container/betting-bot',  # Container path
+            os.getcwd(),  # Current working directory
+            os.path.dirname(os.path.abspath(__file__))  # Utils directory
+        ]
+        
+        # Try to find the assets directory
+        assets_dir = None
+        for base_dir in possible_base_dirs:
+            test_assets_dir = os.path.join(base_dir, "assets")
+            if os.path.exists(test_assets_dir):
+                assets_dir = test_assets_dir
+                logger.info(f"Found assets directory at: {assets_dir}")
+                break
+        
+        if not assets_dir:
+            logger.error("Could not find assets directory in any of the possible locations")
+            raise FileNotFoundError("Assets directory not found")
+            
         fonts_dir = os.path.join(assets_dir, "fonts")
         
         # Try to load fonts from the assets directory first
@@ -134,9 +152,8 @@ def load_fonts():
         emoji_font_path = os.path.join(fonts_dir, "NotoColorEmoji-Regular.ttf")
         
         # Debug logging
-        logger.info(f"Base directory: {base_dir}")
-        logger.info(f"Assets directory: {assets_dir}")
-        logger.info(f"Fonts directory: {fonts_dir}")
+        logger.info(f"Using assets directory: {assets_dir}")
+        logger.info(f"Using fonts directory: {fonts_dir}")
         logger.info(f"Regular font path: {font_path}")
         logger.info(f"Bold font path: {bold_font_path}")
         logger.info(f"Emoji font path: {emoji_font_path}")
