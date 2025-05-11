@@ -512,14 +512,24 @@ class UnitsSelect(Select):
 class ChannelSelect(Select):
     def __init__(self, parent_view: View, channels: List[TextChannel]):
         self.parent_view = parent_view
+        # Sort channels by name for consistency
+        sorted_channels = sorted(channels, key=lambda x: x.name.lower())
+        # Limit to 25 channels to comply with Discord's limit
         options = [
             SelectOption(
                 label=channel.name,
                 value=str(channel.id),
                 description=f"Channel ID: {channel.id}"
             )
-            for channel in channels
+            for channel in sorted_channels[:24]  # Leave room for "Other" option
         ]
+        # Add "Other" option if we have less than 25 options
+        if len(options) < 25:
+            options.append(SelectOption(
+                label="Other Channel",
+                value="other",
+                description="Select a different channel"
+            ))
         super().__init__(
             placeholder="Select channel to post bet...",
             options=options,
@@ -528,8 +538,17 @@ class ChannelSelect(Select):
         )
 
     async def callback(self, interaction: Interaction):
-        channel_id = int(self.values[0])
-        self.parent_view.bet_details["channel_id"] = channel_id
+        channel_id = self.values[0]
+        if channel_id == "other":
+            # Handle manual channel selection
+            await interaction.response.send_message(
+                "Please enter the channel ID manually:",
+                ephemeral=True
+            )
+            # TODO: Implement manual channel ID input handling
+            return
+            
+        self.parent_view.bet_details["channel_id"] = int(channel_id)
         logger.debug(f"Channel selected: {channel_id} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
