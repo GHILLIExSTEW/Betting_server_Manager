@@ -9,6 +9,9 @@ from discord.ui import View, Select, Modal, TextInput
 import logging
 import os
 from typing import Optional, List
+import requests
+from PIL import Image
+from io import BytesIO
 
 # Use relative imports (assuming commands/ is sibling to services/, utils/)
 try:
@@ -397,12 +400,45 @@ class GuildSettingsView(discord.ui.View):
             return
 
         step = self.SETUP_STEPS[self.current_step]
-        content = message.content.strip().lower()
+        content = message.content.strip()
+        setting_key = step['setting_key']
 
-        if content == 'skip':
-            self.settings[step['setting_key']] = None
+        if content.lower() == 'skip':
+            self.settings[setting_key] = None
         else:
-            self.settings[step['setting_key']] = message.content.strip()
+            # If this is a URL step, download and save the image
+            if setting_key in [
+                'guild_background',
+                'bot_image_mask',
+                'default_parlay_image'
+            ]:
+                try:
+                    response = requests.get(content, timeout=10, stream=True)
+                    response.raise_for_status()
+                    content_type = response.headers.get('content-type', '').lower()
+                    if not content_type.startswith('image/'):
+                        await message.channel.send(f"❌ URL does not point to a valid image type for {step['name']}.")
+                        return
+                    image_data = BytesIO(response.content)
+                    with Image.open(image_data) as img:
+                        if img.format not in ['PNG', 'JPEG', 'JPG', 'GIF', 'WEBP']:
+                            await message.channel.send(f"❌ Invalid image format for {step['name']}. Use PNG, JPG, GIF, or WEBP.")
+                            return
+                        # Save as PNG for consistency
+                        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                        guild_dir = os.path.join(base_dir, 'static', 'guilds', str(self.guild.id))
+                        os.makedirs(guild_dir, exist_ok=True)
+                        save_path = os.path.join(guild_dir, f"{setting_key}.png")
+                        img.save(save_path, 'PNG')
+                        # Store the local path (relative to betting-bot/static/guilds/{guild_id}/...)
+                        self.settings[setting_key] = save_path
+                except Exception as e:
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to download/save image for {setting_key}: {e}")
+                    await message.channel.send(f"❌ Failed to download or save the image for {step['name']}.")
+                    return
+            else:
+                self.settings[setting_key] = content
 
         self.waiting_for_url = False
         self.current_step += 1
