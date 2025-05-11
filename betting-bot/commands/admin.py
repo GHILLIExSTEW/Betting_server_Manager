@@ -177,7 +177,7 @@ class SubscriptionView(discord.ui.View):
             guild=interaction.guild,
             admin_service=self.bot.admin_service,
             original_interaction=interaction,
-            is_paid=False
+            subscription_level='free'
         )
         await view.start_selection()
         self.stop()
@@ -216,7 +216,7 @@ class GuildSettingsView(discord.ui.View):
             'select': ChannelSelect,
             'options': lambda guild: [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels],
             'setting_key': 'embed_channel_id',
-            'max_count': 2,  # Maximum number of embed channels allowed for paid
+            'max_count': 2,  # Maximum number of embed channels allowed for premium
             'free_count': 1  # Maximum number of embed channels for free tier
         },
         {
@@ -224,7 +224,7 @@ class GuildSettingsView(discord.ui.View):
             'select': ChannelSelect,
             'options': lambda guild: [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels],
             'setting_key': 'command_channel_id',
-            'max_count': 2,  # Maximum number of command channels allowed for paid
+            'max_count': 2,  # Maximum number of command channels allowed for premium
             'free_count': 1  # Maximum number of command channels for free tier
         },
         {
@@ -239,23 +239,43 @@ class GuildSettingsView(discord.ui.View):
             'name': 'Admin Role',
             'select': RoleSelect,
             'options': lambda guild: [discord.SelectOption(label=role.name, value=str(role.id)) for role in guild.roles],
-            'setting_key': 'admin_role_id'
+            'setting_key': 'admin_role_id',
+            'max_count': 1,  # Only one admin role allowed
+            'free_count': 1
         },
         {
             'name': 'Authorized Role',
             'select': RoleSelect,
             'options': lambda guild: [discord.SelectOption(label=role.name, value=str(role.id)) for role in guild.roles],
-            'setting_key': 'authorized_role_id'
+            'setting_key': 'authorized_role_id',
+            'max_count': 1,  # Only one authorized role allowed
+            'free_count': 1
         },
         {
             'name': 'Member Role',
             'select': RoleSelect,
             'options': lambda guild: [discord.SelectOption(label=role.name, value=str(role.id)) for role in guild.roles],
-            'setting_key': 'member_role_id'
-        }
+            'setting_key': 'member_role_id',
+            'max_count': 1,  # Only one member role allowed
+            'free_count': 1
+        },
+        {
+            'name': 'Bot Avatar URL',
+            'select': None,  # This will be handled by TextInputModal
+            'setting_key': 'bot_avatar_url',
+            'is_premium_only': True
+        },
+        {
+            'name': 'Guild Background URL',
+            'select': None,  # This will be handled by TextInputModal
+            'setting_key': 'guild_background_url',
+            'is_premium_only': True
+        },
+        # Note: User avatars are stored per user in the cappers table's image_path column
+        # and are only available for premium guild members with the authorized role
     ]
 
-    def __init__(self, bot, guild, admin_service, original_interaction, is_paid=False):
+    def __init__(self, bot, guild, admin_service, original_interaction, subscription_level='free'):
         super().__init__(timeout=300)
         self.bot = bot
         self.guild = guild
@@ -263,7 +283,7 @@ class GuildSettingsView(discord.ui.View):
         self.original_interaction = original_interaction
         self.current_step = 0
         self.settings = {}
-        self.is_paid = is_paid
+        self.subscription_level = subscription_level
         self.embed_channels = []  # Track selected embed channels
         self.command_channels = []  # Track selected command channels
 
@@ -286,6 +306,20 @@ class GuildSettingsView(discord.ui.View):
                 return
 
             step = self.SETUP_STEPS[self.current_step]
+            
+            # Skip premium-only steps for free tier
+            if step.get('is_premium_only', False) and self.subscription_level != 'premium':
+                self.current_step += 1
+                await self.process_next_selection(interaction)
+                return
+
+            # Handle text input steps (for image URLs)
+            if step['select'] is None:
+                modal = TextInputModal(title=f"Enter {step['name']}", setting_key=step['setting_key'])
+                modal.view = self
+                await interaction.response.send_modal(modal)
+                return
+
             select_class = step['select']
             
             # Get the appropriate items based on the step type
@@ -302,7 +336,7 @@ class GuildSettingsView(discord.ui.View):
                 return
 
             # Create a new view that inherits from the current view
-            view = GuildSettingsView(self.bot, interaction.guild, self.admin_service, self.original_interaction, self.is_paid)
+            view = GuildSettingsView(self.bot, interaction.guild, self.admin_service, self.original_interaction, self.subscription_level)
             view.current_step = self.current_step
             view.settings = self.settings.copy()  # Copy the current settings
             view.embed_channels = self.embed_channels.copy()  # Copy embed channels list
@@ -310,7 +344,7 @@ class GuildSettingsView(discord.ui.View):
             
             # For embed channels, check if we've reached the limit
             if step['setting_key'] == 'embed_channel_id':
-                max_count = step['max_count'] if self.is_paid else step['free_count']
+                max_count = step['max_count'] if self.subscription_level == 'premium' else step['free_count']
                 if len(self.embed_channels) >= max_count:
                     # Move to next step if we've reached the limit
                     self.current_step += 1
@@ -319,7 +353,7 @@ class GuildSettingsView(discord.ui.View):
 
             # For command channels, check if we've reached the limit
             if step['setting_key'] == 'command_channel_id':
-                max_count = step['max_count'] if self.is_paid else step['free_count']
+                max_count = step['max_count'] if self.subscription_level == 'premium' else step['free_count']
                 if len(self.command_channels) >= max_count:
                     # Move to next step if we've reached the limit
                     self.current_step += 1
@@ -482,8 +516,11 @@ class AdminCog(commands.Cog):
                     ephemeral=True
                 )
                 return
-            is_paid = await self.bot.admin_service.check_guild_subscription(interaction.guild_id)
-            if not is_paid:
+
+            # Get subscription level from database
+            subscription_level = await self.bot.admin_service.get_guild_subscription_level(interaction.guild_id)
+            
+            if subscription_level == 'free':
                 modal = SubscriptionModal()
                 await interaction.followup.send_modal(modal)
                 view = SubscriptionView(self.bot, interaction)
@@ -493,7 +530,13 @@ class AdminCog(commands.Cog):
                     ephemeral=True
                 )
             else:
-                view = GuildSettingsView(self.bot, interaction, is_paid=True)
+                view = GuildSettingsView(
+                    self.bot, 
+                    interaction.guild, 
+                    self.admin_service, 
+                    interaction, 
+                    subscription_level='premium'
+                )
                 await interaction.followup.send(
                     "Starting server setup...",
                     view=view,
@@ -556,7 +599,7 @@ class AdminCog(commands.Cog):
                 guild=interaction.guild,
                 admin_service=self.admin_service,
                 original_interaction=interaction,
-                is_paid=True
+                subscription_level='premium'
             )
             if existing_settings:
                 view.settings = dict(existing_settings)
@@ -586,7 +629,7 @@ class AdminCog(commands.Cog):
                 guild=interaction.guild,
                 admin_service=self.admin_service,
                 original_interaction=interaction,
-                is_paid=True
+                subscription_level='premium'
             )
             await interaction.followup.send(
                 "Starting full server setup...",
