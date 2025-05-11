@@ -184,9 +184,9 @@ class BetSlipGenerator:
         self.padding = 20
         self.LEAGUE_TEAM_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "teams")
         self.LEAGUE_LOGO_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "leagues")
-        self.TEAM_LOGO_BASE_DIR = os.path.join(BASE_DIR, "assets", "league_logos", "leagues")
         self.DEFAULT_LOGO_PATH = os.path.join(BASE_DIR, "static", "logos", "default_logo.png")
         self.LOCK_ICON_PATH = os.path.join(BASE_DIR, "static", "logos", "lock_icon.png")
+        
         self._logo_cache = {}
         self._lock_icon_cache = None
         self._last_cache_cleanup = time.time()
@@ -195,11 +195,13 @@ class BetSlipGenerator:
         
         self.background = None
         self.team_logos = {}
-        self._load_team_logos()
-        self._load_league_logos()
         
         # Load fonts last
-        logger.info("Loading fonts...")
+        logger.info("Loading fonts into BetSlipGenerator instance...")
+        # Make the global FONTS dict available as self.fonts
+        self.fonts = FONTS
+        
+        # Individual font assignments for direct access
         self.font_m_18 = FONTS['font_m_18']
         self.font_m_24 = FONTS['font_m_24']
         self.font_b_18 = FONTS['font_b_18']
@@ -207,40 +209,160 @@ class BetSlipGenerator:
         self.font_b_36 = FONTS['font_b_36']
         self.font_b_28 = FONTS['font_b_28']
         self.emoji_font_24 = FONTS['emoji_font_24']
-        logger.info("Fonts loaded successfully")
-        
-    def _load_team_logos(self):
-        """Load team logos from the assets directory."""
-        self.team_logos = {}
-        try:
-            for sport_category in os.listdir(TEAMS_SUBDIR):
-                sport_path = os.path.join(TEAMS_SUBDIR, sport_category)
-                if os.path.isdir(sport_path):
-                    for team_file in os.listdir(sport_path):
-                        if team_file.endswith('.png'):
-                            team_name = os.path.splitext(team_file)[0]
-                            self.team_logos[team_name] = Image.open(os.path.join(sport_path, team_file))
-        except Exception as e:
-            logger.error(f"Error loading team logos: {e}")
-            raise
+        logger.info("Fonts loaded successfully into BetSlipGenerator instance")
 
-    def _load_league_logos(self):
-        """Load league logos."""
-        self.league_logos = {}
-        try:
-            for sport_category in os.listdir(self.LEAGUE_LOGO_BASE_DIR):
-                sport_path = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport_category)
-                if os.path.isdir(sport_path):
-                    for league_dir in os.listdir(sport_path):
-                        league_path = os.path.join(sport_path, league_dir)
-                        if os.path.isdir(league_path):
-                            for logo_file in os.listdir(league_path):
-                                if logo_file.endswith('.png'):
-                                    league_name = os.path.splitext(logo_file)[0]
-                                    self.league_logos[league_name] = Image.open(os.path.join(league_path, logo_file))
-        except Exception as e:
-            logger.error(f"Error loading league logos: {e}")
-            # Don't raise, just log the error and continue with empty dict
+    def _draw_header(self, draw: ImageDraw.Draw, league_logo: Image.Image, league: str):
+        """Draw the header section of the bet slip."""
+        # Draw league logo
+        if league_logo:
+            logo_size = (100, 100)
+            league_logo = league_logo.resize(logo_size, Image.Resampling.LANCZOS)
+            draw.bitmap((self.padding, self.padding), league_logo)
+        
+        # Draw league name
+        draw.text(
+            (self.padding + 120, self.padding + 40),
+            league.upper(),
+            font=self.fonts['font_b_24'],
+            fill='black'
+        )
+
+    def _draw_teams_section(self, draw: ImageDraw.Draw, home_team: str, away_team: str, home_logo: Image.Image, away_logo: Image.Image):
+        """Draw the teams section of the bet slip."""
+        y = 150
+        
+        # Draw team logos
+        if home_logo and away_logo:
+            logo_size = (80, 80)
+            home_logo = home_logo.resize(logo_size, Image.Resampling.LANCZOS)
+            away_logo = away_logo.resize(logo_size, Image.Resampling.LANCZOS)
+            
+            # Draw home team
+            draw.bitmap((self.padding, y), home_logo)
+            draw.text(
+                (self.padding + 100, y + 30),
+                home_team,
+                font=self.fonts['font_b_18'],
+                fill='black'
+            )
+            
+            # Draw away team
+            draw.bitmap((self.padding, y + 100), away_logo)
+            draw.text(
+                (self.padding + 100, y + 130),
+                away_team,
+                font=self.fonts['font_b_18'],
+                fill='black'
+            )
+
+    def _draw_straight_details(self, draw: ImageDraw.Draw, line: Optional[str], odds: float, units: float, bet_id: str, timestamp: datetime):
+        """Draw straight bet details section."""
+        y = 400
+        
+        # Draw line
+        if line:
+            draw.text(
+                (self.padding, y),
+                line,
+                font=self.fonts['font_m_24'],
+                fill='black'
+            )
+            y += 30
+        
+        # Draw odds
+        odds_txt = self._format_odds_with_sign(odds)
+        draw.text(
+            (self.padding, y + 20),
+            odds_txt,
+            font=self.fonts['font_b_24'],
+            fill='black'
+        )
+        y += 30
+        
+        # Draw units
+        units_txt = f"To Win {units:.2f} Units"
+        draw.text(
+            (self.padding, y + 50),
+            units_txt,
+            font=self.fonts['font_m_18'],
+            fill='black'
+        )
+        
+        # Draw bet ID and timestamp
+        draw.text(
+            (self.padding, y + 90),
+            f"Bet ID: {bet_id}",
+            font=self.fonts['font_m_18'],
+            fill='gray'
+        )
+        draw.text(
+            (self.padding, y + 120),
+            f"Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
+            font=self.fonts['font_m_18'],
+            fill='gray'
+        )
+
+    def _draw_parlay_details(self, draw: ImageDraw.Draw, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool):
+        """Draw parlay bet details section."""
+        y = 400
+        
+        # Draw each leg
+        for i, leg in enumerate(legs, 1):
+            leg_text = f"Leg {i}: {leg.get('team', 'N/A')} {leg.get('line', 'N/A')}"
+            draw.text(
+                (self.padding, y),
+                leg_text,
+                font=self.fonts['font_m_18'],
+                fill='black'
+            )
+            y += 30
+        
+        # Draw total odds and units
+        draw.text(
+            (self.padding, y + 20),
+            f"Total Odds: {odds:+d}",
+            font=self.fonts['font_b_24'],
+            fill='black'
+        )
+        draw.text(
+            (self.padding, y + 50),
+            f"Units: {units}",
+            font=self.fonts['font_b_24'],
+            fill='black'
+        )
+        
+        # Draw bet ID and timestamp
+        draw.text(
+            (self.padding, y + 90),
+            f"Bet ID: {bet_id}",
+            font=self.fonts['font_m_18'],
+            fill='gray'
+        )
+        draw.text(
+            (self.padding, y + 120),
+            f"Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
+            font=self.fonts['font_m_18'],
+            fill='gray'
+        )
+        
+        if is_same_game:
+            draw.text(
+                (self.padding, y + 150),
+                "Same Game Parlay",
+                font=self.fonts['font_b_18'],
+                fill='blue'
+            )
+
+    def _draw_footer(self, draw: ImageDraw.Draw):
+        """Draw the footer section of the bet slip."""
+        # Draw footer text
+        footer_text = "Good luck with your bet!"
+        draw.text(
+            (self.padding, 1000),
+            footer_text,
+            font=self.fonts['font_m_18'],
+            fill='gray'
+        )
 
     def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
         """Load a team logo from the static directory."""
@@ -380,78 +502,6 @@ class BetSlipGenerator:
             logger.error(f"Error generating bet slip: {str(e)}")
             return None
             
-    def _draw_parlay_details(
-        self,
-        draw: ImageDraw.Draw,
-        legs: List[Dict],
-        odds: float,
-        units: float,
-        bet_id: str,
-        timestamp: datetime,
-        is_same_game: bool
-    ):
-        """Draw parlay bet details section."""
-        y = 400
-        # Draw each leg
-        for i, leg in enumerate(legs, 1):
-            leg_text = f"Leg {i}: {leg.get('team', 'N/A')} {leg.get('line', 'N/A')}"
-            draw.text((50, y), leg_text, font=self.fonts['regular'], fill='black')
-            y += 30
-            
-        # Draw total odds and units
-        draw.text((50, y + 20), f"Total Odds: {odds:+d}", font=self.fonts['bold'], fill='black')
-        draw.text((50, y + 50), f"Units: {units}", font=self.fonts['bold'], fill='black')
-        
-        # Draw bet ID and timestamp
-        draw.text((50, y + 90), f"Bet ID: {bet_id}", font=self.fonts['regular'], fill='gray')
-        draw.text((50, y + 120), f"Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}", font=self.fonts['regular'], fill='gray')
-        
-        if is_same_game:
-            draw.text((50, y + 150), "Same Game Parlay", font=self.fonts['bold'], fill='blue')
-
-    def _draw_straight_details(
-        self,
-        draw: ImageDraw.Draw,
-        line: Optional[str],
-        odds: float,
-        units: float,
-        bet_id: str,
-        timestamp: datetime
-    ):
-        """Draw straight bet details section."""
-        y = 400
-        # Draw line
-        draw.text((50, y), f"{line}", font=self.fonts['regular'], fill='black')
-        y += 30
-        
-        # Draw odds
-        odds_txt = self._format_odds_with_sign(odds)
-        draw.text((50, y + 20), odds_txt, font=self.fonts['bold'], fill='black')
-        y += 30
-        
-        # Draw units
-        units_txt = f"To Win {units:.2f} Units"
-        draw.text((50, y + 50), units_txt, font=self.fonts['regular'], fill='black')
-        
-        # Draw bet ID and timestamp
-        draw.text((50, y + 90), f"Bet ID: {bet_id}", font=self.fonts['regular'], fill='gray')
-        draw.text((50, y + 120), f"Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}", font=self.fonts['regular'], fill='gray')
-
-    def _draw_header(self, draw: ImageDraw.Draw, league_logo: Image.Image, league: str):
-        """Draw the header section of the bet slip."""
-        # Implementation of _draw_header method
-        pass
-
-    def _draw_teams_section(self, draw: ImageDraw.Draw, home_team: str, away_team: str, home_logo: Image.Image, away_logo: Image.Image):
-        """Draw the teams section of the bet slip."""
-        # Implementation of _draw_teams_section method
-        pass
-
-    def _draw_footer(self, draw: ImageDraw.Draw):
-        """Draw the footer section of the bet slip."""
-        # Implementation of _draw_footer method
-        pass
-
     def _load_fonts(self):
         """Load fonts with proper fallbacks."""
         # Implementation of _load_fonts method
