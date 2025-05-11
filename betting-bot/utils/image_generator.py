@@ -131,6 +131,10 @@ def load_fonts():
             os.path.dirname(os.path.abspath(__file__))  # Utils directory
         ]
         
+        logger.info("Searching for assets directory in possible locations:")
+        for base_dir in possible_base_dirs:
+            logger.info(f"Checking: {base_dir}")
+        
         # Try to find the assets directory
         assets_dir = None
         for base_dir in possible_base_dirs:
@@ -167,11 +171,19 @@ def load_fonts():
                 font_path = os.path.join(os.environ['WINDIR'], 'Fonts', 'arial.ttf')
                 bold_font_path = os.path.join(os.environ['WINDIR'], 'Fonts', 'arialbd.ttf')
                 emoji_font_path = os.path.join(os.environ['WINDIR'], 'Fonts', 'seguiemj.ttf')
+                logger.info(f"Using Windows system fonts:")
+                logger.info(f"Regular font: {font_path}")
+                logger.info(f"Bold font: {bold_font_path}")
+                logger.info(f"Emoji font: {emoji_font_path}")
             else:
                 # Linux/Unix fallback paths
                 font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
                 bold_font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
                 emoji_font_path = '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf'
+                logger.info(f"Using Linux system fonts:")
+                logger.info(f"Regular font: {font_path}")
+                logger.info(f"Bold font: {bold_font_path}")
+                logger.info(f"Emoji font: {emoji_font_path}")
             
             if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
                 logger.warning("System fonts not found, using default font")
@@ -187,6 +199,7 @@ def load_fonts():
                 }
 
         # Load fonts with proper error handling
+        logger.info("Loading fonts from paths...")
         fonts['font_m_18'] = ImageFont.truetype(font_path, 18)
         fonts['font_m_24'] = ImageFont.truetype(font_path, 24)
         fonts['font_b_18'] = ImageFont.truetype(bold_font_path, 18)
@@ -228,7 +241,13 @@ class BetSlipGenerator:
         self._cache_expiry = 300  # 5 minutes
         self._max_cache_size = 100
         
-        # Use the globally loaded fonts
+        self.background = None
+        self.team_logos = {}
+        self._load_team_logos()
+        self._load_league_logos()
+        
+        # Load fonts last
+        logger.info("Loading fonts...")
         self.font_m_18 = FONTS['font_m_18']
         self.font_m_24 = FONTS['font_m_24']
         self.font_b_18 = FONTS['font_b_18']
@@ -236,11 +255,7 @@ class BetSlipGenerator:
         self.font_b_36 = FONTS['font_b_36']
         self.font_b_28 = FONTS['font_b_28']
         self.emoji_font_24 = FONTS['emoji_font_24']
-        
-        self.background = None
-        self.team_logos = {}
-        self._load_team_logos()
-        self._load_league_logos()
+        logger.info("Fonts loaded successfully")
         
     def _load_team_logos(self):
         """Load team logos from the assets directory."""
