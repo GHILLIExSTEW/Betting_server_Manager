@@ -124,14 +124,14 @@ def _determine_asset_paths():
         potential_static_dir = os.path.join(parent_dir, 'betting-bot', 'static')
 
     final_assets_dir = None
-    if os.path.isdir(potential_assets_dir):
-        final_assets_dir = potential_assets_dir
-    elif os.path.isdir(potential_static_dir):
+    if os.path.isdir(potential_static_dir):
         final_assets_dir = potential_static_dir
+    elif os.path.isdir(potential_assets_dir):
+        final_assets_dir = potential_assets_dir
     elif os.path.isdir(assets_dir_default):
         final_assets_dir = assets_dir_default
     else:
-        final_assets_dir = os.path.join(os.getcwd(), 'assets')
+        final_assets_dir = os.path.join(os.getcwd(), 'static')
         logger.warning(
             "Could not find 'assets' or 'static'. Assuming path: %s",
             final_assets_dir
