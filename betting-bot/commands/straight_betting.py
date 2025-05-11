@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 import io
 import os
 from discord.ext import commands
+from io import BytesIO
 
 # Import directly from utils
 from utils.errors import (
@@ -935,17 +936,17 @@ class StraightBetWorkflowView(View):
             if self.preview_image_bytes: self.preview_image_bytes.close()
             self.stop()
 
-    async def _handle_units_selection(self, interaction: Interaction, units: float):
+    async def _handle_units_selection(self, interaction: discord.Interaction, units: float):
+        """Handle units selection and generate bet slip preview"""
         self.units = units
         self.current_step = 6
-        self.update_view()
         
-        # Initialize bet_slip_generator if not already initialized
+        # Initialize bet slip generator if not already done
         if self.bet_slip_generator is None:
-            self.bet_slip_generator = await self.bot.get_bet_slip_generator(self.original_interaction.guild_id)
+            self.bet_slip_generator = BetSlipGenerator()
             
-        # Generate bet slip preview
         try:
+            # Generate bet slip preview
             bet_slip = self.bet_slip_generator.generate_bet_slip(
                 home_team=self.home_team,
                 away_team=self.away_team,
@@ -954,19 +955,36 @@ class StraightBetWorkflowView(View):
                 odds=self.odds,
                 units=self.units,
                 bet_id=self.bet_id,
-                timestamp=datetime.now(timezone.utc),
-                bet_type="straight"
+                timestamp=datetime.now(timezone.utc)
             )
+            
             if bet_slip:
-                buffer = io.BytesIO()
-                bet_slip.save(buffer, format="PNG")
+                # Create BytesIO buffer for the image
+                buffer = BytesIO()
+                bet_slip.save(buffer, format='PNG')
                 buffer.seek(0)
-                file = discord.File(buffer, filename="bet_slip.png")
-                await self.message.edit(content=self.get_content(), view=self, attachments=[file])
+                
+                # Create discord.File from the buffer
+                file = discord.File(buffer, filename='bet_slip.png')
+                
+                # Edit the message with the bet slip preview
+                await self.edit_message(
+                    content=self.get_current_content(),
+                    view=self,
+                    file=file
+                )
                 logger.debug(f"Bet slip preview generated and attached for bet {self.bet_id}")
             else:
-                logger.warning(f"Failed to generate bet slip preview for bet {self.bet_id}")
-                await self.message.edit(content=self.get_content(), view=self)
+                logger.error(f"Failed to generate bet slip preview for bet {self.bet_id}")
+                # Still update the message even if image generation fails
+                await self.edit_message(
+                    content=self.get_current_content(),
+                    view=self
+                )
         except Exception as e:
-            logger.exception(f"Error generating bet slip preview: {e}")
-            await self.message.edit(content=self.get_content(), view=self)
+            logger.error(f"Error generating bet slip preview: {str(e)}")
+            # Still update the message even if image generation fails
+            await self.edit_message(
+                content=self.get_current_content(),
+                view=self
+            )

@@ -13,6 +13,7 @@ import uuid
 import os
 import json 
 from discord.ext import commands
+from io import BytesIO
 
 # Import directly from utils
 from utils.errors import BetServiceError, ValidationError, GameNotFoundError
@@ -317,47 +318,80 @@ class UnitsSelect(Select):
         super().__init__(placeholder="Select Total Units for Parlay...", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: Interaction):
-        units_str_val = self.values[0]
-        self.parent_view.bet_details['units_str'] = units_str_val 
-        logger.debug(f"Total units selected for parlay: {units_str_val} by user {interaction.user.id}")
+        self.parent_view.bet_details["units_str"] = self.values[0]
+        logger.debug(
+            f"Units selected: {self.values[0]} by user {interaction.user.id}"
+        )
         self.disabled = True
         await interaction.response.defer()
         
-        # Initialize bet_slip_generator if not already initialized
+        # Initialize bet slip generator if not already done
         if self.parent_view.bet_slip_generator is None:
-            self.parent_view.bet_slip_generator = await self.parent_view.bot.get_bet_slip_generator(self.parent_view.original_interaction.guild_id)
+            self.parent_view.bet_slip_generator = BetSlipGenerator()
             
-        # Generate bet slip preview
         try:
             # Get the first leg's details for the preview
-            first_leg = self.parent_view.bet_details.get('legs', [{}])[0]
+            legs = self.parent_view.bet_details.get("legs", [])
+            if not legs:
+                logger.error("No legs found in parlay bet")
+                await self.parent_view.edit_message(
+                    content=self.parent_view.get_current_content(),
+                    view=self.parent_view
+                )
+                return
+                
+            first_leg = legs[0]
+            home_team = first_leg.get("home_team")
+            away_team = first_leg.get("away_team")
+            league = first_leg.get("league")
+            
+            # Check if this is a same-game parlay
+            is_same_game = len(set(leg.get("game_id") for leg in legs)) == 1
+            
+            # Generate bet slip preview
             bet_slip = self.parent_view.bet_slip_generator.generate_bet_slip(
-                home_team=first_leg.get('home_team_name'),
-                away_team=first_leg.get('away_team_name'),
-                league=first_leg.get('league'),
-                line=first_leg.get('line'),
-                odds=float(units_str_val),
-                units=float(units_str_val),
-                bet_id=self.parent_view.bet_details.get('bet_serial'),
+                home_team=home_team,
+                away_team=away_team,
+                league=league,
+                odds=self.parent_view.bet_details.get("odds", 0),
+                units=float(self.values[0]),
+                bet_id=self.parent_view.bet_details.get("bet_serial"),
                 timestamp=datetime.now(timezone.utc),
                 bet_type="parlay",
-                parlay_legs=self.parent_view.bet_details.get('legs', []),
-                is_same_game=len(set(leg.get('game_id') for leg in self.parent_view.bet_details.get('legs', []) if leg.get('game_id'))) == 1
+                parlay_legs=legs,
+                is_same_game=is_same_game
             )
             
             if bet_slip:
-                buffer = io.BytesIO()
-                bet_slip.save(buffer, format="PNG")
+                # Create BytesIO buffer for the image
+                buffer = BytesIO()
+                bet_slip.save(buffer, format='PNG')
                 buffer.seek(0)
-                file = discord.File(buffer, filename="parlay_slip.png")
-                await self.parent_view.message.edit(content=self.parent_view.get_content(), view=self.parent_view, attachments=[file])
-                logger.debug(f"Parlay bet slip preview generated and attached for bet {self.parent_view.bet_details.get('bet_serial')}")
+                
+                # Create discord.File from the buffer
+                file = discord.File(buffer, filename='bet_slip.png')
+                
+                # Edit the message with the bet slip preview
+                await self.parent_view.edit_message(
+                    content=self.parent_view.get_current_content(),
+                    view=self.parent_view,
+                    file=file
+                )
+                logger.debug(f"Bet slip preview generated and attached for parlay bet {self.parent_view.bet_details.get('bet_serial')}")
             else:
-                logger.warning(f"Failed to generate parlay bet slip preview for bet {self.parent_view.bet_details.get('bet_serial')}")
-                await self.parent_view.message.edit(content=self.parent_view.get_content(), view=self.parent_view)
+                logger.error(f"Failed to generate bet slip preview for parlay bet {self.parent_view.bet_details.get('bet_serial')}")
+                # Still update the message even if image generation fails
+                await self.parent_view.edit_message(
+                    content=self.parent_view.get_current_content(),
+                    view=self.parent_view
+                )
         except Exception as e:
-            logger.exception(f"Error generating parlay bet slip preview: {e}")
-            await self.parent_view.message.edit(content=self.parent_view.get_content(), view=self.parent_view)
+            logger.error(f"Error generating bet slip preview: {str(e)}")
+            # Still update the message even if image generation fails
+            await self.parent_view.edit_message(
+                content=self.parent_view.get_current_content(),
+                view=self.parent_view
+            )
             
         await self.parent_view.go_next(interaction)
 
