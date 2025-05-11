@@ -6,7 +6,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Base directory structure
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 FONT_DIR = os.path.join(ASSETS_DIR, "fonts")
 LOGO_DIR = os.path.join(ASSETS_DIR, "logos")
 TEAMS_SUBDIR = os.path.join(LOGO_DIR, "teams")

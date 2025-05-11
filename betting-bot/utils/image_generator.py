@@ -106,80 +106,18 @@ SPORT_CATEGORY_MAP = {
 }
 DEFAULT_FALLBACK_SPORT_CATEGORY = "OTHER_SPORTS"
 
-
-def get_sport_category_for_path(league_name: str) -> str:
-    """Gets the sport category string for use in paths."""
-    return SPORT_CATEGORY_MAP.get(
-        str(league_name).upper(), DEFAULT_FALLBACK_SPORT_CATEGORY
-    )
-
-
-def _determine_asset_paths():
-    """Determine asset paths dynamically."""
-    assets_dir_default = "betting-bot/static/"
-    font_dir_name = 'fonts'
-    logo_dir_name = 'logos'
-    teams_subdir_name = 'teams'
-    leagues_subdir_name = 'leagues'
-
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(script_dir)
-        potential_assets_dir = os.path.join(parent_dir, 'assets')
-        potential_static_dir = os.path.join(parent_dir, 'static')
-    except NameError:
-        script_dir = os.getcwd()
-        parent_dir = os.path.dirname(script_dir)
-        potential_assets_dir = os.path.join(parent_dir, 'betting-bot', 'assets')
-        potential_static_dir = os.path.join(parent_dir, 'betting-bot', 'static')
-
-    final_assets_dir = None
-    if os.path.isdir(potential_static_dir):
-        final_assets_dir = potential_static_dir
-    elif os.path.isdir(potential_assets_dir):
-        final_assets_dir = potential_assets_dir
-    elif os.path.isdir(assets_dir_default):
-        final_assets_dir = assets_dir_default
-    else:
-        final_assets_dir = os.path.join(os.getcwd(), 'static')
-        logger.warning(
-            "Could not find 'assets' or 'static'. Assuming path: %s",
-            final_assets_dir
-        )
-
-    logger.info("Path determination targeting base: %s", final_assets_dir)
-
-    paths = {
-        "ASSETS_DIR": final_assets_dir,
-        "DEFAULT_FONT_PATH": os.path.join(
-            final_assets_dir, font_dir_name, 'Roboto-Regular.ttf'
-        ),
-        "DEFAULT_BOLD_FONT_PATH": os.path.join(
-            final_assets_dir, font_dir_name, 'Roboto-Bold.ttf'
-        ),
-        "DEFAULT_EMOJI_FONT_PATH_NOTO": os.path.join(
-            final_assets_dir, font_dir_name, 'NotoEmoji-Regular.ttf'
-        ),
-        "DEFAULT_EMOJI_FONT_PATH_SEGOE": os.path.join(
-            final_assets_dir, font_dir_name, 'SegoeUIEmoji.ttf'
-        ),
-        "LEAGUE_TEAM_BASE_DIR": os.path.join(
-            final_assets_dir, logo_dir_name, teams_subdir_name
-        ),
-        "LEAGUE_LOGO_BASE_DIR": os.path.join(
-            final_assets_dir, logo_dir_name, leagues_subdir_name
-        ),
-        "DEFAULT_LOCK_ICON_PATH": os.path.join(
-            final_assets_dir, "lock_icon.png"
-        ),
-        "DEFAULT_TEAM_LOGO_PATH": os.path.join(
-            final_assets_dir, logo_dir_name, 'default_logo.png'
-        ),
-    }
-    return paths
-
-
-_PATHS = _determine_asset_paths()
+# Asset paths
+_PATHS = {
+    "ASSETS_DIR": ASSETS_DIR,
+    "DEFAULT_FONT_PATH": os.path.join(FONT_DIR, "Roboto-Regular.ttf"),
+    "DEFAULT_BOLD_FONT_PATH": os.path.join(FONT_DIR, "Roboto-Bold.ttf"),
+    "DEFAULT_EMOJI_FONT_PATH_NOTO": os.path.join(FONT_DIR, "NotoEmoji-Regular.ttf"),
+    "DEFAULT_EMOJI_FONT_PATH_SEGOE": os.path.join(FONT_DIR, "SegoeUIEmoji.ttf"),
+    "LEAGUE_TEAM_BASE_DIR": TEAMS_SUBDIR,
+    "LEAGUE_LOGO_BASE_DIR": LEAGUES_SUBDIR,
+    "DEFAULT_LOCK_ICON_PATH": os.path.join(ASSETS_DIR, "lock_icon.png"),
+    "DEFAULT_TEAM_LOGO_PATH": os.path.join(LOGO_DIR, "default_logo.png"),
+}
 
 try:
     _font_path = _PATHS["DEFAULT_FONT_PATH"]
@@ -200,31 +138,21 @@ try:
 
     _emoji_font_path = _PATHS["DEFAULT_EMOJI_FONT_PATH_NOTO"]
     if not os.path.exists(_emoji_font_path):
+        logger.warning("Default emoji font '%s' not found. Falling back.", _emoji_font_path)
         _emoji_font_path = _PATHS["DEFAULT_EMOJI_FONT_PATH_SEGOE"]
-    if not os.path.exists(_emoji_font_path):
-        logger.warning("Default Noto/Segoe emoji fonts not found. Falling back.")
-        _linux_emoji_fallbacks = [
-            '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf',
-            '/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf'
-        ]
-        _emoji_font_path = next((p for p in _linux_emoji_fallbacks if os.path.exists(p)), _font_path)
+        if not os.path.exists(_emoji_font_path):
+            logger.warning("Fallback emoji font '%s' not found. Using regular font.", _emoji_font_path)
+            _emoji_font_path = _font_path
     logger.info("Using emoji font: %s", _emoji_font_path)
 
+    # Load fonts globally
     font_m_18 = ImageFont.truetype(_font_path, 18)
     font_m_24 = ImageFont.truetype(_font_path, 24)
     font_b_18 = ImageFont.truetype(_bold_font_path, 18)
     font_b_24 = ImageFont.truetype(_bold_font_path, 24)
     font_b_36 = ImageFont.truetype(_bold_font_path, 36)
-    try:
-        font_b_28 = ImageFont.truetype(_bold_font_path, 28)
-    except IOError:
-        font_b_28 = font_b_24
-        logger.warning("Using size 24 bold as 28 fallback.")
-    try:
-        emoji_font_24 = ImageFont.truetype(_emoji_font_path, 24)
-    except IOError:
-        emoji_font_24 = font_m_24
-        logger.warning("Using regular font as emoji fallback.")
+    font_b_28 = ImageFont.truetype(_bold_font_path, 28)
+    emoji_font_24 = ImageFont.truetype(_emoji_font_path, 24)
     logger.info("Fonts loaded globally.")
 except Exception as e:
     logger.critical("CRITICAL: Error loading fonts: %s", e, exc_info=True)

@@ -319,8 +319,9 @@ class VoiceChannelSelect(discord.ui.Select):
 
 # --- Cog Definition ---
 class AdminCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: commands.Bot, admin_service):
         self.bot = bot
+        self.admin_service = admin_service
 
     @app_commands.command(name="setup", description="Run the interactive server setup.")
     @app_commands.checks.has_permissions(administrator=True)
@@ -328,50 +329,34 @@ class AdminCog(commands.Cog):
         """Starts the interactive server setup process."""
         logger.info(f"Setup command initiated by {interaction.user} in guild {interaction.guild_id}")
         try:
-            # Defer the response since we'll be doing multiple operations
             await interaction.response.defer(ephemeral=True)
-
-            # Check if guild is already set up
             existing_settings = await self.bot.db_manager.fetch_one(
                 "SELECT * FROM guild_settings WHERE guild_id = %s",
                 interaction.guild_id
             )
-
             if existing_settings:
-                # Create view for existing guild
                 view = discord.ui.View(timeout=300)
-                
-                async def update_images_callback(interaction: discord.Interaction):
-                    await self.update_images_callback(interaction)
-                
-                async def full_setup_callback(interaction: discord.Interaction):
-                    await self.full_setup_callback(interaction)
-
-                # Add buttons with callbacks
+                # Use instance methods for callbacks, passing context
+                async def update_images_callback(inner_interaction: discord.Interaction):
+                    await self.update_images_callback(inner_interaction, existing_settings)
+                async def full_setup_callback(inner_interaction: discord.Interaction):
+                    await self.full_setup_callback(inner_interaction)
                 update_images_btn = discord.ui.Button(label="Update Images", style=discord.ButtonStyle.primary)
                 update_images_btn.callback = update_images_callback
                 view.add_item(update_images_btn)
-
                 full_setup_btn = discord.ui.Button(label="Full Setup", style=discord.ButtonStyle.secondary)
                 full_setup_btn.callback = full_setup_callback
                 view.add_item(full_setup_btn)
-                
                 await interaction.followup.send(
                     "Server is already set up. Would you like to update images or run full setup?",
                     view=view,
                     ephemeral=True
                 )
                 return
-
-            # Check if guild has paid subscription
             is_paid = await self.bot.admin_service.check_guild_subscription(interaction.guild_id)
-            
             if not is_paid:
-                # Show subscription modal
                 modal = SubscriptionModal()
                 await interaction.followup.send_modal(modal)
-                
-                # After modal is closed, show subscription view
                 view = SubscriptionView(self.bot, interaction)
                 await interaction.followup.send(
                     "Choose your subscription option:",
@@ -379,7 +364,6 @@ class AdminCog(commands.Cog):
                     ephemeral=True
                 )
             else:
-                # Start paid setup
                 view = GuildSettingsView(self.bot, interaction, is_paid=True)
                 await interaction.followup.send(
                     "Starting server setup...",
@@ -387,7 +371,6 @@ class AdminCog(commands.Cog):
                     ephemeral=True
                 )
                 await view.start_selection()
-
         except Exception as e:
             logger.exception(f"Error initiating setup command: {e}")
             if not interaction.response.is_done():
@@ -434,13 +417,18 @@ class AdminCog(commands.Cog):
                    # May not be possible to followup reliably
                    pass
 
-    async def update_images_callback(self, interaction: discord.Interaction):
+    async def update_images_callback(self, interaction: discord.Interaction, existing_settings=None):
         """Handle update images button click"""
         try:
             await interaction.response.defer()
-            view = GuildSettingsView(self.bot, interaction.guild, self.admin_service, self.original_interaction)
-            view.current_step = 0  # Start from the beginning
-            view.settings = self.settings.copy()  # Copy existing settings
+            view = GuildSettingsView(self.bot, interaction, is_paid=True)
+            if existing_settings:
+                view.settings = dict(existing_settings)
+            await interaction.followup.send(
+                "Update your server images:",
+                view=view,
+                ephemeral=True
+            )
             await view.start_selection()
         except Exception as e:
             logger.error(f"Error in update images callback: {str(e)}")
@@ -453,9 +441,12 @@ class AdminCog(commands.Cog):
         """Handle full setup button click"""
         try:
             await interaction.response.defer()
-            view = GuildSettingsView(self.bot, interaction.guild, self.admin_service, self.original_interaction)
-            view.current_step = 0  # Start from the beginning
-            view.settings = {}  # Start with empty settings
+            view = GuildSettingsView(self.bot, interaction, is_paid=True)
+            await interaction.followup.send(
+                "Starting full server setup...",
+                view=view,
+                ephemeral=True
+            )
             await view.start_selection()
         except Exception as e:
             logger.error(f"Error in full setup callback: {str(e)}")
@@ -467,5 +458,5 @@ class AdminCog(commands.Cog):
 
 # The setup function for the extension
 async def setup(bot: commands.Bot):
-    await bot.add_cog(AdminCog(bot))
+    await bot.add_cog(AdminCog(bot, bot.admin_service))
     logger.info("AdminCog loaded")
