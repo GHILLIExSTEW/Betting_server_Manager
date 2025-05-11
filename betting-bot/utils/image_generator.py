@@ -128,6 +128,14 @@ def load_fonts():
         bold_font_path = os.getenv('FONT_BOLD_PATH')
         emoji_font_path = os.getenv('FONT_EMOJI_PATH')
         
+        # Normalize paths for container environment
+        if font_path:
+            font_path = font_path.replace('\\', '/')
+        if bold_font_path:
+            bold_font_path = bold_font_path.replace('\\', '/')
+        if emoji_font_path:
+            emoji_font_path = emoji_font_path.replace('\\', '/')
+        
         logger.info("Loading fonts from environment variables:")
         logger.info(f"FONT_REGULAR_PATH: {font_path}")
         logger.info(f"FONT_BOLD_PATH: {bold_font_path}")
