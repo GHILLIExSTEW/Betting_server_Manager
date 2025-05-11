@@ -440,6 +440,13 @@ class BetDetailsModal(Modal):
                         "Failed to create bet record (no serial returned)."
                     )
                 self.view.bet_details["bet_serial"] = bet_serial
+                # Set bet details attributes
+                self.view.home_team = team
+                self.view.away_team = opponent
+                self.view.league = self.view.bet_details.get("league", "UNKNOWN")
+                self.view.line = line
+                self.view.odds = odds_val
+                self.view.bet_id = str(bet_serial)
                 logger.debug(f"Bet record {bet_serial} created from modal.")
                 await self.view._preload_team_logos(
                     team,
@@ -531,6 +538,7 @@ class UnitsSelect(Select):
         )
         self.disabled = True
         await interaction.response.defer()
+        await self.parent_view._handle_units_selection(interaction, float(self.values[0]))
         await self.parent_view.go_next(interaction)
 
 
@@ -618,6 +626,13 @@ class StraightBetWorkflowView(View):
         self.bet_slip_generator = None  # Will be initialized when needed
         self.preview_image_bytes: Optional[io.BytesIO] = None
         self.team_logos: Dict[str, Optional[str]] = {}
+        # Initialize bet details attributes
+        self.home_team = None
+        self.away_team = None
+        self.league = None
+        self.line = None
+        self.odds = None
+        self.bet_id = None
 
     async def get_bet_slip_generator(self) -> BetSlipGenerator:
         """Get the BetSlipGenerator for the current guild."""
@@ -919,3 +934,39 @@ class StraightBetWorkflowView(View):
         finally:
             if self.preview_image_bytes: self.preview_image_bytes.close()
             self.stop()
+
+    async def _handle_units_selection(self, interaction: Interaction, units: float):
+        self.units = units
+        self.current_step = 6
+        self.update_view()
+        
+        # Initialize bet_slip_generator if not already initialized
+        if self.bet_slip_generator is None:
+            self.bet_slip_generator = await self.bot.get_bet_slip_generator(self.original_interaction.guild_id)
+            
+        # Generate bet slip preview
+        try:
+            bet_slip = self.bet_slip_generator.generate_bet_slip(
+                home_team=self.home_team,
+                away_team=self.away_team,
+                league=self.league,
+                line=self.line,
+                odds=self.odds,
+                units=self.units,
+                bet_id=self.bet_id,
+                timestamp=datetime.now(timezone.utc),
+                bet_type="straight"
+            )
+            if bet_slip:
+                buffer = io.BytesIO()
+                bet_slip.save(buffer, format="PNG")
+                buffer.seek(0)
+                file = discord.File(buffer, filename="bet_slip.png")
+                await self.message.edit(content=self.get_content(), view=self, attachments=[file])
+                logger.debug(f"Bet slip preview generated and attached for bet {self.bet_id}")
+            else:
+                logger.warning(f"Failed to generate bet slip preview for bet {self.bet_id}")
+                await self.message.edit(content=self.get_content(), view=self)
+        except Exception as e:
+            logger.exception(f"Error generating bet slip preview: {e}")
+            await self.message.edit(content=self.get_content(), view=self)
