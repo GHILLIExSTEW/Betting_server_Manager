@@ -9,14 +9,9 @@ from discord.ui import View, Select, Button
 import logging
 from typing import Optional
 
-# Ensure correct relative imports for when this is part of the package
-try:
-    from .straight_betting import StraightBetWorkflowView
-    from .parlay_betting import ParlayBetWorkflowView
-except ImportError:  # Fallback for potential direct execution or different context
-    from straight_betting import StraightBetWorkflowView
-    from parlay_betting import ParlayBetWorkflowView
-
+# Import from same directory
+from straight_betting import StraightBetWorkflowView
+from parlay_betting import ParlayBetWorkflowView
 
 logger = logging.getLogger(__name__)
 
@@ -222,16 +217,11 @@ class BettingCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    cog = BettingCog(bot)
-    await bot.add_cog(cog)
-    
-    # Register the bet command with the guild
+    """Adds the betting cog to the bot."""
     try:
-        guild = bot.guilds[0]  # Get the first guild the bot is in
-        if guild:
-            await bot.tree.sync(guild=guild)
-            logger.info(f"Bet command synced with guild {guild.name} (ID: {guild.id})")
+        cog = BettingCog(bot)
+        await bot.add_cog(cog)
+        logger.info("BettingCog loaded successfully")
     except Exception as e:
-        logger.error(f"Failed to sync bet command with guild: {e}")
-    
-    logger.info("BettingCog setup completed and added to bot")
+        logger.error(f"Failed to load BettingCog: {e}")
+        raise
