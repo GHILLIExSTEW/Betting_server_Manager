@@ -434,9 +434,6 @@ class TextInputModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            # Defer the interaction first
-            await interaction.response.defer(ephemeral=True)
-            
             value = self.children[0].value.strip()
             view = self.view
             
@@ -453,22 +450,18 @@ class TextInputModal(discord.ui.Modal):
             while view.current_step < len(view.SETUP_STEPS):
                 step = view.SETUP_STEPS[view.current_step]
                 if step.get('is_premium_only', False) and step['select'] is None:
-                    # Send a message first
-                    await interaction.followup.send(
-                        f"Please provide the {step['name'].lower()}:",
-                        ephemeral=True
-                    )
-                    # Create and send the next modal through a new interaction
+                    # Create and send the next modal through interaction response
                     next_modal = TextInputModal(
                         title=f"Enter {step['name']}", 
                         setting_key=step['setting_key']
                     )
                     next_modal.view = view
-                    await interaction.followup.send_modal(next_modal)
+                    await interaction.response.send_modal(next_modal)
                     return
                 view.current_step += 1
             
             # If we've gone through all steps, finalize
+            await interaction.response.defer(ephemeral=True)
             await view.finalize_setup(interaction)
             
         except Exception as e:
