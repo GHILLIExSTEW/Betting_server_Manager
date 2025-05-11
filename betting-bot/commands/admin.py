@@ -148,105 +148,103 @@ class SubscriptionView(discord.ui.View):
         self.stop()
 
 class GuildSettingsView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, interaction: discord.Interaction, is_paid: bool = False, is_image_setup: bool = False):
+    """View for guild settings setup"""
+    
+    SETUP_STEPS = [
+        {
+            'name': 'Embed Channel',
+            'select': ChannelSelect,
+            'options': lambda guild: [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels],
+            'setting_key': 'embed_channel_id'
+        },
+        {
+            'name': 'Command Channel',
+            'select': ChannelSelect,
+            'options': lambda guild: [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels],
+            'setting_key': 'command_channel_id'
+        },
+        {
+            'name': 'Admin Channel',
+            'select': ChannelSelect,
+            'options': lambda guild: [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels],
+            'setting_key': 'admin_channel_id'
+        },
+        {
+            'name': 'Admin Role',
+            'select': RoleSelect,
+            'options': lambda guild: [discord.SelectOption(label=role.name, value=str(role.id)) for role in guild.roles],
+            'setting_key': 'admin_role_id'
+        },
+        {
+            'name': 'Authorized Role',
+            'select': RoleSelect,
+            'options': lambda guild: [discord.SelectOption(label=role.name, value=str(role.id)) for role in guild.roles],
+            'setting_key': 'authorized_role_id'
+        },
+        {
+            'name': 'Member Role',
+            'select': RoleSelect,
+            'options': lambda guild: [discord.SelectOption(label=role.name, value=str(role.id)) for role in guild.roles],
+            'setting_key': 'member_role_id'
+        }
+    ]
+
+    def __init__(self, bot, guild, admin_service, original_interaction):
         super().__init__(timeout=300)
         self.bot = bot
-        self.original_interaction = interaction
-        self.guild = interaction.guild
-        self.settings = {}
+        self.guild = guild
+        self.admin_service = admin_service
+        self.original_interaction = original_interaction
         self.current_step = 0
-        self.is_paid = is_paid
-        self.is_image_setup = is_image_setup
-        
-        # Filter channels/roles accessible by the bot and sort them
-        self.text_channels = sorted(
-            [c for c in self.guild.text_channels if c.permissions_for(self.guild.me).view_channel],
-            key=lambda c: c.position
-        )
-        self.voice_channels = sorted(
-            [c for c in self.guild.voice_channels if c.permissions_for(self.guild.me).view_channel],
-            key=lambda c: c.position
-        )
-        self.roles = sorted(
-            [r for r in self.guild.roles if r.id != self.guild.id and not r.is_default()],
-            key=lambda r: r.position,
-            reverse=True
-        )
-
-        # Define steps based on tier and setup type
-        if is_image_setup:
-            self.steps = [
-                ("Set Guild Background Image URL", "guild_background", None, None),
-                ("Set Default Image URL", "guild_default_image", None, None),
-                ("Set Default Parlay Image URL", "default_parlay_thumbnail", None, None)
-            ]
-        else:
-            self.steps = []
-            # Free tier steps
-            self.steps.extend([
-                ("Select Embed Channel", "embed_channel_1", self.text_channels, ChannelSelect),
-                ("Select Command Channel", "command_channel_1", self.text_channels, ChannelSelect),
-                ("Select Admin Channel", "admin_channel_1", self.text_channels, ChannelSelect),
-                ("Select Admin Role", "admin_role", self.roles, RoleSelect),
-                ("Select Authorized Role (Capper Role)", "authorized_role", self.roles, RoleSelect),
-                ("Select Member Role", "member_role", self.roles, RoleSelect)
-            ])
-            
-            # Paid tier additional steps
-            if is_paid:
-                self.steps.extend([
-                    ("Select Second Embed Channel", "embed_channel_2", self.text_channels, ChannelSelect),
-                    ("Select Second Command Channel", "command_channel_2", self.text_channels, ChannelSelect),
-                    ("Select Voice Channel for Monthly Updates", "voice_channel_id", self.voice_channels, VoiceChannelSelect),
-                    ("Select Voice Channel for Yearly Updates", "yearly_channel_id", self.voice_channels, VoiceChannelSelect),
-                    ("Set Minimum Unit Value", "min_units", None, None),
-                    ("Set Maximum Unit Value", "max_units", None, None),
-                    ("Set Daily Report Time (HH:MM)", "daily_report_time", None, None),
-                    ("Set Bot Name Mask", "bot_name_mask", None, None),
-                    ("Set Bot Image Mask", "bot_image_mask", None, None),
-                    ("Set Guild Background Image URL", "guild_background", None, None),
-                    ("Set Default Image URL", "guild_default_image", None, None),
-                    ("Set Default Parlay Image URL", "default_parlay_thumbnail", None, None)
-                ])
+        self.settings = {}
+        self.is_paid = False
 
     async def start_selection(self):
-        """Sends the initial message and starts the selection process."""
-        await self.process_next_selection(self.original_interaction, initial=True)
+        """Start the selection process"""
+        try:
+            await self.process_next_selection(self.original_interaction, initial=True)
+        except Exception as e:
+            logger.error(f"Error in start_selection: {str(e)}")
+            if not self.original_interaction.response.is_done():
+                await self.original_interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
+            else:
+                await self.original_interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
 
     async def process_next_selection(self, interaction: discord.Interaction, initial: bool = False):
-        """Processes the next selection step or saves settings."""
-        if self.current_step >= len(self.steps):
-            await self.save_settings(interaction)
-            return
-
-        step_title, setting_key, options, select_class = self.steps[self.current_step]
-        self.clear_items()
-
-        if select_class:
-            if not options:
-                await interaction.edit_original_response(
-                    content="❌ No available options found. Please ensure the bot has proper permissions.",
-                    view=None
-                )
-                self.stop()
+        """Process the next selection step"""
+        try:
+            if self.current_step >= len(self.SETUP_STEPS):
+                await self.finalize_setup(interaction)
                 return
 
-            select = select_class(self, options)
-            self.add_item(select)
-            self.add_item(CancelButton(self))
+            step = self.SETUP_STEPS[self.current_step]
+            select_class = step['select']
+            options = await step['options'](interaction.guild)
 
-            content = f"**Step {self.current_step + 1}**: {step_title}"
-            if initial:
-                await interaction.edit_original_response(content=content, view=self)
+            if not options:
+                await interaction.followup.send(f"No {step['name'].lower()} found. Please create one and try again.", ephemeral=True)
+                return
+
+            if select_class == ChannelSelect:
+                select = select_class(self, options, step['setting_key'])
             else:
-                await interaction.response.edit_message(content=content, view=self)
-        else:
-            # Handle text input for non-select options
-            modal = TextInputModal(step_title, setting_key)
-            await interaction.response.send_modal(modal)
-            self.current_step += 1
+                select = select_class(self, options)
 
-    async def save_settings(self, interaction: discord.Interaction):
+            view = discord.ui.View(timeout=300)
+            view.add_item(select)
+            
+            if not initial:
+                await interaction.response.send_message(f"Select a {step['name']}:", view=view, ephemeral=True)
+            else:
+                await interaction.followup.send(f"Select a {step['name']}:", view=view, ephemeral=True)
+        except Exception as e:
+            logger.error(f"Error in process_next_selection: {str(e)}")
+            if not interaction.response.is_done():
+                await interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
+            else:
+                await interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
+
+    async def finalize_setup(self, interaction: discord.Interaction):
         """Saves the collected settings to the database."""
         try:
             # Ensure assets/logos/guild_id exists
@@ -258,14 +256,12 @@ class GuildSettingsView(discord.ui.View):
             final_settings = {}
             for k, v in self.settings.items():
                 if v and v != "none":
-                    if k in ['embed_channel_1', 'embed_channel_2', 'command_channel_1', 'command_channel_2',
-                           'admin_channel_1', 'admin_role', 'authorized_role', 'member_role',
-                           'voice_channel_id', 'yearly_channel_id']:
+                    if k in ['embed_channel_id', 'command_channel_id', 'admin_channel_id', 'admin_role_id', 'authorized_role_id', 'member_role_id']:
                         final_settings[k] = int(v)
                     else:
                         final_settings[k] = v
 
-            await self.bot.admin_service.setup_guild(interaction.guild_id, final_settings)
+            await self.admin_service.setup_guild(interaction.guild_id, final_settings)
             await interaction.edit_original_response(
                 content="✅ Guild setup completed successfully!",
                 view=None
@@ -346,14 +342,10 @@ class AdminCog(commands.Cog):
                 view = discord.ui.View(timeout=300)
                 
                 async def update_images_callback(interaction: discord.Interaction):
-                    await interaction.response.defer(ephemeral=True)
-                    view = GuildSettingsView(self.bot, interaction, is_paid=existing_settings.get('is_paid', False), is_image_setup=True)
-                    await view.start_selection()
+                    await self.update_images_callback(interaction)
                 
                 async def full_setup_callback(interaction: discord.Interaction):
-                    await interaction.response.defer(ephemeral=True)
-                    view = GuildSettingsView(self.bot, interaction, is_paid=existing_settings.get('is_paid', False))
-                    await view.start_selection()
+                    await self.full_setup_callback(interaction)
 
                 # Add buttons with callbacks
                 update_images_btn = discord.ui.Button(label="Update Images", style=discord.ButtonStyle.primary)
@@ -441,6 +433,36 @@ class AdminCog(commands.Cog):
               else:
                    # May not be possible to followup reliably
                    pass
+
+    async def update_images_callback(self, interaction: discord.Interaction):
+        """Handle update images button click"""
+        try:
+            await interaction.response.defer()
+            view = GuildSettingsView(self.bot, interaction.guild, self.admin_service, self.original_interaction)
+            view.current_step = 0  # Start from the beginning
+            view.settings = self.settings.copy()  # Copy existing settings
+            await view.start_selection()
+        except Exception as e:
+            logger.error(f"Error in update images callback: {str(e)}")
+            if not interaction.response.is_done():
+                await interaction.followup.send("An error occurred while updating images. Please try again.", ephemeral=True)
+            else:
+                await interaction.followup.send("An error occurred while updating images. Please try again.", ephemeral=True)
+
+    async def full_setup_callback(self, interaction: discord.Interaction):
+        """Handle full setup button click"""
+        try:
+            await interaction.response.defer()
+            view = GuildSettingsView(self.bot, interaction.guild, self.admin_service, self.original_interaction)
+            view.current_step = 0  # Start from the beginning
+            view.settings = {}  # Start with empty settings
+            await view.start_selection()
+        except Exception as e:
+            logger.error(f"Error in full setup callback: {str(e)}")
+            if not interaction.response.is_done():
+                await interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
+            else:
+                await interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
 
 
 # The setup function for the extension
