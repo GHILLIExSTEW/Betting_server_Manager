@@ -322,7 +322,44 @@ class UnitsSelect(Select):
         logger.debug(f"Total units selected for parlay: {units_str_val} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
-        await self.parent_view.go_next(interaction) 
+        # Generate bet slip preview
+        try:
+            if self.parent_view.bet_slip_generator is None:
+                self.parent_view.bet_slip_generator = await self.parent_view.bot.get_bet_slip_generator(self.parent_view.original_interaction.guild_id)
+            
+            legs = self.parent_view.bet_details.get('legs', [])
+            if not legs:
+                logger.error("No legs found in parlay bet details")
+                return
+                
+            league = legs[0].get('league', 'UNKNOWN_LEAGUE')
+            game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
+            is_sgp = len(game_ids) == 1 and len(legs) > 1
+            
+            bet_slip = self.parent_view.bet_slip_generator.generate_bet_slip(
+                home_team=legs[0].get('team', 'N/A'),
+                away_team=legs[0].get('opponent', 'N/A'),
+                league=league,
+                line="Parlay",
+                odds=float(self.parent_view.bet_details.get('total_odds', 0)),
+                units=float(units_str_val),
+                bet_id=str(self.parent_view.bet_details.get('bet_serial', '')),
+                timestamp=datetime.now(timezone.utc),
+                bet_type="parlay",
+                parlay_legs=legs,
+                is_same_game=is_sgp
+            )
+            
+            if bet_slip:
+                buffer = io.BytesIO()
+                bet_slip.save(buffer, format="PNG")
+                buffer.seek(0)
+                await self.parent_view.message.edit(attachments=[discord.File(buffer, filename="parlay_slip.png")])
+                logger.debug("Parlay bet slip preview generated and attached")
+        except Exception as e:
+            logger.exception(f"Error generating parlay bet slip preview: {e}")
+            # Continue with the workflow even if image generation fails
+        await self.parent_view.go_next(interaction)
 
 
 class AddLegButton(Button):
