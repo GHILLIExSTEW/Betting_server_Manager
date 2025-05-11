@@ -129,20 +129,30 @@ def load_fonts():
         emoji_font_path = os.getenv('FONT_EMOJI_PATH')
         
         logger.info("Loading fonts from environment variables:")
-        logger.info(f"Regular font path: {font_path}")
-        logger.info(f"Bold font path: {bold_font_path}")
-        logger.info(f"Emoji font path: {emoji_font_path}")
+        logger.info(f"FONT_REGULAR_PATH: {font_path}")
+        logger.info(f"FONT_BOLD_PATH: {bold_font_path}")
+        logger.info(f"FONT_EMOJI_PATH: {emoji_font_path}")
         
         # Check if all required font paths are set
         if not all([font_path, bold_font_path, emoji_font_path]):
-            logger.warning("Not all font paths are set in environment variables")
-            logger.warning("FONT_REGULAR_PATH, FONT_BOLD_PATH, and FONT_EMOJI_PATH must be set")
-            raise ValueError("Missing required font paths in environment variables")
+            missing = []
+            if not font_path: missing.append('FONT_REGULAR_PATH')
+            if not bold_font_path: missing.append('FONT_BOLD_PATH')
+            if not emoji_font_path: missing.append('FONT_EMOJI_PATH')
+            logger.warning(f"Missing environment variables: {', '.join(missing)}")
+            raise ValueError(f"Missing required font paths in environment variables: {', '.join(missing)}")
         
         # Check if fonts exist at specified paths
-        if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
-            logger.error("One or more font files not found at specified paths")
-            raise FileNotFoundError("Font files not found at specified paths")
+        missing_files = []
+        if not os.path.exists(font_path): missing_files.append(font_path)
+        if not os.path.exists(bold_font_path): missing_files.append(bold_font_path)
+        if not os.path.exists(emoji_font_path): missing_files.append(emoji_font_path)
+        
+        if missing_files:
+            logger.error("Font files not found at these paths:")
+            for path in missing_files:
+                logger.error(f"  - {path}")
+            raise FileNotFoundError(f"Font files not found at specified paths: {', '.join(missing_files)}")
 
         # Load fonts with proper error handling
         logger.info("Loading fonts from specified paths...")
