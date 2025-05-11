@@ -119,45 +119,70 @@ _PATHS = {
     "DEFAULT_TEAM_LOGO_PATH": os.path.join(LOGO_DIR, "default_logo.png"),
 }
 
-try:
-    _font_path = _PATHS["DEFAULT_FONT_PATH"]
-    if not os.path.exists(_font_path):
-        logger.warning("Default font '%s' not found. Falling back.", _font_path)
-        _linux_fallbacks = [
-            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
-        ]
-        _font_path = next((p for p in _linux_fallbacks if os.path.exists(p)), 'arial.ttf')
-    logger.info("Using regular font: %s", _font_path)
+def load_fonts():
+    """Load fonts with proper fallbacks."""
+    fonts = {}
+    try:
+        # Try to load fonts from the assets directory first
+        font_path = os.path.join(ASSETS_DIR, "fonts", "Roboto-Regular.ttf")
+        bold_font_path = os.path.join(ASSETS_DIR, "fonts", "Roboto-Bold.ttf")
+        emoji_font_path = os.path.join(ASSETS_DIR, "fonts", "NotoColorEmoji-Regular.ttf")
+        
+        # Check if fonts exist in assets
+        if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
+            logger.warning("Font files not found in assets directory, trying system fonts")
+            
+            # Windows fallback paths
+            if os.name == 'nt':
+                font_path = os.path.join(os.environ['WINDIR'], 'Fonts', 'arial.ttf')
+                bold_font_path = os.path.join(os.environ['WINDIR'], 'Fonts', 'arialbd.ttf')
+                emoji_font_path = os.path.join(os.environ['WINDIR'], 'Fonts', 'seguiemj.ttf')
+            else:
+                # Linux/Unix fallback paths
+                font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+                bold_font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+                emoji_font_path = '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf'
+            
+            if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
+                logger.warning("System fonts not found, using default font")
+                default_font = ImageFont.load_default()
+                return {
+                    'font_m_18': default_font,
+                    'font_m_24': default_font,
+                    'font_b_18': default_font,
+                    'font_b_24': default_font,
+                    'font_b_36': default_font,
+                    'font_b_28': default_font,
+                    'emoji_font_24': default_font
+                }
 
-    _bold_font_path = _PATHS["DEFAULT_BOLD_FONT_PATH"]
-    if not os.path.exists(_bold_font_path):
-        logger.warning("Default bold font '%s' not found. Falling back.", _bold_font_path)
-        _bold_font_path = _font_path
-    logger.info("Using bold font: %s", _bold_font_path)
+        # Load fonts with proper error handling
+        fonts['font_m_18'] = ImageFont.truetype(font_path, 18)
+        fonts['font_m_24'] = ImageFont.truetype(font_path, 24)
+        fonts['font_b_18'] = ImageFont.truetype(bold_font_path, 18)
+        fonts['font_b_24'] = ImageFont.truetype(bold_font_path, 24)
+        fonts['font_b_36'] = ImageFont.truetype(bold_font_path, 36)
+        fonts['font_b_28'] = ImageFont.truetype(bold_font_path, 28)
+        fonts['emoji_font_24'] = ImageFont.truetype(emoji_font_path, 24)
+        
+        logger.info("Successfully loaded all fonts")
+        return fonts
+        
+    except Exception as e:
+        logger.error(f"Error loading fonts: {e}")
+        default_font = ImageFont.load_default()
+        return {
+            'font_m_18': default_font,
+            'font_m_24': default_font,
+            'font_b_18': default_font,
+            'font_b_24': default_font,
+            'font_b_36': default_font,
+            'font_b_28': default_font,
+            'emoji_font_24': default_font
+        }
 
-    _emoji_font_path = _PATHS["DEFAULT_EMOJI_FONT_PATH_NOTO"]
-    if not os.path.exists(_emoji_font_path):
-        logger.warning("Default emoji font '%s' not found. Falling back.", _emoji_font_path)
-        _emoji_font_path = _PATHS["DEFAULT_EMOJI_FONT_PATH_SEGOE"]
-        if not os.path.exists(_emoji_font_path):
-            logger.warning("Fallback emoji font '%s' not found. Using regular font.", _emoji_font_path)
-            _emoji_font_path = _font_path
-    logger.info("Using emoji font: %s", _emoji_font_path)
-
-    # Load fonts globally
-    font_m_18 = ImageFont.truetype(_font_path, 18)
-    font_m_24 = ImageFont.truetype(_font_path, 24)
-    font_b_18 = ImageFont.truetype(_bold_font_path, 18)
-    font_b_24 = ImageFont.truetype(_bold_font_path, 24)
-    font_b_36 = ImageFont.truetype(_bold_font_path, 36)
-    font_b_28 = ImageFont.truetype(_bold_font_path, 28)
-    emoji_font_24 = ImageFont.truetype(_emoji_font_path, 24)
-    logger.info("Fonts loaded globally.")
-except Exception as e:
-    logger.critical("CRITICAL: Error loading fonts: %s", e, exc_info=True)
-    font_m_18 = font_m_24 = font_b_18 = font_b_24 = font_b_36 = font_b_28 = emoji_font_24 = ImageFont.load_default()
-
+# Load fonts globally
+FONTS = load_fonts()
 
 class BetSlipGenerator:
     def __init__(self, guild_id: Optional[int] = None):
@@ -172,7 +197,16 @@ class BetSlipGenerator:
         self._last_cache_cleanup = time.time()
         self._cache_expiry = 300  # 5 minutes
         self._max_cache_size = 100
-        self._load_fonts()
+        
+        # Use the globally loaded fonts
+        self.font_m_18 = FONTS['font_m_18']
+        self.font_m_24 = FONTS['font_m_24']
+        self.font_b_18 = FONTS['font_b_18']
+        self.font_b_24 = FONTS['font_b_24']
+        self.font_b_36 = FONTS['font_b_36']
+        self.font_b_28 = FONTS['font_b_28']
+        self.emoji_font_24 = FONTS['emoji_font_24']
+        
         self.background = None
         self.team_logos = {}
         self._load_team_logos()
