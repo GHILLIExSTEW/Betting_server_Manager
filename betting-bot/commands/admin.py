@@ -29,9 +29,9 @@ class ChannelSelect(discord.ui.Select):
     """Select menu for choosing text channels."""
     def __init__(self, channels: List[TextChannel], placeholder: str, setting_key: str, max_options=25):
         # Filter out channels that have already been selected for this type
-        if setting_key == 'embed_channel_id' and hasattr(self.view, 'embed_channels'):
+        if setting_key == 'embed_channel_id' and hasattr(self, 'view') and hasattr(self.view, 'embed_channels'):
             channels = [ch for ch in channels if str(ch.id) not in self.view.embed_channels]
-        elif setting_key == 'command_channel_id' and hasattr(self.view, 'command_channels'):
+        elif setting_key == 'command_channel_id' and hasattr(self, 'view') and hasattr(self.view, 'command_channels'):
             channels = [ch for ch in channels if str(ch.id) not in self.view.command_channels]
 
         options = [
@@ -493,6 +493,7 @@ class AdminCog(commands.Cog):
         """Handle update images button click"""
         try:
             await interaction.response.defer()
+            # Create a new view for image URL requests
             view = GuildSettingsView(
                 bot=self.bot,
                 guild=interaction.guild,
@@ -502,11 +503,15 @@ class AdminCog(commands.Cog):
             )
             if existing_settings:
                 view.settings = dict(existing_settings)
+            
+            # Skip to image URL requests
+            view.current_step = len(view.SETUP_STEPS)  # Set to last step to trigger finalize
             await interaction.followup.send(
-                "Update your server images:",
+                "Please provide the image URLs for your server:",
                 view=view,
                 ephemeral=True
             )
+            # Start with image URL requests
             await view.start_selection()
         except Exception as e:
             logger.error(f"Error in update images callback: {str(e)}")
