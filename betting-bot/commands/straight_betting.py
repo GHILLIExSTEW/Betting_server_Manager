@@ -446,6 +446,30 @@ class BetDetailsModal(Modal):
                     opponent,
                     self.view.bet_details.get("league", "UNKNOWN"),
                 )
+
+                # Generate bet slip image
+                try:
+                    bet_slip_generator = await self.view.get_bet_slip_generator()
+                    bet_slip_image = bet_slip_generator.generate_bet_slip(
+                        home_team=team,
+                        away_team=opponent,
+                        league=self.view.bet_details.get("league", "UNKNOWN"),
+                        line=line,
+                        odds=odds_val,
+                        units=1.0,
+                        bet_id=str(bet_serial),
+                        timestamp=datetime.now(timezone.utc),
+                        bet_type="straight"
+                    )
+                    if bet_slip_image:
+                        self.view.preview_image_bytes = io.BytesIO()
+                        bet_slip_image.save(self.view.preview_image_bytes, format='PNG')
+                        logger.debug(f"Bet slip image generated for bet {bet_serial}")
+                    else:
+                        logger.warning(f"Failed to generate bet slip image for bet {bet_serial}")
+                except Exception as e:
+                    logger.exception(f"Error generating bet slip image: {e}")
+                    # Continue with the workflow even if image generation fails
             except Exception as e:
                 logger.exception(f"Failed to create bet from modal: {e}")
                 await interaction.followup.send(
