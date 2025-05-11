@@ -123,32 +123,15 @@ def load_fonts():
     """Load fonts with proper fallbacks."""
     fonts = {}
     try:
-        # Get font paths from environment variables
-        font_path = os.getenv('FONT_REGULAR_PATH')
-        bold_font_path = os.getenv('FONT_BOLD_PATH')
-        emoji_font_path = os.getenv('FONT_EMOJI_PATH')
+        # Use relative paths from project root
+        font_path = os.path.join(BASE_DIR, "assets", "fonts", "Roboto-Regular.ttf")
+        bold_font_path = os.path.join(BASE_DIR, "assets", "fonts", "Roboto-Bold.ttf")
+        emoji_font_path = os.path.join(BASE_DIR, "assets", "fonts", "NotoColorEmoji-Regular.ttf")
         
-        # Convert to full paths from /home
-        if font_path:
-            font_path = f"/home/container/betting-bot/{font_path.lstrip('/')}"
-        if bold_font_path:
-            bold_font_path = f"/home/container/betting-bot/{bold_font_path.lstrip('/')}"
-        if emoji_font_path:
-            emoji_font_path = f"/home/container/betting-bot/{emoji_font_path.lstrip('/')}"
-        
-        logger.info("Loading fonts from environment variables:")
-        logger.info(f"FONT_REGULAR_PATH: {font_path}")
-        logger.info(f"FONT_BOLD_PATH: {bold_font_path}")
-        logger.info(f"FONT_EMOJI_PATH: {emoji_font_path}")
-        
-        # Check if all required font paths are set
-        if not all([font_path, bold_font_path, emoji_font_path]):
-            missing = []
-            if not font_path: missing.append('FONT_REGULAR_PATH')
-            if not bold_font_path: missing.append('FONT_BOLD_PATH')
-            if not emoji_font_path: missing.append('FONT_EMOJI_PATH')
-            logger.warning(f"Missing environment variables: {', '.join(missing)}")
-            raise ValueError(f"Missing required font paths in environment variables: {', '.join(missing)}")
+        logger.info("Loading fonts from paths:")
+        logger.info(f"Regular font: {font_path}")
+        logger.info(f"Bold font: {bold_font_path}")
+        logger.info(f"Emoji font: {emoji_font_path}")
         
         # Check if fonts exist at specified paths
         missing_files = []
