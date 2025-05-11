@@ -261,19 +261,19 @@ class GuildSettingsView(discord.ui.View):
         },
         {
             'name': 'Bot Avatar URL',
-            'select': None,  # This will be handled by TextInputModal
+            'select': None,  # This will be handled by message input
             'setting_key': 'bot_image_mask',
             'is_premium_only': True
         },
         {
             'name': 'Guild Background URL',
-            'select': None,  # This will be handled by TextInputModal
+            'select': None,  # This will be handled by message input
             'setting_key': 'guild_background',
             'is_premium_only': True
         },
         {
             'name': 'Default Parlay Image',
-            'select': None,  # This will be handled by TextInputModal
+            'select': None,  # This will be handled by message input
             'setting_key': 'default_parlay_image',
             'is_premium_only': True
         }
@@ -292,6 +292,7 @@ class GuildSettingsView(discord.ui.View):
         self.subscription_level = subscription_level
         self.embed_channels = []  # Track selected embed channels
         self.command_channels = []  # Track selected command channels
+        self.waiting_for_url = False  # Track if we're waiting for a URL input
 
     async def start_selection(self):
         """Start the selection process"""
@@ -319,20 +320,19 @@ class GuildSettingsView(discord.ui.View):
                 await self.process_next_selection(interaction)
                 return
 
-            # Handle text input steps (for image URLs)
+            # Handle URL input steps
             if step['select'] is None:
-                modal = TextInputModal(title=f"Enter {step['name']}", setting_key=step['setting_key'])
-                modal.view = self
+                self.waiting_for_url = True
                 if not interaction.response.is_done():
-                    await interaction.response.send_modal(modal)
-                else:
-                    # If we can't send a modal, send a message with instructions
-                    await interaction.followup.send(
-                        f"Please use the `/setid` command to set your {step['name'].lower()}.",
+                    await interaction.response.send_message(
+                        f"Please provide the {step['name'].lower()} or type 'skip' to skip this step:",
                         ephemeral=True
                     )
-                    self.current_step += 1
-                    await self.process_next_selection(interaction)
+                else:
+                    await interaction.followup.send(
+                        f"Please provide the {step['name'].lower()} or type 'skip' to skip this step:",
+                        ephemeral=True
+                    )
                 return
 
             # For selection steps, defer the interaction
@@ -391,12 +391,43 @@ class GuildSettingsView(discord.ui.View):
             else:
                 await interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
 
-    async def finalize_setup(self, interaction: discord.Interaction):
+    async def handle_url_input(self, message: discord.Message):
+        """Handle URL input from user"""
+        if not self.waiting_for_url:
+            return
+
+        step = self.SETUP_STEPS[self.current_step]
+        content = message.content.strip().lower()
+
+        if content == 'skip':
+            self.settings[step['setting_key']] = None
+        else:
+            self.settings[step['setting_key']] = message.content.strip()
+
+        self.waiting_for_url = False
+        self.current_step += 1
+
+        # Check if there are more URL steps
+        while self.current_step < len(self.SETUP_STEPS):
+            next_step = self.SETUP_STEPS[self.current_step]
+            if next_step.get('is_premium_only', False) and next_step['select'] is None:
+                await message.channel.send(
+                    f"Please provide the {next_step['name'].lower()} or type 'skip' to skip this step:",
+                    ephemeral=True
+                )
+                self.waiting_for_url = True
+                return
+            self.current_step += 1
+
+        # If we've gone through all steps, finalize
+        await self.finalize_setup(message)
+
+    async def finalize_setup(self, interaction_or_message):
         """Saves the collected settings to the database."""
         try:
             # Ensure assets/logos/guild_id exists
             base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            guild_logos_dir = os.path.join(base_dir, 'assets', 'logos', str(interaction.guild.id))
+            guild_logos_dir = os.path.join(base_dir, 'assets', 'logos', str(self.guild.id))
             os.makedirs(guild_logos_dir, exist_ok=True)
 
             # Convert selected IDs from string to int before saving
@@ -408,68 +439,32 @@ class GuildSettingsView(discord.ui.View):
                     else:
                         final_settings[k] = v
 
-            await self.admin_service.setup_guild(interaction.guild_id, final_settings)
-            await interaction.edit_original_response(
-                content="✅ Guild setup completed successfully!",
-                view=None
-            )
+            await self.admin_service.setup_guild(self.guild.id, final_settings)
+            
+            if isinstance(interaction_or_message, discord.Interaction):
+                await interaction_or_message.edit_original_response(
+                    content="✅ Guild setup completed successfully!",
+                    view=None
+                )
+            else:
+                await interaction_or_message.channel.send(
+                    "✅ Guild setup completed successfully!",
+                    ephemeral=True
+                )
         except Exception as e:
             logger.exception(f"Error saving guild settings: {e}")
-            await interaction.edit_original_response(
-                content="❌ An error occurred while saving settings.",
-                view=None
-            )
+            if isinstance(interaction_or_message, discord.Interaction):
+                await interaction_or_message.edit_original_response(
+                    content="❌ An error occurred while saving settings.",
+                    view=None
+                )
+            else:
+                await interaction_or_message.channel.send(
+                    "❌ An error occurred while saving settings.",
+                    ephemeral=True
+                )
         finally:
             self.stop()
-
-class TextInputModal(discord.ui.Modal):
-    def __init__(self, title: str, setting_key: str):
-        super().__init__(title=title)
-        self.setting_key = setting_key
-        self.add_item(discord.ui.TextInput(
-            label=title,
-            placeholder=f"Enter {title.lower()} (leave blank to skip)",
-            required=False
-        ))
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            value = self.children[0].value.strip()
-            view = self.view
-            
-            # If value is blank, set to None (will be NULL in database)
-            if not value:
-                view.settings[self.setting_key] = None
-            else:
-                view.settings[self.setting_key] = value
-            
-            # Move to next step
-            view.current_step += 1
-            
-            # Check if there are more image URL steps
-            while view.current_step < len(view.SETUP_STEPS):
-                step = view.SETUP_STEPS[view.current_step]
-                if step.get('is_premium_only', False) and step['select'] is None:
-                    # Create and send the next modal through interaction response
-                    next_modal = TextInputModal(
-                        title=f"Enter {step['name']}", 
-                        setting_key=step['setting_key']
-                    )
-                    next_modal.view = view
-                    await interaction.response.send_modal(next_modal)
-                    return
-                view.current_step += 1
-            
-            # If we've gone through all steps, finalize
-            await interaction.response.defer(ephemeral=True)
-            await view.finalize_setup(interaction)
-            
-        except Exception as e:
-            logger.error(f"Error in TextInputModal submission: {str(e)}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message("An error occurred while processing your input. Please try again.", ephemeral=True)
-            else:
-                await interaction.followup.send("An error occurred while processing your input. Please try again.", ephemeral=True)
 
 class VoiceChannelSelect(discord.ui.Select):
     def __init__(self, parent_view: GuildSettingsView, channels: List[discord.VoiceChannel]):
@@ -626,13 +621,12 @@ class AdminCog(commands.Cog):
                     view.current_step = i
                     break
             
-            # Create and send the first modal through interaction response
-            modal = TextInputModal(
-                title=f"Enter {view.SETUP_STEPS[view.current_step]['name']}", 
-                setting_key=view.SETUP_STEPS[view.current_step]['setting_key']
+            # Send initial message asking for URL
+            await interaction.response.send_message(
+                f"Please provide the {view.SETUP_STEPS[view.current_step]['name'].lower()} or type 'skip' to skip this step:",
+                ephemeral=True
             )
-            modal.view = view
-            await interaction.response.send_modal(modal)
+            view.waiting_for_url = True
             
         except Exception as e:
             logger.error(f"Error in update images callback: {str(e)}")
