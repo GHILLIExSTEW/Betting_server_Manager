@@ -382,7 +382,7 @@ class BetSlipGenerator:
                     del self._logo_cache[cache_key]
             sport = get_sport_category_for_path(league.upper())
             fname = f"{league.lower().replace(' ', '_')}.png"
-            logo_dir = os.path.join(self.league_logo_base_dir, sport)
+            logo_dir = os.path.join(self.league_logo_base_dir, sport, league.upper())
             logo_path = os.path.join(logo_dir, fname)
             os.makedirs(logo_dir, exist_ok=True)
 
