@@ -6,6 +6,7 @@ import logging
 import discord
 from discord.ext import commands
 from discord import app_commands
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -45,37 +46,151 @@ class AdminService:
             logger.error(f"Failed to stop AdminService: {e}", exc_info=True)
             raise RuntimeError(f"Could not stop AdminService: {str(e)}")
 
-    async def setup_guild(self, guild_id: int, settings: dict):
-        """Set up guild settings in the database.
-        
-        Args:
-            guild_id: The Discord guild ID.
-            settings: Dictionary of settings to save.
-        """
-        logger.info(f"Setting up guild {guild_id} with settings: {settings}")
+    async def check_guild_subscription(self, guild_id: int) -> bool:
+        """Check if a guild has an active paid subscription."""
         try:
-            # Build the update query dynamically based on provided settings
+            result = await self.db_manager.fetch_one(
+                "SELECT is_paid FROM guild_settings WHERE guild_id = %s",
+                guild_id
+            )
+            return bool(result and result.get('is_paid', False))
+        except Exception as e:
+            logger.error(f"Error checking guild subscription for {guild_id}: {e}")
+            return False
+
+    async def setup_guild(self, guild_id: int, settings: Dict[str, any]) -> bool:
+        """Set up or update guild settings."""
+        try:
+            # Check if guild already exists
+            existing = await self.db_manager.fetch_one(
+                "SELECT * FROM guild_settings WHERE guild_id = %s",
+                guild_id
+            )
+
+            if existing:
+                # Update existing settings
+                await self.db_manager.execute(
+                    """
+                    UPDATE guild_settings 
+                    SET embed_channel_1 = %s,
+                        embed_channel_2 = %s,
+                        command_channel_1 = %s,
+                        command_channel_2 = %s,
+                        admin_channel_1 = %s,
+                        admin_role = %s,
+                        authorized_role = %s,
+                        member_role = %s,
+                        voice_channel_id = %s,
+                        yearly_channel_id = %s,
+                        daily_report_time = %s,
+                        bot_name_mask = %s,
+                        bot_image_mask = %s,
+                        guild_background = %s,
+                        guild_default_image = %s,
+                        default_parlay_thumbnail = %s,
+                        min_units = %s,
+                        max_units = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE guild_id = %s
+                    """,
+                    settings.get('embed_channel_1'),
+                    settings.get('embed_channel_2'),
+                    settings.get('command_channel_1'),
+                    settings.get('command_channel_2'),
+                    settings.get('admin_channel_1'),
+                    settings.get('admin_role'),
+                    settings.get('authorized_role'),
+                    settings.get('member_role'),
+                    settings.get('voice_channel_id'),
+                    settings.get('yearly_channel_id'),
+                    settings.get('daily_report_time'),
+                    settings.get('bot_name_mask'),
+                    settings.get('bot_image_mask'),
+                    settings.get('guild_background'),
+                    settings.get('guild_default_image'),
+                    settings.get('default_parlay_thumbnail'),
+                    settings.get('min_units'),
+                    settings.get('max_units'),
+                    guild_id
+                )
+            else:
+                # Insert new guild settings
+                await self.db_manager.execute(
+                    """
+                    INSERT INTO guild_settings (
+                        guild_id, embed_channel_1, embed_channel_2, command_channel_1,
+                        command_channel_2, admin_channel_1, admin_role, authorized_role,
+                        member_role, voice_channel_id, yearly_channel_id, daily_report_time,
+                        bot_name_mask, bot_image_mask, guild_background, guild_default_image,
+                        default_parlay_thumbnail, min_units, max_units, is_paid
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    """,
+                    guild_id,
+                    settings.get('embed_channel_1'),
+                    settings.get('embed_channel_2'),
+                    settings.get('command_channel_1'),
+                    settings.get('command_channel_2'),
+                    settings.get('admin_channel_1'),
+                    settings.get('admin_role'),
+                    settings.get('authorized_role'),
+                    settings.get('member_role'),
+                    settings.get('voice_channel_id'),
+                    settings.get('yearly_channel_id'),
+                    settings.get('daily_report_time'),
+                    settings.get('bot_name_mask'),
+                    settings.get('bot_image_mask'),
+                    settings.get('guild_background'),
+                    settings.get('guild_default_image'),
+                    settings.get('default_parlay_thumbnail'),
+                    settings.get('min_units'),
+                    settings.get('max_units'),
+                    settings.get('is_paid', False)
+                )
+
+            return True
+        except Exception as e:
+            logger.error(f"Error setting up guild {guild_id}: {e}")
+            return False
+
+    async def get_guild_settings(self, guild_id: int) -> Optional[Dict[str, any]]:
+        """Get guild settings."""
+        try:
+            return await self.db_manager.fetch_one(
+                "SELECT * FROM guild_settings WHERE guild_id = %s",
+                guild_id
+            )
+        except Exception as e:
+            logger.error(f"Error getting guild settings for {guild_id}: {e}")
+            return None
+
+    async def update_guild_settings(self, guild_id: int, settings: Dict[str, any]) -> bool:
+        """Update specific guild settings."""
+        try:
+            # Build dynamic update query based on provided settings
             set_clauses = []
-            params = []
-            
+            values = []
             for key, value in settings.items():
-                set_clauses.append(f"{key} = %s")
-                params.append(value)
+                if key != 'guild_id':  # Skip guild_id in SET clause
+                    set_clauses.append(f"{key} = %s")
+                    values.append(value)
             
-            # Add guild_id to params
-            params.append(guild_id)
-            
+            if not set_clauses:
+                return False
+
+            values.append(guild_id)  # Add guild_id for WHERE clause
             query = f"""
-                INSERT INTO guild_settings (guild_id, {', '.join(settings.keys())})
-                VALUES (%s, {', '.join(['%s'] * len(settings))})
-                ON DUPLICATE KEY UPDATE {', '.join(set_clauses)}
+                UPDATE guild_settings 
+                SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = %s
             """
             
-            await self.db_manager.execute(query, params)
-            logger.info(f"Guild settings updated for guild {guild_id}")
+            await self.db_manager.execute(query, *values)
+            return True
         except Exception as e:
-            logger.error(f"Failed to set up guild settings for guild {guild_id}: {e}", exc_info=True)
-            raise AdminServiceError(f"Failed to set up guild settings: {str(e)}")
+            logger.error(f"Error updating guild settings for {guild_id}: {e}")
+            return False
 
 class AdminCog(commands.Cog):
     def __init__(self, bot, admin_service):

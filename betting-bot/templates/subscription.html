@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bet Embed Generator - Subscription</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .feature-list li {
+            position: relative;
+            padding-left: 1.5rem;
+        }
+        .feature-list li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #10B981;
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen text-white">
+    <div class="container mx-auto px-4 py-16">
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-4xl font-bold text-center mb-8">Upgrade to Premium</h1>
+            
+            <div class="grid md:grid-cols-2 gap-8">
+                <!-- Free Tier -->
+                <div class="card rounded-lg p-8">
+                    <h2 class="text-2xl font-bold mb-4">Free Tier</h2>
+                    <p class="text-gray-400 mb-6">Basic features for small communities</p>
+                    <ul class="feature-list space-y-3 mb-8">
+                        <li>1 Embed Channel</li>
+                        <li>1 Command Channel</li>
+                        <li>Admin Channel</li>
+                        <li>Admin Role</li>
+                        <li>Authorized Role</li>
+                        <li>Member Role</li>
+                        <li>Limited to 4 active bets</li>
+                    </ul>
+                    <button class="w-full py-3 px-6 bg-gray-700 rounded-lg hover:bg-gray-600 transition">
+                        Current Plan
+                    </button>
+                </div>
+
+                <!-- Premium Tier -->
+                <div class="card rounded-lg p-8 border-2 border-green-500">
+                    <div class="absolute top-0 right-0 bg-green-500 text-white px-4 py-1 rounded-bl-lg">
+                        Popular
+                    </div>
+                    <h2 class="text-2xl font-bold mb-4">Premium</h2>
+                    <p class="text-gray-400 mb-6">Full features for growing communities</p>
+                    <div class="text-3xl font-bold mb-6">$19.99<span class="text-lg text-gray-400">/month</span></div>
+                    <ul class="feature-list space-y-3 mb-8">
+                        <li>2 Embed Channels</li>
+                        <li>2 Command Channels</li>
+                        <li>Admin Channel</li>
+                        <li>Admin Role</li>
+                        <li>Authorized Role</li>
+                        <li>Member Role</li>
+                        <li>Voice Channel Updates</li>
+                        <li>Yearly Channel Updates</li>
+                        <li>Daily Reports</li>
+                        <li>Bot Avatar Masks</li>
+                        <li>Custom User Avatar Masks</li>
+                        <li>Custom Guild Background</li>
+                        <li>Unlimited Active Bets</li>
+                    </ul>
+                    <button onclick="window.location.href='/subscribe'" class="w-full py-3 px-6 bg-green-500 rounded-lg hover:bg-green-600 transition">
+                        Upgrade Now
+                    </button>
+                </div>
+            </div>
+
+            <div class="mt-16 text-center">
+                <h3 class="text-2xl font-bold mb-4">Why Upgrade?</h3>
+                <p class="text-gray-400 max-w-2xl mx-auto">
+                    Get access to premium features that will help your community grow and engage more effectively. 
+                    With our premium tier, you'll have more control over your betting environment and better tools 
+                    to manage your community.
+                </p>
+            </div>
+        </div>
+    </div>
+</body>
+</html> 
