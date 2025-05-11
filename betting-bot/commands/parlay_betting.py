@@ -646,95 +646,101 @@ class ParlayBetWorkflowView(View):
                 self.add_item(CancelButton(self))
                 step_content = f"**Finalize Parlay**: Select Total Units (Overall Odds: {self.bet_details.get('total_odds_str', 'N/A')})"
                 await self.edit_message_for_current_leg(interaction, content=step_content, view=self)
-            elif self.current_step == 7: # Channel Selection & Preview
-                 if 'units_str' not in self.bet_details:
-                      await self.edit_message_for_current_leg(interaction, content="❌ Units missing.", view=None); self.stop(); return
-                 if 'bet_serial' not in self.bet_details: # Ensure bet was created
-                      logger.error("Parlay bet_serial missing before preview generation.")
-                      # Attempt to create the parlay record now if it wasn't due to earlier logic
-                      try:
-                          temp_bet_serial = await self.bot.bet_service.create_parlay_bet(
-                              guild_id=interaction.guild_id, user_id=interaction.user.id,
-                              legs=self.bet_details.get('legs',[]), channel_id=None, # No channel yet
-                              league=self.bet_details.get('legs', [{}])[0].get('league', 'Mixed') # Use first leg's league
-                          )
-                          if not temp_bet_serial: raise BetServiceError("Failed to create parlay record on demand.")
-                          self.bet_details['bet_serial'] = temp_bet_serial
-                      except Exception as db_err:
-                          logger.exception(f"Failed to create parlay record before preview: {db_err}")
-                          await self.edit_message_for_current_leg(interaction, content="❌ DB Error creating parlay. Restart.", view=None); self.stop(); return
-                 
-                 try: # Image Generation
-                     bet_serial = self.bet_details['bet_serial']
-                     legs = self.bet_details.get('legs', [])
-                     if not legs: raise ValueError("No legs for parlay preview.")
-                     league_for_header = legs[0].get('league', 'Parlay') # Use first leg's league or generic
-                     game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
-                     is_sgp = len(game_ids) == 1 and len(legs) > 1
-                     
-                     bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                         home_team=legs[0].get('team', 'Leg 1 Team'), away_team=legs[0].get('opponent', 'Opponent'), 
-                         league=league_for_header, line="Parlay", odds=self.bet_details.get('total_odds', 0.0), 
-                         units=float(self.bet_details.get('units_str', 1.0)), bet_id=str(bet_serial), 
-                         timestamp=datetime.now(timezone.utc), bet_type="parlay", parlay_legs=legs, is_same_game=is_sgp
-                     )
-                     self.preview_image_bytes = io.BytesIO(); bet_slip_image.save(self.preview_image_bytes, format='PNG'); self.preview_image_bytes.seek(0)
-                     file_to_send = File(self.preview_image_bytes, filename="parlay_preview.png"); self.preview_image_bytes.seek(0) 
-                 except Exception as e:
-                     logger.exception(f"Failed to generate parlay slip image: {e}")
-                     await self.edit_message_for_current_leg(interaction, content="❌ Failed to generate preview.", view=None); self.stop(); return
-                 
-                 # Get embed channels from guild settings
-                 try:
-                     settings = await self.bot.db_manager.fetch_one(
-                         "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
-                         (interaction.guild_id,)
-                     )
-                     if not settings:
-                         await self.edit_message_for_current_leg(interaction, content="❌ Guild settings not found. Please contact an administrator.", view=None)
-                         self.stop()
-                         return
-                     
-                     embed_channel_ids = [settings['embed_channel_1'], settings['embed_channel_2']]
-                     embed_channel_ids = [cid for cid in embed_channel_ids if cid is not None]
-                     
-                     if not embed_channel_ids:
-                         await self.edit_message_for_current_leg(interaction, content="❌ No embed channels configured. Please contact an administrator.", view=None)
-                         self.stop()
-                         return
-                     
-                     channels = []
-                     for channel_id in embed_channel_ids:
-                         channel = interaction.guild.get_channel(channel_id)
-                         if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
-                             channels.append(channel)
-                     
-                     if not channels:
-                         await self.edit_message_for_current_leg(interaction, content="❌ No writable embed channels found. Please contact an administrator.", view=None)
-                         self.stop()
-                         return
-                     
-                     self.add_item(ChannelSelect(self, channels))
-                     self.add_item(CancelButton(self))
-                     step_content = f"**Finalize Parlay**: Review & Select Channel"
-                     await self.edit_message_for_current_leg(interaction, content=step_content, view=self, file=file_to_send)
-                 except Exception as e:
-                     logger.exception(f"Error fetching guild settings for channel selection: {e}")
-                     await self.edit_message_for_current_leg(interaction, content="❌ Error fetching channel settings. Please try again.", view=None)
-                     self.stop()
-                     return
-            elif self.current_step == 8: # Confirmation
-                 if not all(k in self.bet_details for k in ['bet_serial', 'channel_id', 'units_str', 'total_odds_str', 'legs']):
-                     await self.edit_message_for_current_leg(interaction, content="❌ Details incomplete.", view=None); self.stop(); return
-                 file_to_send = File(self.preview_image_bytes, filename="parlay_confirm.png") if self.preview_image_bytes else None
-                 if file_to_send: self.preview_image_bytes.seek(0)
-                 self.add_item(ConfirmButton(self)); self.add_item(CancelButton(self))
-                 channel_mention = f"<#{self.bet_details['channel_id']}>"
-                 leg_summary = "\n".join([f"- {leg['line']} ({leg.get('team','N/A')} vs {leg.get('opponent','N/A')}) @ {leg['odds_str']}" for leg in self.bet_details['legs']])
-                 confirmation_text = (f"**Confirm Parlay Details:**\n\n**Legs ({len(self.bet_details['legs'])}):**\n{leg_summary}\n"
-                                      f"**Total Odds:** {self.bet_details['total_odds_str']}\n**Stake:** {self.bet_details['units_str']} Units\n"
-                                      f"**Post to:** {channel_mention}\n\nConfirm to post.")
-                 await self.edit_message_for_current_leg(interaction, content=confirmation_text, view=self, file=file_to_send)
+            elif self.current_step == 7:  # Channel Selection & Preview
+                if 'units_str' not in self.bet_details:
+                    await self.edit_message_for_current_leg(interaction, content="❌ Units missing.", view=None)
+                    self.stop()
+                    return
+
+                # Generate preview image
+                try:
+                    file_to_send = None
+                    if self.preview_image_bytes:
+                        self.preview_image_bytes.seek(0)
+                        file_to_send = File(
+                            self.preview_image_bytes,
+                            filename="parlay_preview.png"
+                        )
+                except Exception as e:
+                    logger.exception(f"Failed to generate parlay slip image: {e}")
+                    await self.edit_message_for_current_leg(interaction, content="❌ Failed to generate preview.", view=None)
+                    self.stop()
+                    return
+
+                # Get embed channels from guild settings
+                settings = await self.bot.db_manager.fetch_one(
+                    "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
+                    (interaction.guild_id,)
+                )
+                if not settings:
+                    await self.edit_message_for_current_leg(interaction, content="❌ Guild settings not found. Please contact an administrator.", view=None)
+                    self.stop()
+                    return
+
+                embed_channel_ids = [settings['embed_channel_1'], settings['embed_channel_2']]
+                embed_channel_ids = [cid for cid in embed_channel_ids if cid is not None]
+
+                if not embed_channel_ids:
+                    await self.edit_message_for_current_leg(interaction, content="❌ No embed channels configured. Please contact an administrator.", view=None)
+                    self.stop()
+                    return
+
+                channels = []
+                for channel_id in embed_channel_ids:
+                    channel = interaction.guild.get_channel(channel_id)
+                    if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
+                        channels.append(channel)
+
+                if not channels:
+                    await self.edit_message_for_current_leg(interaction, content="❌ No writable embed channels found. Please contact an administrator.", view=None)
+                    self.stop()
+                    return
+
+                self.add_item(ChannelSelect(self, channels))
+                self.add_item(CancelButton(self))
+                step_content = f"**Finalize Parlay**: Review & Select Channel"
+                await self.edit_message_for_current_leg(interaction, content=step_content, view=self, file=file_to_send)
+                self.is_processing = False
+                return
+            elif self.current_step == 8:  # Confirmation
+                if not all(k in self.bet_details for k in ['bet_serial', 'channel_id']):
+                    await self.edit_message_for_current_leg(interaction, content="❌ Details incomplete.", view=None)
+                    self.stop()
+                    return
+
+                # Generate final parlay slip image
+                try:
+                    file_to_send = None
+                    if self.preview_image_bytes:
+                        self.preview_image_bytes.seek(0)
+                        file_to_send = File(
+                            self.preview_image_bytes,
+                            filename="parlay_slip.png"
+                        )
+                except Exception as e:
+                    logger.exception(f"Failed to generate final parlay slip image: {e}")
+                    await self.edit_message_for_current_leg(interaction, content="❌ Failed to generate parlay slip.", view=None)
+                    self.stop()
+                    return
+
+                self.add_item(ConfirmButton(self))
+                self.add_item(CancelButton(self))
+                confirmation_text = "**Confirm Your Parlay**\n\n"
+                for i, leg in enumerate(self.bet_details.get('legs', []), 1):
+                    confirmation_text += f"**Leg {i}**:\n"
+                    confirmation_text += f"League: {leg.get('league', 'N/A')}\n"
+                    confirmation_text += f"Game: {leg.get('away_team_name', 'N/A')} @ {leg.get('home_team_name', 'N/A')}\n"
+                    if leg.get('player'):
+                        confirmation_text += f"Player: {leg.get('player', 'N/A')}\n"
+                    confirmation_text += f"Line: {leg.get('line', 'N/A')}\n"
+                    confirmation_text += f"Odds: {leg.get('odds', 'N/A')}\n\n"
+                confirmation_text += f"Total Odds: {self.bet_details.get('total_odds', 'N/A')}\n"
+                confirmation_text += f"Units: {self.bet_details.get('units_str', 'N/A')}\n"
+                confirmation_text += f"Channel: <#{self.bet_details.get('channel_id', 'N/A')}>\n\n"
+                confirmation_text += "Click Confirm to place your parlay."
+                await self.edit_message_for_current_leg(interaction, content=confirmation_text, view=self, file=file_to_send)
+                self.is_processing = False
+                return
             else: 
                 logger.error(f"ParlayBetWorkflowView unexpected step: {self.current_step}")
                 await self.edit_message_for_current_leg(interaction, content="❌ Invalid step.", view=None); self.stop()

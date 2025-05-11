@@ -794,57 +794,99 @@ class StraightBetWorkflowView(View):
                 await self.edit_message(content=f"{step_content}: Select Units", view=self)
                 self.is_processing = False; return
 
-            elif self.current_step == 6:
-                if "units_str" not in self.bet_details:
-                     await self.edit_message(content="❌ Units missing.", view=None); self.stop(); self.is_processing = False; return
-                
-                # Get embed channels from guild settings
-                try:
-                    settings = await self.bot.db_manager.fetch_one(
-                        "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
-                        (interaction.guild_id,)
-                    )
-                    if not settings:
-                        await self.edit_message(content="❌ Guild settings not found. Please contact an administrator.", view=None)
-                        self.stop()
-                        return
-                    
-                    embed_channel_ids = [settings['embed_channel_1'], settings['embed_channel_2']]
-                    embed_channel_ids = [cid for cid in embed_channel_ids if cid is not None]
-                    
-                    if not embed_channel_ids:
-                        await self.edit_message(content="❌ No embed channels configured. Please contact an administrator.", view=None)
-                        self.stop()
-                        return
-                    
-                    channels = []
-                    for channel_id in embed_channel_ids:
-                        channel = interaction.guild.get_channel(channel_id)
-                        if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
-                            channels.append(channel)
-                    
-                    if not channels:
-                        await self.edit_message(content="❌ No writable embed channels found. Please contact an administrator.", view=None)
-                        self.stop()
-                        return
-                    
-                    self.add_item(ChannelSelect(self, channels))
-                    self.add_item(CancelButton(self))
-                    step_content = f"**Finalize Bet**: Review & Select Channel"
-                    await self.edit_message(content=step_content, view=self)
-                except Exception as e:
-                    logger.exception(f"Error fetching guild settings for channel selection: {e}")
-                    await self.edit_message(content="❌ Error fetching channel settings. Please try again.", view=None)
+            elif self.current_step == 6:  # Channel Selection & Preview
+                if 'units_str' not in self.bet_details:
+                    await self.edit_message(content="❌ Units missing.", view=None)
                     self.stop()
                     return
 
-            elif self.current_step == 7:
+                # Generate preview image
+                try:
+                    file_to_send = None
+                    if self.preview_image_bytes:
+                        self.preview_image_bytes.seek(0)
+                        file_to_send = File(
+                            self.preview_image_bytes,
+                            filename="bet_preview.png"
+                        )
+                except Exception as e:
+                    logger.exception(f"Failed to generate bet slip image: {e}")
+                    await self.edit_message(content="❌ Failed to generate preview.", view=None)
+                    self.stop()
+                    return
+
+                # Get embed channels from guild settings
+                settings = await self.bot.db_manager.fetch_one(
+                    "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
+                    (interaction.guild_id,)
+                )
+                if not settings:
+                    await self.edit_message(content="❌ Guild settings not found. Please contact an administrator.", view=None)
+                    self.stop()
+                    return
+
+                embed_channel_ids = [settings['embed_channel_1'], settings['embed_channel_2']]
+                embed_channel_ids = [cid for cid in embed_channel_ids if cid is not None]
+
+                if not embed_channel_ids:
+                    await self.edit_message(content="❌ No embed channels configured. Please contact an administrator.", view=None)
+                    self.stop()
+                    return
+
+                channels = []
+                for channel_id in embed_channel_ids:
+                    channel = interaction.guild.get_channel(channel_id)
+                    if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
+                        channels.append(channel)
+
+                if not channels:
+                    await self.edit_message(content="❌ No writable embed channels found. Please contact an administrator.", view=None)
+                    self.stop()
+                    return
+
+                self.add_item(ChannelSelect(self, channels))
+                self.add_item(CancelButton(self))
+                step_content = f"**Finalize Bet**: Review & Select Channel"
+                await self.edit_message(content=step_content, view=self, file=file_to_send)
+                self.is_processing = False
+                return
+
+            elif self.current_step == 7:  # Confirmation
                 if not all(k in self.bet_details for k in ['bet_serial', 'channel_id']):
-                     await self.edit_message(content="❌ Details incomplete.", view=None); self.stop(); self.is_processing = False; return
-                # ... (Confirmation text and image setup for file_to_send) ...
-                confirmation_text = "Confirm your bet..." # Placeholder
+                    await self.edit_message(content="❌ Details incomplete.", view=None)
+                    self.stop()
+                    return
+
+                # Generate final bet slip image
+                try:
+                    file_to_send = None
+                    if self.preview_image_bytes:
+                        self.preview_image_bytes.seek(0)
+                        file_to_send = File(
+                            self.preview_image_bytes,
+                            filename="bet_slip.png"
+                        )
+                except Exception as e:
+                    logger.exception(f"Failed to generate final bet slip image: {e}")
+                    await self.edit_message(content="❌ Failed to generate bet slip.", view=None)
+                    self.stop()
+                    return
+
+                self.add_item(ConfirmButton(self))
+                self.add_item(CancelButton(self))
+                confirmation_text = "**Confirm Your Bet**\n\n"
+                confirmation_text += f"League: {self.bet_details.get('league', 'N/A')}\n"
+                confirmation_text += f"Game: {self.bet_details.get('away_team_name', 'N/A')} @ {self.bet_details.get('home_team_name', 'N/A')}\n"
+                if self.bet_details.get('player'):
+                    confirmation_text += f"Player: {self.bet_details.get('player', 'N/A')}\n"
+                confirmation_text += f"Line: {self.bet_details.get('line', 'N/A')}\n"
+                confirmation_text += f"Odds: {self.bet_details.get('odds', 'N/A')}\n"
+                confirmation_text += f"Units: {self.bet_details.get('units_str', 'N/A')}\n"
+                confirmation_text += f"Channel: <#{self.bet_details.get('channel_id', 'N/A')}>\n\n"
+                confirmation_text += "Click Confirm to place your bet."
                 await self.edit_message(content=confirmation_text, view=self, file=file_to_send)
-                self.is_processing = False; return
+                self.is_processing = False
+                return
             else:
                 logger.error(f"Unexpected step: {self.current_step}")
                 await self.edit_message(content="❌ Invalid step.", view=None)
