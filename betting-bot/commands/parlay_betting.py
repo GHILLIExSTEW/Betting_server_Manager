@@ -684,9 +684,11 @@ class ParlayBetWorkflowView(View):
                      logger.exception(f"Failed to generate parlay slip image: {e}")
                      await self.edit_message_for_current_leg(interaction, content="❌ Failed to generate preview.", view=None); self.stop(); return
                  
-                 channels = [ch for ch in interaction.guild.text_channels if ch.permissions_for(interaction.guild.me).send_messages] if interaction.guild else []
+                 channels = [ch for ch in interaction.guild.text_channels 
+                           if ch.permissions_for(interaction.guild.me).send_messages 
+                           and not ch.name.startswith('embed_')] if interaction.guild else []
                  if not channels:
-                     await self.edit_message_for_current_leg(interaction, content="❌ No writable channels.", view=None); self.stop(); return
+                     await self.edit_message_for_current_leg(interaction, content="❌ No writable channels found. Please ensure there are channels available for posting bets.", view=None); self.stop(); return
                  self.add_item(ChannelSelect(self, channels))
                  self.add_item(CancelButton(self))
                  step_content = f"**Finalize Parlay**: Review & Select Channel"
