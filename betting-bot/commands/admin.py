@@ -327,6 +327,13 @@ class GuildSettingsView(discord.ui.View):
                 await self.process_next_selection(interaction)
                 return
 
+            # For roles, check if we've already selected one
+            if step['setting_key'] in ['admin_role_id', 'authorized_role_id', 'member_role_id'] and step['setting_key'] in self.settings:
+                # Move to next step if role is already selected
+                self.current_step += 1
+                await self.process_next_selection(interaction)
+                return
+
             select = select_class(items, f"Select a {step['name']}", step['setting_key'])
             view.add_item(select)
             
@@ -334,13 +341,17 @@ class GuildSettingsView(discord.ui.View):
             skip_button = SkipButton()
             view.add_item(skip_button)
             
-            if not initial:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
-                else:
-                    await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
-            else:
+            if initial:
+                # For initial message, send a new one
                 await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
+            else:
+                # For subsequent steps, edit the existing message
+                try:
+                    await interaction.message.edit(content=f"Select a {step['name']} or skip:", view=view)
+                except Exception as e:
+                    logger.error(f"Error editing message: {str(e)}")
+                    # Fallback to new message if edit fails
+                    await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
         except Exception as e:
             logger.error(f"Error in process_next_selection: {str(e)}")
             if not interaction.response.is_done():
