@@ -242,69 +242,8 @@ class BetSlipGenerator:
         self._load_team_logos()
         self._load_league_logos()
         
-    def _load_fonts(self):
-        """Load required fonts."""
-        try:
-            # Try to load fonts from the assets directory first
-            font_path = os.path.join(ASSETS_DIR, "fonts", "Roboto-Regular.ttf")
-            bold_font_path = os.path.join(ASSETS_DIR, "fonts", "Roboto-Bold.ttf")
-            emoji_font_path = os.path.join(ASSETS_DIR, "fonts", "NotoColorEmoji-Regular.ttf")
-            
-            if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
-                logger.warning("Font files not found in assets directory, trying system fonts")
-                # Fallback to system fonts
-                font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-                bold_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-                emoji_font_path = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
-                
-                if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
-                    logger.warning("System fonts not found, using default font")
-                    # Use default font as last resort
-                    self.font_b_36 = self.font_b_28 = self.font_b_24 = self.font_m_24 = self.font_m_18 = self.emoji_font_24 = ImageFont.load_default()
-                    return
-
-            # Load fonts with proper error handling
-            self.font_b_36 = ImageFont.truetype(bold_font_path, 36)
-            self.font_b_28 = ImageFont.truetype(bold_font_path, 28)
-            self.font_b_24 = ImageFont.truetype(bold_font_path, 24)
-            self.font_m_24 = ImageFont.truetype(font_path, 24)
-            self.font_m_18 = ImageFont.truetype(font_path, 18)
-            self.emoji_font_24 = ImageFont.truetype(emoji_font_path, 24)
-            
-        except Exception as e:
-            logger.error(f"Error loading fonts: {e}")
-            # Fallback to default font
-            self.font_b_36 = self.font_b_28 = self.font_b_24 = self.font_m_24 = self.font_m_18 = self.emoji_font_24 = ImageFont.load_default()
-            
-    def _load_background(self):
-        """Load the background image from guild settings or use a solid color."""
-        try:
-            if self.guild_id:
-                # Try to get the guild's background image from settings
-                query = """
-                    SELECT guild_background
-                    FROM guild_settings
-                    WHERE guild_id = %s
-                """
-                result = self.db_manager.fetch_one(query, (self.guild_id,))
-                if result and result[0]:
-                    try:
-                        self.background = Image.open(result[0]).convert('RGB')
-                        # Resize to standard dimensions if needed
-                        if self.background.size != (800, 400):
-                            self.background = self.background.resize((800, 400), Image.Resampling.LANCZOS)
-                        return
-                    except Exception as e:
-                        logger.warning(f"Failed to load guild background image: {e}")
-            
-            # Fallback to solid color background
-            self.background = Image.new('RGB', (800, 400), color=(45, 45, 45))  # Dark gray background
-        except Exception as e:
-            logger.error(f"Error creating background: {e}")
-            raise
-            
     def _load_team_logos(self):
-        """Load team logos."""
+        """Load team logos from the assets directory."""
         self.team_logos = {}
         try:
             for sport_category in os.listdir(TEAMS_SUBDIR):
