@@ -307,8 +307,8 @@ class BetSlipGenerator:
             absolute_logo_path = os.path.abspath(logo_path)
             file_exists = os.path.exists(absolute_logo_path)
             logger.info(
-                "Attempting to load team logo: Path='%s', Exists=%s",
-                absolute_logo_path, file_exists
+                "Team logo details - Team: '%s', League: '%s', Path: '%s', Exists: %s",
+                team_name, league, absolute_logo_path, file_exists
             )
             # --- END REFINED LOGGING ---
 
@@ -390,8 +390,8 @@ class BetSlipGenerator:
             absolute_logo_path = os.path.abspath(logo_path)
             file_exists = os.path.exists(absolute_logo_path)
             logger.info(
-                "Attempting to load league logo: Path='%s', Exists=%s",
-                absolute_logo_path, file_exists
+                "League logo details - League: '%s', Sport: '%s', Path: '%s', Exists: %s",
+                league, sport, absolute_logo_path, file_exists
             )
             # --- END REFINED LOGGING ---
 
