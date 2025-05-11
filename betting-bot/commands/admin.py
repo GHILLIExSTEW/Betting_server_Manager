@@ -143,7 +143,13 @@ class SubscriptionView(discord.ui.View):
     @discord.ui.button(label="Continue with Free Tier", style=discord.ButtonStyle.grey)
     async def continue_free(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        view = GuildSettingsView(self.bot, interaction, is_paid=False)
+        view = GuildSettingsView(
+            bot=self.bot,
+            guild=interaction.guild,
+            admin_service=self.bot.admin_service,
+            original_interaction=interaction,
+            is_paid=False
+        )
         await view.start_selection()
         self.stop()
 
@@ -189,7 +195,7 @@ class GuildSettingsView(discord.ui.View):
         }
     ]
 
-    def __init__(self, bot, guild, admin_service, original_interaction):
+    def __init__(self, bot, guild, admin_service, original_interaction, is_paid=False):
         super().__init__(timeout=300)
         self.bot = bot
         self.guild = guild
@@ -197,7 +203,7 @@ class GuildSettingsView(discord.ui.View):
         self.original_interaction = original_interaction
         self.current_step = 0
         self.settings = {}
-        self.is_paid = False
+        self.is_paid = is_paid
 
     async def start_selection(self):
         """Start the selection process"""
