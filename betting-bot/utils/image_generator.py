@@ -287,7 +287,7 @@ class BetSlipGenerator:
                 self._logo_cache.pop(k, None)
             self._last_cache_cleanup = now
 
-    def _normalize_team_name(team_name: str) -> str:
+    def _normalize_team_name(self, team_name: str) -> str:
         """Normalize team name to match logo file naming convention."""
         # Common team name mappings
         team_mappings = {
