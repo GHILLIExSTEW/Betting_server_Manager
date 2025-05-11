@@ -33,7 +33,7 @@ class ChannelSelect(discord.ui.Select):
                 label=f"#{channel.name}", # Add # prefix
                 value=str(channel.id),
                 description=f"ID: {channel.id}"
-            )[:100] for channel in channels[:max_options] # Limit options and description length
+            ) for channel in channels[:max_options] # Limit options
         ]
         if not options: # Handle case with no channels
              options.append(discord.SelectOption(label="No Text Channels Found", value="none", emoji="❌"))
@@ -79,7 +79,7 @@ class RoleSelect(discord.ui.Select):
                 label=role.name,
                 value=str(role.id),
                 description=f"ID: {role.id}"
-            )[:100] for role in roles[:max_options] # Limit options and description length
+            ) for role in roles[:max_options] # Limit options
         ]
         if not options: # Handle case with no roles
              options.append(discord.SelectOption(label="No Roles Found (Except @everyone)", value="none", emoji="❌"))
