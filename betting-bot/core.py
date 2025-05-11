@@ -102,6 +102,14 @@ class BettingBot(discord.Client):
         """Called when the bot is ready. Loads commands."""
         logger.info(f"Bot is ready. Logged in as {self.user}")
         await self.load_commands()
+        
+        # Sync commands with all guilds the bot is in
+        for guild in self.guilds:
+            try:
+                await self.register_guild_commands(guild.id)
+                logger.info(f"Synced commands for guild {guild.name} (ID: {guild.id})")
+            except Exception as e:
+                logger.error(f"Failed to sync commands for guild {guild.name} (ID: {guild.id}): {e}")
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         """Handles raw reaction add events for bet resolution"""

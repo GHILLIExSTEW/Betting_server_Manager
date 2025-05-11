@@ -222,5 +222,16 @@ class BettingCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(BettingCog(bot))
+    cog = BettingCog(bot)
+    await bot.add_cog(cog)
+    
+    # Register the bet command with the guild
+    try:
+        guild = bot.guilds[0]  # Get the first guild the bot is in
+        if guild:
+            await bot.tree.sync(guild=guild)
+            logger.info(f"Bet command synced with guild {guild.name} (ID: {guild.id})")
+    except Exception as e:
+        logger.error(f"Failed to sync bet command with guild: {e}")
+    
     logger.info("BettingCog setup completed and added to bot")
