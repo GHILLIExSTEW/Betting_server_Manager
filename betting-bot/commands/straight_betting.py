@@ -522,32 +522,24 @@ class ChannelSelect(Select):
     def __init__(self, parent_view: View, channels: List[TextChannel]):
         self.parent_view = parent_view
         options = [
-            SelectOption(label=f"#{channel.name}", value=str(channel.id))
-            for channel in channels[:25]
-        ]
-        if not options:
-            options.append(
-                SelectOption(
-                    label="No Writable Channels Found", value="none", emoji="❌"
-                )
+            SelectOption(
+                label=channel.name,
+                value=str(channel.id),
+                description=f"Channel ID: {channel.id}"
             )
+            for channel in channels
+        ]
         super().__init__(
-            placeholder="Select Channel to Post Bet...",
+            placeholder="Select channel to post bet...",
             options=options,
             min_values=1,
-            max_values=1,
-            disabled=not options or options[0].value == "none",
+            max_values=1
         )
 
     async def callback(self, interaction: Interaction):
-        selected_value = self.values[0]
-        if selected_value == "none":
-            await interaction.response.defer()
-            return
-        self.parent_view.bet_details["channel_id"] = int(selected_value)
-        logger.debug(
-            f"Channel selected: {selected_value} by user {interaction.user.id}"
-        )
+        channel_id = int(self.values[0])
+        self.parent_view.bet_details["channel_id"] = channel_id
+        logger.debug(f"Channel selected: {channel_id} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
@@ -697,9 +689,7 @@ class StraightBetWorkflowView(View):
 
     async def go_next(self, interaction: Interaction):
         if self.is_processing:
-            logger.debug(
-                f"Skipping go_next; already processing step {self.current_step}"
-            )
+            logger.debug(f"Skipping go_next; already processing step {self.current_step}")
             if not interaction.response.is_done():
                 try: await interaction.response.defer()
                 except: pass
@@ -712,9 +702,7 @@ class StraightBetWorkflowView(View):
                 logger.warning(f"Defer in go_next failed for {interaction.id}: {e}")
         
         try:
-            logger.debug(
-                f"Processing go_next: current_step={self.current_step} for user {interaction.user.id}"
-            )
+            logger.debug(f"Processing go_next: current_step={self.current_step} for user {interaction.user.id}")
             self.clear_items()
             self.current_step += 1
             step_content = f"**Step {self.current_step}**"
@@ -794,60 +782,23 @@ class StraightBetWorkflowView(View):
                 await self.edit_message(content=f"{step_content}: Select Units", view=self)
                 self.is_processing = False; return
 
-            elif self.current_step == 6:  # Channel Selection & Preview
-                if 'units_str' not in self.bet_details:
-                    await self.edit_message(content="❌ Units missing.", view=None)
-                    self.stop()
-                    return
-
-                # Generate preview image
-                try:
-                    file_to_send = None
-                    if self.preview_image_bytes:
-                        self.preview_image_bytes.seek(0)
-                        file_to_send = File(
-                            self.preview_image_bytes,
-                            filename="bet_preview.png"
-                        )
-                except Exception as e:
-                    logger.exception(f"Failed to generate bet slip image: {e}")
-                    await self.edit_message(content="❌ Failed to generate preview.", view=None)
-                    self.stop()
-                    return
-
-                # Get embed channels from guild settings
-                settings = await self.bot.db_manager.fetch_one(
-                    "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
-                    (interaction.guild_id,)
-                )
-                if not settings:
-                    await self.edit_message(content="❌ Guild settings not found. Please contact an administrator.", view=None)
-                    self.stop()
-                    return
-
-                embed_channel_ids = [settings['embed_channel_1'], settings['embed_channel_2']]
-                embed_channel_ids = [cid for cid in embed_channel_ids if cid is not None]
-
-                if not embed_channel_ids:
-                    await self.edit_message(content="❌ No embed channels configured. Please contact an administrator.", view=None)
-                    self.stop()
-                    return
-
-                channels = []
-                for channel_id in embed_channel_ids:
-                    channel = interaction.guild.get_channel(channel_id)
-                    if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
-                        channels.append(channel)
-
+            elif self.current_step == 6:
+                # Get all writable text channels
+                channels = [
+                    channel for channel in interaction.guild.text_channels
+                    if channel.permissions_for(interaction.guild.me).send_messages
+                ]
+                
                 if not channels:
-                    await self.edit_message(content="❌ No writable embed channels found. Please contact an administrator.", view=None)
+                    await self.edit_message(content="❌ No writable channels found.", view=None)
                     self.stop()
+                    self.is_processing = False
                     return
-
+                
                 self.add_item(ChannelSelect(self, channels))
                 self.add_item(CancelButton(self))
-                step_content = f"**Finalize Bet**: Review & Select Channel"
-                await self.edit_message(content=step_content, view=self, file=file_to_send)
+                step_content += ": Select Channel"
+                await self.edit_message(content=step_content, view=self)
                 self.is_processing = False
                 return
 

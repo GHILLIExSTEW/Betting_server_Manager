@@ -406,24 +406,25 @@ class LegDecisionView(View):
 class ChannelSelect(Select):
     def __init__(self, parent_view, channels: List[TextChannel]):
         self.parent_view = parent_view
-        options = [SelectOption(label=f"#{channel.name}", value=str(channel.id)) for channel in channels[:25]]
-        if not options:
-            options.append(SelectOption(label="No Writable Channels Found", value="none", emoji="❌"))
+        options = [
+            SelectOption(
+                label=channel.name,
+                value=str(channel.id),
+                description=f"Channel ID: {channel.id}"
+            )
+            for channel in channels
+        ]
         super().__init__(
-            placeholder="Select Channel to Post Parlay...",
+            placeholder="Select channel to post bet...",
             options=options,
             min_values=1,
-            max_values=1,
-            disabled=not options or options[0].value == "none"
+            max_values=1
         )
 
     async def callback(self, interaction: Interaction):
-        selected_value = self.values[0]
-        if selected_value == "none":
-            await interaction.response.defer()
-            return
-        self.parent_view.bet_details['channel_id'] = int(selected_value)
-        logger.debug(f"Channel selected for parlay: {selected_value} by user {interaction.user.id}")
+        channel_id = int(self.values[0])
+        self.parent_view.bet_details["channel_id"] = channel_id
+        logger.debug(f"Channel selected: {channel_id} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
         await self.parent_view.go_next(interaction)
@@ -569,23 +570,30 @@ class ParlayBetWorkflowView(View):
 
     async def go_next(self, interaction: Interaction):
         if self.is_processing:
-            logger.debug(f"Skipping parlay go_next; already processing step {self.current_step} for user {interaction.user.id}")
+            logger.debug(f"Skipping go_next; already processing step {self.current_step}")
+            if not interaction.response.is_done():
+                try: await interaction.response.defer()
+                except: pass
             return
         self.is_processing = True
+
+        if not interaction.response.is_done(): # Safety defer
+            try: await interaction.response.defer()
+            except discord.HTTPException as e:
+                logger.warning(f"Defer in go_next failed for {interaction.id}: {e}")
+        
         try:
-            # current_step is managed by button callbacks or advanced here
-            # Add Leg button resets current_step to 0, then go_next increments to 1
-            # Finalize button sets current_step to 5, then go_next increments to 6
-            if not (interaction.data and interaction.data.get('custom_id','').startswith('parlay_finalize_')):
-                 self.current_step +=1
-            
+            logger.debug(f"Processing go_next: current_step={self.current_step} for user {interaction.user.id}")
+            self.clear_items()
+            self.current_step += 1
+            step_content = f"**Step {self.current_step}**"
+            file_to_send = None
+            logger.debug(f"Entering step {self.current_step}")
+
             leg_count = len(self.bet_details.get('legs', []))
             step_content = f"**Parlay Leg {leg_count + 1} - Step {self.current_step}**"
             if self.current_step > 5 : # After unit selection
                  step_content = f"**Finalizing Parlay - Step {self.current_step}**"
-
-            self.clear_items() 
-            logger.debug(f"Entering parlay step {self.current_step} for leg {leg_count + 1 if self.current_step <=4 else 'N/A'}")
 
             if self.current_step == 1: 
                 allowed_leagues = ["NBA", "NFL", "MLB", "NHL", "NCAAB", "NCAAF", "Soccer", "Tennis", "UFC/MMA"]
@@ -641,67 +649,30 @@ class ParlayBetWorkflowView(View):
                 self.is_processing = False 
                 return 
             # Step 5 (LegDecisionView) is handled by add_leg method
-            elif self.current_step == 6: # Units Selection (after Finalize)
+            elif self.current_step == 6:
+                # Get all writable text channels
+                channels = [
+                    channel for channel in interaction.guild.text_channels
+                    if channel.permissions_for(interaction.guild.me).send_messages
+                ]
+                
+                if not channels:
+                    await self.edit_message_for_current_leg(interaction, content="❌ No writable channels found.", view=None)
+                    self.stop()
+                    self.is_processing = False
+                    return
+                
+                self.add_item(ChannelSelect(self, channels))
+                self.add_item(CancelButton(self))
+                step_content += ": Select Channel"
+                await self.edit_message_for_current_leg(interaction, content=step_content, view=self)
+                self.is_processing = False
+                return
+            elif self.current_step == 7:  # Units Selection (after Finalize)
                 self.add_item(UnitsSelect(self))
                 self.add_item(CancelButton(self))
                 step_content = f"**Finalize Parlay**: Select Total Units (Overall Odds: {self.bet_details.get('total_odds_str', 'N/A')})"
                 await self.edit_message_for_current_leg(interaction, content=step_content, view=self)
-            elif self.current_step == 7:  # Channel Selection & Preview
-                if 'units_str' not in self.bet_details:
-                    await self.edit_message_for_current_leg(interaction, content="❌ Units missing.", view=None)
-                    self.stop()
-                    return
-
-                # Generate preview image
-                try:
-                    file_to_send = None
-                    if self.preview_image_bytes:
-                        self.preview_image_bytes.seek(0)
-                        file_to_send = File(
-                            self.preview_image_bytes,
-                            filename="parlay_preview.png"
-                        )
-                except Exception as e:
-                    logger.exception(f"Failed to generate parlay slip image: {e}")
-                    await self.edit_message_for_current_leg(interaction, content="❌ Failed to generate preview.", view=None)
-                    self.stop()
-                    return
-
-                # Get embed channels from guild settings
-                settings = await self.bot.db_manager.fetch_one(
-                    "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
-                    (interaction.guild_id,)
-                )
-                if not settings:
-                    await self.edit_message_for_current_leg(interaction, content="❌ Guild settings not found. Please contact an administrator.", view=None)
-                    self.stop()
-                    return
-
-                embed_channel_ids = [settings['embed_channel_1'], settings['embed_channel_2']]
-                embed_channel_ids = [cid for cid in embed_channel_ids if cid is not None]
-
-                if not embed_channel_ids:
-                    await self.edit_message_for_current_leg(interaction, content="❌ No embed channels configured. Please contact an administrator.", view=None)
-                    self.stop()
-                    return
-
-                channels = []
-                for channel_id in embed_channel_ids:
-                    channel = interaction.guild.get_channel(channel_id)
-                    if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
-                        channels.append(channel)
-
-                if not channels:
-                    await self.edit_message_for_current_leg(interaction, content="❌ No writable embed channels found. Please contact an administrator.", view=None)
-                    self.stop()
-                    return
-
-                self.add_item(ChannelSelect(self, channels))
-                self.add_item(CancelButton(self))
-                step_content = f"**Finalize Parlay**: Review & Select Channel"
-                await self.edit_message_for_current_leg(interaction, content=step_content, view=self, file=file_to_send)
-                self.is_processing = False
-                return
             elif self.current_step == 8:  # Confirmation
                 if not all(k in self.bet_details for k in ['bet_serial', 'channel_id']):
                     await self.edit_message_for_current_leg(interaction, content="❌ Details incomplete.", view=None)
