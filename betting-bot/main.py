@@ -18,7 +18,7 @@ from services.user_service import UserService
 from services.voice_service import VoiceService
 from services.data_sync_service import DataSyncService
 from utils.image_generator import BetSlipGenerator
-from cogs.sync_cog import setup_sync_cog
+from commands.sync_cog import setup_sync_cog
 
 # --- Path Setup ---
 # Determine the directory where main.py is located
