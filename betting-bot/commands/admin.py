@@ -65,8 +65,24 @@ class ChannelSelect(discord.ui.Select):
                 await interaction.response.send_message("This channel has already been selected as an embed channel.", ephemeral=True)
                 return
             self.view.embed_channels.append(selected_value)
+            # Store as a list in settings
+            if 'embed_channel_id' not in self.view.settings:
+                self.view.settings['embed_channel_id'] = []
+            self.view.settings['embed_channel_id'].append(selected_value)
+        # For command channels, track the selection
+        elif self.setting_key == 'command_channel_id':
+            if selected_value in self.view.command_channels:
+                await interaction.response.send_message("This channel has already been selected as a command channel.", ephemeral=True)
+                return
+            self.view.command_channels.append(selected_value)
+            # Store as a list in settings
+            if 'command_channel_id' not in self.view.settings:
+                self.view.settings['command_channel_id'] = []
+            self.view.settings['command_channel_id'].append(selected_value)
+        else:
+            # For other channels (like admin channel), store as single value
+            self.view.settings[self.setting_key] = selected_value
 
-        self.view.settings[self.setting_key] = selected_value
         await interaction.response.defer()
 
         # Ensure the view attribute exists and has the method
@@ -169,13 +185,16 @@ class GuildSettingsView(discord.ui.View):
             'select': ChannelSelect,
             'options': lambda guild: [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels],
             'setting_key': 'embed_channel_id',
-            'max_count': 2  # Maximum number of embed channels allowed
+            'max_count': 2,  # Maximum number of embed channels allowed for paid
+            'free_count': 1  # Maximum number of embed channels for free tier
         },
         {
             'name': 'Command Channel',
             'select': ChannelSelect,
             'options': lambda guild: [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels],
-            'setting_key': 'command_channel_id'
+            'setting_key': 'command_channel_id',
+            'max_count': 2,  # Maximum number of command channels allowed for paid
+            'free_count': 1  # Maximum number of command channels for free tier
         },
         {
             'name': 'Admin Channel',
@@ -213,6 +232,7 @@ class GuildSettingsView(discord.ui.View):
         self.settings = {}
         self.is_paid = is_paid
         self.embed_channels = []  # Track selected embed channels
+        self.command_channels = []  # Track selected command channels
 
     async def start_selection(self):
         """Start the selection process"""
@@ -253,14 +273,38 @@ class GuildSettingsView(discord.ui.View):
             view.current_step = self.current_step
             view.settings = self.settings.copy()  # Copy the current settings
             view.embed_channels = self.embed_channels.copy()  # Copy embed channels list
+            view.command_channels = self.command_channels.copy()  # Copy command channels list
             
             # For embed channels, check if we've reached the limit
             if step['setting_key'] == 'embed_channel_id':
-                if len(self.embed_channels) >= step.get('max_count', 2):
+                max_count = step['max_count'] if self.is_paid else step['free_count']
+                if len(self.embed_channels) >= max_count:
                     if not interaction.response.is_done():
-                        await interaction.response.send_message("You have already selected the maximum number of embed channels (2).", ephemeral=True)
+                        await interaction.response.send_message(
+                            f"You have already selected the maximum number of embed channels ({max_count}).",
+                            ephemeral=True
+                        )
                     else:
-                        await interaction.followup.send("You have already selected the maximum number of embed channels (2).", ephemeral=True)
+                        await interaction.followup.send(
+                            f"You have already selected the maximum number of embed channels ({max_count}).",
+                            ephemeral=True
+                        )
+                    return
+
+            # For command channels, check if we've reached the limit
+            if step['setting_key'] == 'command_channel_id':
+                max_count = step['max_count'] if self.is_paid else step['free_count']
+                if len(self.command_channels) >= max_count:
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            f"You have already selected the maximum number of command channels ({max_count}).",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(
+                            f"You have already selected the maximum number of command channels ({max_count}).",
+                            ephemeral=True
+                        )
                     return
 
             select = select_class(items, f"Select a {step['name']}", step['setting_key'])
