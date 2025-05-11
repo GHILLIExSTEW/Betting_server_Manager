@@ -428,14 +428,37 @@ class TextInputModal(discord.ui.Modal):
         self.setting_key = setting_key
         self.add_item(discord.ui.TextInput(
             label=title,
-            placeholder=f"Enter {title.lower()}",
-            required=True
+            placeholder=f"Enter {title.lower()} (leave blank to skip)",
+            required=False
         ))
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            value = self.children[0].value
+            value = self.children[0].value.strip()
             view = self.view
+            
+            # If value is blank, treat as skip
+            if not value:
+                view.current_step += 1
+                # Check if there are more image URL steps
+                while view.current_step < len(view.SETUP_STEPS):
+                    step = view.SETUP_STEPS[view.current_step]
+                    if step.get('is_premium_only', False) and step['select'] is None:
+                        # Create and send the next modal
+                        next_modal = TextInputModal(
+                            title=f"Enter {step['name']}", 
+                            setting_key=step['setting_key']
+                        )
+                        next_modal.view = view
+                        await interaction.response.send_modal(next_modal)
+                        return
+                    view.current_step += 1
+                
+                # If we've gone through all steps, finalize
+                await view.finalize_setup(interaction)
+                return
+            
+            # If we have a value, store it and continue
             view.settings[self.setting_key] = value
             
             # Move to next step
