@@ -9,6 +9,16 @@ from discord import app_commands
 from dotenv import load_dotenv
 import asyncio
 from typing import Optional
+from bot.data.db_manager import DatabaseManager
+from bot.services.admin_service import AdminService
+from bot.services.analytics_service import AnalyticsService
+from bot.services.bet_service import BetService
+from bot.services.game_service import GameService
+from bot.services.user_service import UserService
+from bot.services.voice_service import VoiceService
+from bot.services.data_sync_service import DataSyncService
+from bot.utils.image_generator import BetSlipGenerator
+from bot.cogs.sync_cog import setup_sync_cog
 
 # --- Path Setup ---
 # Determine the directory where main.py is located
@@ -117,6 +127,13 @@ class BettingBot(commands.Bot):
         self.data_sync_service = DataSyncService(
             self.game_service, self.db_manager
         )
+        self.bet_slip_generators = {}  # Dictionary to store generators per guild
+
+    async def get_bet_slip_generator(self, guild_id: int) -> BetSlipGenerator:
+        """Get or create a BetSlipGenerator for a specific guild."""
+        if guild_id not in self.bet_slip_generators:
+            self.bet_slip_generators[guild_id] = BetSlipGenerator(guild_id=guild_id)
+        return self.bet_slip_generators[guild_id]
 
     async def load_extensions(self):
         """Loads all cogs from the commands directory."""
