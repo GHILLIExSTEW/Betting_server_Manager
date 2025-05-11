@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 class ChannelSelect(discord.ui.Select):
     """Select menu for choosing text channels."""
     def __init__(self, channels: List[TextChannel], placeholder: str, setting_key: str, max_options=25):
+        # Filter out channels that have already been selected for this type
+        if setting_key == 'embed_channel_id' and hasattr(self.view, 'embed_channels'):
+            channels = [ch for ch in channels if str(ch.id) not in self.view.embed_channels]
+        elif setting_key == 'command_channel_id' and hasattr(self.view, 'command_channels'):
+            channels = [ch for ch in channels if str(ch.id) not in self.view.command_channels]
+
         options = [
             discord.SelectOption(
                 label=f"#{channel.name}", # Add # prefix
@@ -279,32 +285,18 @@ class GuildSettingsView(discord.ui.View):
             if step['setting_key'] == 'embed_channel_id':
                 max_count = step['max_count'] if self.is_paid else step['free_count']
                 if len(self.embed_channels) >= max_count:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            f"You have already selected the maximum number of embed channels ({max_count}).",
-                            ephemeral=True
-                        )
-                    else:
-                        await interaction.followup.send(
-                            f"You have already selected the maximum number of embed channels ({max_count}).",
-                            ephemeral=True
-                        )
+                    # Move to next step if we've reached the limit
+                    self.current_step += 1
+                    await self.process_next_selection(interaction)
                     return
 
             # For command channels, check if we've reached the limit
             if step['setting_key'] == 'command_channel_id':
                 max_count = step['max_count'] if self.is_paid else step['free_count']
                 if len(self.command_channels) >= max_count:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            f"You have already selected the maximum number of command channels ({max_count}).",
-                            ephemeral=True
-                        )
-                    else:
-                        await interaction.followup.send(
-                            f"You have already selected the maximum number of command channels ({max_count}).",
-                            ephemeral=True
-                        )
+                    # Move to next step if we've reached the limit
+                    self.current_step += 1
+                    await self.process_next_selection(interaction)
                     return
 
             select = select_class(items, f"Select a {step['name']}", step['setting_key'])
