@@ -321,9 +321,14 @@ class GuildSettingsView(discord.ui.View):
 
             # Handle text input steps (for image URLs)
             if step['select'] is None:
-                modal = TextInputModal(title=f"Enter {step['name']}", setting_key=step['setting_key'])
-                modal.view = self
-                await interaction.response.send_modal(modal)
+                if not interaction.response.is_done():
+                    modal = TextInputModal(title=f"Enter {step['name']}", setting_key=step['setting_key'])
+                    modal.view = self
+                    await interaction.response.send_modal(modal)
+                else:
+                    modal = TextInputModal(title=f"Enter {step['name']}", setting_key=step['setting_key'])
+                    modal.view = self
+                    await interaction.followup.send_modal(modal)
                 return
 
             select_class = step['select']
@@ -344,68 +349,33 @@ class GuildSettingsView(discord.ui.View):
             # Create a new view that inherits from the current view
             view = GuildSettingsView(self.bot, interaction.guild, self.admin_service, self.original_interaction, self.subscription_level)
             view.current_step = self.current_step
-            view.settings = self.settings.copy()  # Copy the current settings
-            view.embed_channels = self.embed_channels.copy()  # Copy embed channels list
-            view.command_channels = self.command_channels.copy()  # Copy command channels list
-            
-            # For embed channels, check if we've reached the limit
-            if step['setting_key'] == 'embed_channel_id':
-                max_count = step['max_count'] if self.subscription_level == 'premium' else step['free_count']
-                if len(self.embed_channels) >= max_count:
-                    # Move to next step if we've reached the limit
-                    self.current_step += 1
-                    await self.process_next_selection(interaction)
-                    return
+            view.settings = self.settings.copy()
+            view.message = self.message
 
-            # For command channels, check if we've reached the limit
-            if step['setting_key'] == 'command_channel_id':
-                max_count = step['max_count'] if self.subscription_level == 'premium' else step['free_count']
-                if len(self.command_channels) >= max_count:
-                    # Move to next step if we've reached the limit
-                    self.current_step += 1
-                    await self.process_next_selection(interaction)
-                    return
-
-            # For admin channel, check if we've already selected one
-            if step['setting_key'] == 'admin_channel_id' and 'admin_channel_id' in self.settings:
-                # Move to next step if admin channel is already selected
-                self.current_step += 1
-                await self.process_next_selection(interaction)
-                return
-
-            # For roles, check if we've already selected one
-            if step['setting_key'] in ['admin_role_id', 'authorized_role_id', 'member_role_id'] and step['setting_key'] in self.settings:
-                # Move to next step if role is already selected
-                self.current_step += 1
-                await self.process_next_selection(interaction)
-                return
-
-            select = select_class(items, f"Select a {step['name']}", step['setting_key'])
+            # Create the selection dropdown
+            select = select_class(
+                placeholder=f"Select {step['name']}",
+                options=step['options'](interaction.guild),
+                min_values=1,
+                max_values=1
+            )
             view.add_item(select)
-            
+
             # Add skip button
             skip_button = SkipButton()
             view.add_item(skip_button)
-            
+
+            # Send the message
             if initial:
-                # For initial message, send a new one
-                message = await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
-                view.message = message
+                await interaction.response.send_message(f"Please select a {step['name'].lower()}:", view=view, ephemeral=True)
             else:
-                # For subsequent steps, edit the existing message
-                try:
-                    if hasattr(self, 'message'):
-                        await self.message.edit(content=f"Select a {step['name']} or skip:", view=view)
-                        view.message = self.message
-                    else:
-                        # Fallback to new message if no existing message
-                        message = await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
-                        view.message = message
-                except Exception as e:
-                    logger.error(f"Error editing message: {str(e)}")
-                    # Fallback to new message if edit fails
-                    message = await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
-                    view.message = message
+                if self.message:
+                    try:
+                        await self.message.edit(content=f"Please select a {step['name'].lower()}:", view=view)
+                    except discord.NotFound:
+                        await interaction.followup.send(f"Please select a {step['name'].lower()}:", view=view, ephemeral=True)
+                else:
+                    await interaction.followup.send(f"Please select a {step['name'].lower()}:", view=view, ephemeral=True)
         except Exception as e:
             logger.error(f"Error in process_next_selection: {str(e)}")
             if not interaction.response.is_done():
@@ -455,10 +425,22 @@ class TextInputModal(discord.ui.Modal):
         ))
 
     async def on_submit(self, interaction: discord.Interaction):
-        value = self.children[0].value
-        view = self.view
-        view.settings[self.setting_key] = value
-        await view.process_next_selection(interaction)
+        try:
+            value = self.children[0].value
+            view = self.view
+            view.settings[self.setting_key] = value
+            
+            # Move to next step
+            view.current_step += 1
+            
+            # Process next step
+            await view.process_next_selection(interaction)
+        except Exception as e:
+            logger.error(f"Error in TextInputModal submission: {str(e)}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("An error occurred while processing your input. Please try again.", ephemeral=True)
+            else:
+                await interaction.followup.send("An error occurred while processing your input. Please try again.", ephemeral=True)
 
 class VoiceChannelSelect(discord.ui.Select):
     def __init__(self, parent_view: GuildSettingsView, channels: List[discord.VoiceChannel]):
