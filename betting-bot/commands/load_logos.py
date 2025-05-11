@@ -12,14 +12,8 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from PIL import Image
 
-# Assuming image_generator is in utils relative to betting-bot root
-try:
-    from ..utils.image_generator import get_sport_category_for_path # Import the helper
-except ImportError:
-    # Fallback if running script directly or different structure
-    # This requires image_generator.py to be accessible in PYTHONPATH
-    from utils.image_generator import get_sport_category_for_path
-
+# Import directly from utils
+from utils.image_generator import get_sport_category_for_path
 
 logger = logging.getLogger(__name__)
 

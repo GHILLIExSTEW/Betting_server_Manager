@@ -38,7 +38,7 @@ class BettingBot(discord.Client):
             try:
                 module = __import__(f"bot.commands.{cmd_file}", fromlist=["setup"])
                 if hasattr(module, "setup"):
-                    await module.setup(self.command_tree)
+                    await module.setup(self)
                     logger.info(f"Loaded global command module: {cmd_file}")
             except Exception as e:
                 logger.error(f"Failed to load global command module {cmd_file}: {e}")
@@ -48,30 +48,20 @@ class BettingBot(discord.Client):
             try:
                 module = __import__(f"bot.commands.{cmd_file}", fromlist=["setup"])
                 if hasattr(module, "setup"):
-                    self.guild_command_setup_functions[cmd_file] = module.setup
+                    await module.setup(self)
                     logger.info(f"Loaded guild command module: {cmd_file}")
             except Exception as e:
                 logger.error(f"Failed to load guild command module {cmd_file}: {e}")
 
     async def register_guild_commands(self, guild_id: int):
-        """Clears and registers commands specific to a given guild"""
+        """Registers commands specific to a given guild"""
         guild = self.get_guild(guild_id)
         if not guild:
             logger.error(f"Guild {guild_id} not found")
             return
 
-        # Clear existing commands
-        self.command_tree.clear_commands(guild=guild)
-
-        # Register new commands
-        for setup_func in self.guild_command_setup_functions.values():
-            try:
-                await setup_func(self.command_tree, guild)
-            except Exception as e:
-                logger.error(f"Failed to register guild commands: {e}")
-
-        # Sync commands
         try:
+            # Sync commands with the guild
             await self.command_tree.sync(guild=guild)
             logger.info(f"Synced commands for guild {guild_id}")
         except Exception as e:

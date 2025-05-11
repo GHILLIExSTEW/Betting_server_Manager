@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from PIL import Image, ImageDraw, ImageFont
-from ..config.asset_paths import (
+from config.asset_paths import (
     ASSETS_DIR,
     FONT_DIR,
     LOGO_DIR,
@@ -16,7 +16,7 @@ from ..config.asset_paths import (
     LEAGUES_SUBDIR,
     get_sport_category_for_path
 )
-from ..config.team_mappings import normalize_team_name
+from config.team_mappings import normalize_team_name
 
 logger = logging.getLogger(__name__)
 
