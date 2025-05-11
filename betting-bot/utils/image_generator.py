@@ -427,7 +427,8 @@ class BetSlipGenerator:
         is_same_game: bool = False
     ) -> Optional[Image.Image]:
         eff_league = league or "UNKNOWN"
-        logger.info("Gen slip: %s, Lg: %s, ID: %s", bet_type, eff_league, bet_id)
+        logger.info("Generating bet slip - Home: '%s', Away: '%s', League: '%s', Type: %s", 
+                   home_team, away_team, eff_league, bet_type)
         try:
             width = 800; header_h = 100; footer_h = 80; leg_h = 180
             num_legs = len(parlay_legs) if parlay_legs else 1
@@ -446,8 +447,10 @@ class BetSlipGenerator:
             else:
                 title = f"{eff_league.upper()} - Straight Bet"
 
+            logger.info("Loading league logo for: '%s'", eff_league)
             lg_logo = self._load_league_logo(eff_league)
             if lg_logo:
+                logger.info("Successfully loaded league logo for: '%s'", eff_league)
                 r = min(60 / lg_logo.height, 1.0)
                 nw, nh = int(lg_logo.width * r), int(lg_logo.height * r)
                 lg_disp = lg_logo.resize((nw, nh), Image.Resampling.LANCZOS)
@@ -459,6 +462,7 @@ class BetSlipGenerator:
                 draw = ImageDraw.Draw(img)
                 h_y += nh + 5
             else:
+                logger.warning("Failed to load league logo for: '%s'", eff_league)
                 h_y += 10
 
             bbox = draw.textbbox((0, 0), title, self.font_b_36)
@@ -467,21 +471,29 @@ class BetSlipGenerator:
             c_start_y = header_h + 10
             if bet_type == "straight":
                 logo_y, l_sz = c_start_y + 40, (120, 120)
+                logger.info("Loading team logos - Home: '%s', Away: '%s', League: '%s'", 
+                           home_team, away_team, eff_league)
                 h_logo = self._load_team_logo(home_team, eff_league)
                 a_logo = self._load_team_logo(away_team, eff_league)
                 if h_logo:
+                    logger.info("Successfully loaded home team logo for: '%s'", home_team)
                     h_disp = h_logo.resize(l_sz, Image.Resampling.LANCZOS)
                     if img.mode != 'RGBA': img = img.convert("RGBA")
                     tmp = Image.new('RGBA', img.size, (0, 0, 0, 0))
                     tmp.paste(h_disp, (width // 4 - l_sz[0] // 2, logo_y), h_disp)
                     img = Image.alpha_composite(img, tmp); draw = ImageDraw.Draw(img)
+                else:
+                    logger.warning("Failed to load home team logo for: '%s'", home_team)
                 draw.text((width // 4, logo_y + l_sz[1] + 20), home_team, 'white', self.font_b_24, 'mm')
                 if a_logo:
+                    logger.info("Successfully loaded away team logo for: '%s'", away_team)
                     a_disp = a_logo.resize(l_sz, Image.Resampling.LANCZOS)
                     if img.mode != 'RGBA': img = img.convert("RGBA")
                     tmp = Image.new('RGBA', img.size, (0, 0, 0, 0))
                     tmp.paste(a_disp, (3 * width // 4 - l_sz[0] // 2, logo_y), a_disp)
                     img = Image.alpha_composite(img, tmp); draw = ImageDraw.Draw(img)
+                else:
+                    logger.warning("Failed to load away team logo for: '%s'", away_team)
                 draw.text((3 * width // 4, logo_y + l_sz[1] + 20), away_team, 'white', self.font_b_24, 'mm')
 
                 det_y = logo_y + l_sz[1] + 80
