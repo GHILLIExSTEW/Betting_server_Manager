@@ -17,7 +17,7 @@ from config.asset_paths import (
     get_sport_category_for_path
 )
 from config.team_mappings import normalize_team_name
-from database.database_manager import DatabaseManager
+from data.db_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
