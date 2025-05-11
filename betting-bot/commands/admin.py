@@ -236,9 +236,12 @@ class GuildSettingsView(discord.ui.View):
                 await interaction.followup.send(f"No {step['name'].lower()} found. Please create one and try again.", ephemeral=True)
                 return
 
+            # Create a new view that inherits from the current view
+            view = GuildSettingsView(self.bot, interaction.guild, self.admin_service, self.original_interaction, self.is_paid)
+            view.current_step = self.current_step
+            view.settings = self.settings.copy()  # Copy the current settings
+            
             select = select_class(items, f"Select a {step['name']}", step['setting_key'])
-
-            view = discord.ui.View(timeout=300)
             view.add_item(select)
             
             if not initial:
