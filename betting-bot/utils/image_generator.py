@@ -666,3 +666,9 @@ class BetSlipGenerator:
                 league, e, exc_info=True
             )
             return None
+
+    def _format_odds_with_sign(self, odds: float) -> str:
+        """Format odds with appropriate sign."""
+        if odds > 0:
+            return f"+{odds:.0f}"
+        return f"{odds:.0f}"
