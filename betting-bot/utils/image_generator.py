@@ -14,7 +14,8 @@ from config.asset_paths import (
     LOGO_DIR,
     TEAMS_SUBDIR,
     LEAGUES_SUBDIR,
-    get_sport_category_for_path
+    get_sport_category_for_path,
+    BASE_DIR
 )
 from config.team_mappings import normalize_team_name
 from data.db_manager import DatabaseManager
