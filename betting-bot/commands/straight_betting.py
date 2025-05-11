@@ -17,25 +17,15 @@ from typing import Optional, List, Dict, Union, Any
 from datetime import datetime, timezone
 import io
 import os
+from discord.ext import commands
 
-# Use relative imports
-try:
-    from ..utils.errors import (
-        BetServiceError,
-        ValidationError,
-        GameNotFoundError,
-    )
-    from ..utils.image_generator import BetSlipGenerator
-    from discord.ext import commands
-except ImportError:
-    # Fallback for running script directly or different structure
-    from utils.errors import (
-        BetServiceError,
-        ValidationError,
-        GameNotFoundError,
-    )
-    from utils.image_generator import BetSlipGenerator
-    from discord.ext import commands
+# Import directly from utils
+from utils.errors import (
+    BetServiceError,
+    ValidationError,
+    GameNotFoundError,
+)
+from utils.image_generator import BetSlipGenerator
 
 logger = logging.getLogger(__name__)
 
