@@ -332,6 +332,9 @@ class AdminCog(commands.Cog):
         """Starts the interactive server setup process."""
         logger.info(f"Setup command initiated by {interaction.user} in guild {interaction.guild_id}")
         try:
+            # Defer the response since we'll be doing multiple operations
+            await interaction.response.defer(ephemeral=True)
+
             # Check if guild is already set up
             existing_settings = await self.bot.db_manager.fetch_one(
                 "SELECT * FROM guild_settings WHERE guild_id = %s",
@@ -339,12 +342,29 @@ class AdminCog(commands.Cog):
             )
 
             if existing_settings:
-                # Ask if they want to update images
-                view = discord.ui.View()
-                view.add_item(discord.ui.Button(label="Update Images", style=discord.ButtonStyle.primary))
-                view.add_item(discord.ui.Button(label="Full Setup", style=discord.ButtonStyle.secondary))
+                # Create view for existing guild
+                view = discord.ui.View(timeout=300)
                 
-                await interaction.response.send_message(
+                async def update_images_callback(interaction: discord.Interaction):
+                    await interaction.response.defer(ephemeral=True)
+                    view = GuildSettingsView(self.bot, interaction, is_paid=existing_settings.get('is_paid', False), is_image_setup=True)
+                    await view.start_selection()
+                
+                async def full_setup_callback(interaction: discord.Interaction):
+                    await interaction.response.defer(ephemeral=True)
+                    view = GuildSettingsView(self.bot, interaction, is_paid=existing_settings.get('is_paid', False))
+                    await view.start_selection()
+
+                # Add buttons with callbacks
+                update_images_btn = discord.ui.Button(label="Update Images", style=discord.ButtonStyle.primary)
+                update_images_btn.callback = update_images_callback
+                view.add_item(update_images_btn)
+
+                full_setup_btn = discord.ui.Button(label="Full Setup", style=discord.ButtonStyle.secondary)
+                full_setup_btn.callback = full_setup_callback
+                view.add_item(full_setup_btn)
+                
+                await interaction.followup.send(
                     "Server is already set up. Would you like to update images or run full setup?",
                     view=view,
                     ephemeral=True
@@ -357,7 +377,7 @@ class AdminCog(commands.Cog):
             if not is_paid:
                 # Show subscription modal
                 modal = SubscriptionModal()
-                await interaction.response.send_modal(modal)
+                await interaction.followup.send_modal(modal)
                 
                 # After modal is closed, show subscription view
                 view = SubscriptionView(self.bot, interaction)
@@ -369,7 +389,7 @@ class AdminCog(commands.Cog):
             else:
                 # Start paid setup
                 view = GuildSettingsView(self.bot, interaction, is_paid=True)
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Starting server setup...",
                     view=view,
                     ephemeral=True
@@ -378,10 +398,16 @@ class AdminCog(commands.Cog):
 
         except Exception as e:
             logger.exception(f"Error initiating setup command: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred while starting the setup.",
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ An error occurred while starting the setup.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    "❌ An error occurred while starting the setup.",
+                    ephemeral=True
+                )
 
     @app_commands.command(name="setchannel", description="Set or remove voice channels for stat tracking.")
     @app_commands.checks.has_permissions(administrator=True)
