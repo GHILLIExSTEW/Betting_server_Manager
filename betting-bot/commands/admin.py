@@ -603,9 +603,6 @@ class AdminCog(commands.Cog):
     async def update_images_callback(self, interaction: discord.Interaction, existing_settings=None):
         """Handle update images button click"""
         try:
-            # Defer the interaction first
-            await interaction.response.defer(ephemeral=True)
-            
             # Create a new view for image URL requests
             view = GuildSettingsView(
                 bot=self.bot,
@@ -623,19 +620,13 @@ class AdminCog(commands.Cog):
                     view.current_step = i
                     break
             
-            # Send initial message
-            await interaction.followup.send(
-                "Please provide the image URLs for your server:",
-                ephemeral=True
-            )
-            
-            # Create and send the first modal
+            # Create and send the first modal through interaction response
             modal = TextInputModal(
                 title=f"Enter {view.SETUP_STEPS[view.current_step]['name']}", 
                 setting_key=view.SETUP_STEPS[view.current_step]['setting_key']
             )
             modal.view = view
-            await interaction.followup.send_modal(modal)
+            await interaction.response.send_modal(modal)
             
         except Exception as e:
             logger.error(f"Error in update images callback: {str(e)}")
