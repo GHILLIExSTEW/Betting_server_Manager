@@ -123,83 +123,29 @@ def load_fonts():
     """Load fonts with proper fallbacks."""
     fonts = {}
     try:
-        # Try multiple possible base directories
-        possible_base_dirs = [
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # Current working directory
-            '/home/container/betting-bot',  # Container path
-            os.getcwd(),  # Current working directory
-            os.path.dirname(os.path.abspath(__file__))  # Utils directory
-        ]
+        # Get font paths from environment variables
+        font_path = os.getenv('FONT_REGULAR_PATH')
+        bold_font_path = os.getenv('FONT_BOLD_PATH')
+        emoji_font_path = os.getenv('FONT_EMOJI_PATH')
         
-        logger.info("Searching for assets directory in possible locations:")
-        for base_dir in possible_base_dirs:
-            logger.info(f"Checking: {base_dir}")
-        
-        # Try to find the assets directory
-        assets_dir = None
-        for base_dir in possible_base_dirs:
-            test_assets_dir = os.path.join(base_dir, "assets")
-            if os.path.exists(test_assets_dir):
-                assets_dir = test_assets_dir
-                logger.info(f"Found assets directory at: {assets_dir}")
-                break
-        
-        if not assets_dir:
-            logger.error("Could not find assets directory in any of the possible locations")
-            raise FileNotFoundError("Assets directory not found")
-            
-        fonts_dir = os.path.join(assets_dir, "fonts")
-        
-        # Try to load fonts from the assets directory first
-        font_path = os.path.join(fonts_dir, "Roboto-Regular.ttf")
-        bold_font_path = os.path.join(fonts_dir, "Roboto-Bold.ttf")
-        emoji_font_path = os.path.join(fonts_dir, "NotoColorEmoji-Regular.ttf")
-        
-        # Debug logging
-        logger.info(f"Using assets directory: {assets_dir}")
-        logger.info(f"Using fonts directory: {fonts_dir}")
+        logger.info("Loading fonts from environment variables:")
         logger.info(f"Regular font path: {font_path}")
         logger.info(f"Bold font path: {bold_font_path}")
         logger.info(f"Emoji font path: {emoji_font_path}")
         
-        # Check if fonts exist in assets
+        # Check if all required font paths are set
+        if not all([font_path, bold_font_path, emoji_font_path]):
+            logger.warning("Not all font paths are set in environment variables")
+            logger.warning("FONT_REGULAR_PATH, FONT_BOLD_PATH, and FONT_EMOJI_PATH must be set")
+            raise ValueError("Missing required font paths in environment variables")
+        
+        # Check if fonts exist at specified paths
         if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
-            logger.warning("Font files not found in assets directory, trying system fonts")
-            
-            # Windows fallback paths
-            if os.name == 'nt':
-                font_path = os.path.join(os.environ['WINDIR'], 'Fonts', 'arial.ttf')
-                bold_font_path = os.path.join(os.environ['WINDIR'], 'Fonts', 'arialbd.ttf')
-                emoji_font_path = os.path.join(os.environ['WINDIR'], 'Fonts', 'seguiemj.ttf')
-                logger.info(f"Using Windows system fonts:")
-                logger.info(f"Regular font: {font_path}")
-                logger.info(f"Bold font: {bold_font_path}")
-                logger.info(f"Emoji font: {emoji_font_path}")
-            else:
-                # Linux/Unix fallback paths
-                font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
-                bold_font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-                emoji_font_path = '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf'
-                logger.info(f"Using Linux system fonts:")
-                logger.info(f"Regular font: {font_path}")
-                logger.info(f"Bold font: {bold_font_path}")
-                logger.info(f"Emoji font: {emoji_font_path}")
-            
-            if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
-                logger.warning("System fonts not found, using default font")
-                default_font = ImageFont.load_default()
-                return {
-                    'font_m_18': default_font,
-                    'font_m_24': default_font,
-                    'font_b_18': default_font,
-                    'font_b_24': default_font,
-                    'font_b_36': default_font,
-                    'font_b_28': default_font,
-                    'emoji_font_24': default_font
-                }
+            logger.error("One or more font files not found at specified paths")
+            raise FileNotFoundError("Font files not found at specified paths")
 
         # Load fonts with proper error handling
-        logger.info("Loading fonts from paths...")
+        logger.info("Loading fonts from specified paths...")
         fonts['font_m_18'] = ImageFont.truetype(font_path, 18)
         fonts['font_m_24'] = ImageFont.truetype(font_path, 24)
         fonts['font_b_18'] = ImageFont.truetype(bold_font_path, 18)
