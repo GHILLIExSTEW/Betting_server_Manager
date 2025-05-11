@@ -206,7 +206,9 @@ class GuildSettingsView(discord.ui.View):
             'name': 'Admin Channel',
             'select': ChannelSelect,
             'options': lambda guild: [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels],
-            'setting_key': 'admin_channel_id'
+            'setting_key': 'admin_channel_id',
+            'max_count': 1,  # Only one admin channel allowed
+            'free_count': 1
         },
         {
             'name': 'Admin Role',
@@ -298,6 +300,13 @@ class GuildSettingsView(discord.ui.View):
                     self.current_step += 1
                     await self.process_next_selection(interaction)
                     return
+
+            # For admin channel, check if we've already selected one
+            if step['setting_key'] == 'admin_channel_id' and 'admin_channel_id' in self.settings:
+                # Move to next step if admin channel is already selected
+                self.current_step += 1
+                await self.process_next_selection(interaction)
+                return
 
             select = select_class(items, f"Select a {step['name']}", step['setting_key'])
             view.add_item(select)
