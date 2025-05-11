@@ -182,6 +182,25 @@ class SubscriptionView(discord.ui.View):
         await view.start_selection()
         self.stop()
 
+class SkipButton(discord.ui.Button):
+    """Button to skip the current setup step."""
+    def __init__(self):
+        super().__init__(
+            label="Skip",
+            style=discord.ButtonStyle.secondary,
+            custom_id="skip_step"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        """Handle skip button click."""
+        if not hasattr(self.view, 'process_next_selection'):
+            await interaction.response.send_message("Error: Cannot process skip action.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        self.view.current_step += 1
+        await self.view.process_next_selection(interaction)
+
 class GuildSettingsView(discord.ui.View):
     """View for guild settings setup"""
     
@@ -311,13 +330,17 @@ class GuildSettingsView(discord.ui.View):
             select = select_class(items, f"Select a {step['name']}", step['setting_key'])
             view.add_item(select)
             
+            # Add skip button
+            skip_button = SkipButton()
+            view.add_item(skip_button)
+            
             if not initial:
                 if not interaction.response.is_done():
-                    await interaction.response.send_message(f"Select a {step['name']}:", view=view, ephemeral=True)
+                    await interaction.response.send_message(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
                 else:
-                    await interaction.followup.send(f"Select a {step['name']}:", view=view, ephemeral=True)
+                    await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
             else:
-                await interaction.followup.send(f"Select a {step['name']}:", view=view, ephemeral=True)
+                await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
         except Exception as e:
             logger.error(f"Error in process_next_selection: {str(e)}")
             if not interaction.response.is_done():
