@@ -453,7 +453,12 @@ class TextInputModal(discord.ui.Modal):
             while view.current_step < len(view.SETUP_STEPS):
                 step = view.SETUP_STEPS[view.current_step]
                 if step.get('is_premium_only', False) and step['select'] is None:
-                    # Create and send the next modal
+                    # Send a message first
+                    await interaction.followup.send(
+                        f"Please provide the {step['name'].lower()}:",
+                        ephemeral=True
+                    )
+                    # Create and send the next modal through a new interaction
                     next_modal = TextInputModal(
                         title=f"Enter {step['name']}", 
                         setting_key=step['setting_key']
