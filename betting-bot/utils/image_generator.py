@@ -123,10 +123,23 @@ def load_fonts():
     """Load fonts with proper fallbacks."""
     fonts = {}
     try:
+        # Get absolute paths
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        assets_dir = os.path.join(base_dir, "assets")
+        fonts_dir = os.path.join(assets_dir, "fonts")
+        
         # Try to load fonts from the assets directory first
-        font_path = os.path.join(ASSETS_DIR, "fonts", "Roboto-Regular.ttf")
-        bold_font_path = os.path.join(ASSETS_DIR, "fonts", "Roboto-Bold.ttf")
-        emoji_font_path = os.path.join(ASSETS_DIR, "fonts", "NotoColorEmoji-Regular.ttf")
+        font_path = os.path.join(fonts_dir, "Roboto-Regular.ttf")
+        bold_font_path = os.path.join(fonts_dir, "Roboto-Bold.ttf")
+        emoji_font_path = os.path.join(fonts_dir, "NotoColorEmoji-Regular.ttf")
+        
+        # Debug logging
+        logger.info(f"Base directory: {base_dir}")
+        logger.info(f"Assets directory: {assets_dir}")
+        logger.info(f"Fonts directory: {fonts_dir}")
+        logger.info(f"Regular font path: {font_path}")
+        logger.info(f"Bold font path: {bold_font_path}")
+        logger.info(f"Emoji font path: {emoji_font_path}")
         
         # Check if fonts exist in assets
         if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
