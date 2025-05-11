@@ -808,13 +808,27 @@ class StraightBetWorkflowView(View):
                 self.add_item(ChannelSelect(self, text_channels))
                 self.add_item(CancelButton(self))
                 
-                # Generate preview image if needed
+                # Generate preview image
                 file_to_send = None
-                if hasattr(self, 'bet_slip_generator'):
-                    try:
-                        file_to_send = await self.bet_slip_generator.generate_preview(self.bet_details)
-                    except Exception as e:
-                        logger.error(f"Failed to generate preview image: {e}")
+                try:
+                    bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                        home_team=self.bet_details.get('team', 'Unknown'),
+                        away_team=self.bet_details.get('opponent', 'Unknown'),
+                        league=self.bet_details.get('league', 'UNKNOWN'),
+                        line=self.bet_details.get('line', 'N/A'),
+                        odds=float(self.bet_details.get('odds', 0)),
+                        units=float(self.bet_details.get('units_str', 1.0)),
+                        bet_id=str(self.bet_details.get('bet_serial', 'PREVIEW')),
+                        timestamp=datetime.now(timezone.utc),
+                        bet_type="straight"
+                    )
+                    if bet_slip_image:
+                        self.preview_image_bytes = io.BytesIO()
+                        bet_slip_image.save(self.preview_image_bytes, format='PNG')
+                        self.preview_image_bytes.seek(0)
+                        file_to_send = File(self.preview_image_bytes, filename="bet_preview.png")
+                except Exception as e:
+                    logger.error(f"Failed to generate preview image: {e}")
                 
                 await self.edit_message(content=f"{step_content}: Review & Select Channel", view=self, file=file_to_send)
                 self.is_processing = False; return
