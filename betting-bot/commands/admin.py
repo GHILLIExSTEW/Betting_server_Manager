@@ -335,6 +335,10 @@ class GuildSettingsView(discord.ui.View):
                     await self.process_next_selection(interaction)
                 return
 
+            # For selection steps, defer the interaction
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+
             select_class = step['select']
             
             # Get the appropriate items based on the step type
@@ -584,7 +588,6 @@ class AdminCog(commands.Cog):
     async def update_images_callback(self, interaction: discord.Interaction, existing_settings=None):
         """Handle update images button click"""
         try:
-            await interaction.response.defer()
             # Create a new view for image URL requests
             view = GuildSettingsView(
                 bot=self.bot,
@@ -602,17 +605,19 @@ class AdminCog(commands.Cog):
                     view.current_step = i
                     break
             
-            await interaction.followup.send(
+            # Send initial message and start selection without deferring
+            await interaction.response.send_message(
                 "Please provide the image URLs for your server:",
                 view=view,
                 ephemeral=True
             )
+            
             # Start with image URL requests
-            await view.start_selection()
+            await view.process_next_selection(interaction)
         except Exception as e:
             logger.error(f"Error in update images callback: {str(e)}")
             if not interaction.response.is_done():
-                await interaction.followup.send("An error occurred while updating images. Please try again.", ephemeral=True)
+                await interaction.response.send_message("An error occurred while updating images. Please try again.", ephemeral=True)
             else:
                 await interaction.followup.send("An error occurred while updating images. Please try again.", ephemeral=True)
 
