@@ -197,7 +197,13 @@ class SkipButton(discord.ui.Button):
             await interaction.response.send_message("Error: Cannot process skip action.", ephemeral=True)
             return
 
+        # Defer the interaction to prevent timeout
         await interaction.response.defer()
+        
+        # Store the message for editing
+        self.view.message = interaction.message
+        
+        # Move to next step
         self.view.current_step += 1
         await self.view.process_next_selection(interaction)
 
@@ -343,15 +349,23 @@ class GuildSettingsView(discord.ui.View):
             
             if initial:
                 # For initial message, send a new one
-                await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
+                message = await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
+                view.message = message
             else:
                 # For subsequent steps, edit the existing message
                 try:
-                    await interaction.message.edit(content=f"Select a {step['name']} or skip:", view=view)
+                    if hasattr(self, 'message'):
+                        await self.message.edit(content=f"Select a {step['name']} or skip:", view=view)
+                        view.message = self.message
+                    else:
+                        # Fallback to new message if no existing message
+                        message = await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
+                        view.message = message
                 except Exception as e:
                     logger.error(f"Error editing message: {str(e)}")
                     # Fallback to new message if edit fails
-                    await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
+                    message = await interaction.followup.send(f"Select a {step['name']} or skip:", view=view, ephemeral=True)
+                    view.message = message
         except Exception as e:
             logger.error(f"Error in process_next_selection: {str(e)}")
             if not interaction.response.is_done():
