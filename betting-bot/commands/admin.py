@@ -412,8 +412,7 @@ class GuildSettingsView(discord.ui.View):
             next_step = self.SETUP_STEPS[self.current_step]
             if next_step.get('is_premium_only', False) and next_step['select'] is None:
                 await message.channel.send(
-                    f"Please provide the {next_step['name'].lower()} or type 'skip' to skip this step:",
-                    ephemeral=True
+                    f"Please provide the {next_step['name'].lower()} or type 'skip' to skip this step:"
                 )
                 self.waiting_for_url = True
                 return
@@ -448,8 +447,7 @@ class GuildSettingsView(discord.ui.View):
                 )
             else:
                 await interaction_or_message.channel.send(
-                    "✅ Guild setup completed successfully!",
-                    ephemeral=True
+                    "✅ Guild setup completed successfully!"
                 )
         except Exception as e:
             logger.exception(f"Error saving guild settings: {e}")
@@ -460,8 +458,7 @@ class GuildSettingsView(discord.ui.View):
                 )
             else:
                 await interaction_or_message.channel.send(
-                    "❌ An error occurred while saving settings.",
-                    ephemeral=True
+                    "❌ An error occurred while saving settings."
                 )
         finally:
             self.stop()
@@ -516,7 +513,7 @@ class AdminCog(commands.Cog):
                         del self.active_views[message.author.id]
                 except Exception as e:
                     logger.error(f"Error handling URL input: {str(e)}")
-                    await message.channel.send("An error occurred while processing your input. Please try again.", ephemeral=True)
+                    await message.channel.send("An error occurred while processing your input. Please try again.")
                     del self.active_views[message.author.id]
 
     @app_commands.command(name="setup", description="Run the interactive server setup.")
