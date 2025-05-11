@@ -9,16 +9,16 @@ from discord import app_commands
 from dotenv import load_dotenv
 import asyncio
 from typing import Optional
-from bot.data.db_manager import DatabaseManager
-from bot.services.admin_service import AdminService
-from bot.services.analytics_service import AnalyticsService
-from bot.services.bet_service import BetService
-from bot.services.game_service import GameService
-from bot.services.user_service import UserService
-from bot.services.voice_service import VoiceService
-from bot.services.data_sync_service import DataSyncService
-from bot.utils.image_generator import BetSlipGenerator
-from bot.cogs.sync_cog import setup_sync_cog
+from data.db_manager import DatabaseManager
+from services.admin_service import AdminService
+from services.analytics_service import AnalyticsService
+from services.bet_service import BetService
+from services.game_service import GameService
+from services.user_service import UserService
+from services.voice_service import VoiceService
+from services.data_sync_service import DataSyncService
+from utils.image_generator import BetSlipGenerator
+from cogs.sync_cog import setup_sync_cog
 
 # --- Path Setup ---
 # Determine the directory where main.py is located
