@@ -252,9 +252,10 @@ class BetSlipGenerator:
     def _load_background(self):
         """Load the background image."""
         try:
-            self.background = Image.open(os.path.join(ASSETS_DIR, "background.png"))
+            # Create a solid color background instead of loading an image
+            self.background = Image.new('RGB', (800, 400), color=(45, 45, 45))  # Dark gray background
         except Exception as e:
-            logger.error(f"Error loading background: {e}")
+            logger.error(f"Error creating background: {e}")
             raise
             
     def _load_team_logos(self):
