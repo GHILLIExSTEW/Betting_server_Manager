@@ -802,6 +802,7 @@ class StraightBetWorkflowView(View):
                 text_channels = [
                     channel for channel in interaction.guild.text_channels
                     if channel.permissions_for(interaction.guild.me).send_messages
+                    and not channel.name.startswith('embed_')  # Exclude embed channels
                 ]
                 
                 # Add channel select and cancel button
