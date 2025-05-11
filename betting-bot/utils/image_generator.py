@@ -8,6 +8,15 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from PIL import Image, ImageDraw, ImageFont
+from ..config.asset_paths import (
+    ASSETS_DIR,
+    FONT_DIR,
+    LOGO_DIR,
+    TEAMS_SUBDIR,
+    LEAGUES_SUBDIR,
+    get_sport_category_for_path
+)
+from ..config.team_mappings import normalize_team_name
 
 logger = logging.getLogger(__name__)
 
@@ -222,36 +231,72 @@ except Exception as e:
 
 
 class BetSlipGenerator:
-    def __init__(self, font_path: Optional[str] = None, emoji_font_path: Optional[str] = None, assets_dir: Optional[str] = None):
-        self.assets_dir = assets_dir or _PATHS["ASSETS_DIR"]
-        self.font_path = font_path or _PATHS["DEFAULT_FONT_PATH"]
-        self.bold_font_path = _PATHS["DEFAULT_BOLD_FONT_PATH"]
-        self.emoji_font_path = emoji_font_path or _PATHS["DEFAULT_EMOJI_FONT_PATH_NOTO"]
-        self.league_team_base_dir = _PATHS["LEAGUE_TEAM_BASE_DIR"]
-        self.league_logo_base_dir = _PATHS["LEAGUE_LOGO_BASE_DIR"]
-        os.makedirs(self.league_team_base_dir, exist_ok=True)
-        os.makedirs(self.league_logo_base_dir, exist_ok=True)
-        self._logo_cache = {}
-        self._font_cache = {}
-        self._lock_icon_cache = None
-        self._max_cache_size = 100
-        self._cache_expiry = 3600
-        self._last_cache_cleanup = time.time()
-        self.width = 800
-        self.leg_height = 120
-        self.header_height = 100
-        self.footer_height = 80
-        self.padding = 20
-        self.logo_size = 60
-        self.image = None
-        self.font_m_18 = font_m_18
-        self.font_m_24 = font_m_24
-        self.font_b_18 = font_b_18
-        self.font_b_24 = font_b_24
-        self.font_b_28 = font_b_28
-        self.font_b_36 = font_b_36
-        self.emoji_font_24 = emoji_font_24
-        logger.info("BetSlipGenerator initialized with assets_dir: %s", self.assets_dir)
+    def __init__(self):
+        """Initialize the bet slip generator with required assets."""
+        self._load_fonts()
+        self._load_background()
+        self._load_team_logos()
+        self._load_league_logos()
+        
+    def _load_fonts(self):
+        """Load required fonts."""
+        try:
+            self.title_font = ImageFont.truetype(os.path.join(FONT_DIR, "Roboto-Bold.ttf"), 36)
+            self.subtitle_font = ImageFont.truetype(os.path.join(FONT_DIR, "Roboto-Regular.ttf"), 24)
+            self.text_font = ImageFont.truetype(os.path.join(FONT_DIR, "Roboto-Regular.ttf"), 20)
+            self.small_font = ImageFont.truetype(os.path.join(FONT_DIR, "Roboto-Regular.ttf"), 16)
+        except Exception as e:
+            logger.error(f"Error loading fonts: {e}")
+            raise
+            
+    def _load_background(self):
+        """Load the background image."""
+        try:
+            self.background = Image.open(os.path.join(ASSETS_DIR, "background.png"))
+        except Exception as e:
+            logger.error(f"Error loading background: {e}")
+            raise
+            
+    def _load_team_logos(self):
+        """Load team logos."""
+        self.team_logos = {}
+        try:
+            for sport_category in os.listdir(TEAMS_SUBDIR):
+                sport_path = os.path.join(TEAMS_SUBDIR, sport_category)
+                if os.path.isdir(sport_path):
+                    for team_file in os.listdir(sport_path):
+                        if team_file.endswith('.png'):
+                            team_name = os.path.splitext(team_file)[0]
+                            self.team_logos[team_name] = Image.open(os.path.join(sport_path, team_file))
+        except Exception as e:
+            logger.error(f"Error loading team logos: {e}")
+            raise
+            
+    def _load_league_logo(self, league: str) -> Image.Image:
+        """Load a league logo."""
+        try:
+            sport_category = get_sport_category_for_path(league)
+            if not sport_category:
+                logger.warning(f"No sport category found for league: {league}")
+                return None
+                
+            logo_path = os.path.join(LEAGUES_SUBDIR, sport_category, f"{league.lower()}.png")
+            if os.path.exists(logo_path):
+                return Image.open(logo_path)
+            else:
+                logger.warning(f"League logo not found: {logo_path}")
+                return None
+        except Exception as e:
+            logger.error(f"Error loading league logo for {league}: {e}")
+            return None
+            
+    def _get_team_logo(self, team_name: str) -> Image.Image:
+        """Get a team logo by name."""
+        normalized_name = normalize_team_name(team_name)
+        if normalized_name in self.team_logos:
+            return self.team_logos[normalized_name]
+        logger.warning(f"Team logo not found for: {team_name} (normalized: {normalized_name})")
+        return None
 
     def _format_odds_with_sign(self, odds: Optional[Any]) -> str:
         if odds is None:
@@ -269,10 +314,10 @@ class BetSlipGenerator:
             sport = get_sport_category_for_path(league_upper)
             if sport == DEFAULT_FALLBACK_SPORT_CATEGORY:
                 sport = "UNKNOWN_NCAA_SPORT"
-            team_dir = os.path.join(self.league_team_base_dir, "NCAA", sport)
+            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, "NCAA", sport)
         else:
             sport = get_sport_category_for_path(league_upper)
-            team_dir = os.path.join(self.league_team_base_dir, sport, league_upper)
+            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, sport, league_upper)
         os.makedirs(team_dir, exist_ok=True)
         return team_dir
 
@@ -323,6 +368,40 @@ class BetSlipGenerator:
             "Sharks": "san_jose_sharks",
             "Kings": "los_angeles_kings",
             "Ducks": "anaheim_ducks",
+            
+            # NFL Teams
+            "49ers": "san_francisco_49ers",
+            "Bears": "chicago_bears",
+            "Bengals": "cincinnati_bengals",
+            "Bills": "buffalo_bills",
+            "Broncos": "denver_broncos",
+            "Browns": "cleveland_browns",
+            "Buccaneers": "tampa_bay_buccaneers",
+            "Cardinals": "arizona_cardinals",
+            "Chargers": "los_angeles_chargers",
+            "Chiefs": "kansas_city_chiefs",
+            "Colts": "indianapolis_colts",
+            "Cowboys": "dallas_cowboys",
+            "Dolphins": "miami_dolphins",
+            "Eagles": "philadelphia_eagles",
+            "Falcons": "atlanta_falcons",
+            "Giants": "new_york_giants",
+            "Jaguars": "jacksonville_jaguars",
+            "Jets": "new_york_jets",
+            "Lions": "detroit_lions",
+            "Packers": "green_bay_packers",
+            "Panthers": "carolina_panthers",
+            "Patriots": "new_england_patriots",
+            "Raiders": "las_vegas_raiders",
+            "Rams": "los_angeles_rams",
+            "Ravens": "baltimore_ravens",
+            "Saints": "new_orleans_saints",
+            "Seahawks": "seattle_seahawks",
+            "Steelers": "pittsburgh_steelers",
+            "Texans": "houston_texans",
+            "Titans": "tennessee_titans",
+            "Vikings": "minnesota_vikings",
+            "Commanders": "washington_commanders"
         }
         
         # First check if we have a direct mapping
@@ -429,7 +508,7 @@ class BetSlipGenerator:
                     del self._logo_cache[cache_key]
             sport = get_sport_category_for_path(league.upper())
             fname = f"{league.lower().replace(' ', '_')}.png"
-            logo_dir = os.path.join(self.league_logo_base_dir, sport, league.upper())
+            logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper())
             logo_path = os.path.join(logo_dir, fname)
             os.makedirs(logo_dir, exist_ok=True)
 
