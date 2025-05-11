@@ -111,7 +111,7 @@ _PATHS = {
     "ASSETS_DIR": ASSETS_DIR,
     "DEFAULT_FONT_PATH": os.path.join(FONT_DIR, "Roboto-Regular.ttf"),
     "DEFAULT_BOLD_FONT_PATH": os.path.join(FONT_DIR, "Roboto-Bold.ttf"),
-    "DEFAULT_EMOJI_FONT_PATH_NOTO": os.path.join(FONT_DIR, "NotoEmoji-Regular.ttf"),
+    "DEFAULT_EMOJI_FONT_PATH_NOTO": os.path.join(FONT_DIR, "NotoColorEmoji-Regular.ttf"),
     "DEFAULT_EMOJI_FONT_PATH_SEGOE": os.path.join(FONT_DIR, "SegoeUIEmoji.ttf"),
     "LEAGUE_TEAM_BASE_DIR": TEAMS_SUBDIR,
     "LEAGUE_LOGO_BASE_DIR": LEAGUES_SUBDIR,
@@ -164,21 +164,33 @@ class BetSlipGenerator:
         """Initialize the bet slip generator with required assets."""
         self.guild_id = guild_id
         self.db_manager = DatabaseManager()
+        self.padding = 20
+        self.LEAGUE_TEAM_BASE_DIR = TEAMS_SUBDIR
+        self.LEAGUE_LOGO_BASE_DIR = LEAGUES_SUBDIR
+        self._logo_cache = {}
+        self._lock_icon_cache = None
+        self._last_cache_cleanup = time.time()
+        self._cache_expiry = 300  # 5 minutes
+        self._max_cache_size = 100
         self._load_fonts()
-        self._load_background()
+        self.background = None
+        self.team_logos = {}
         self._load_team_logos()
         self._load_league_logos()
         
     def _load_fonts(self):
         """Load required fonts."""
         try:
-            self.title_font = ImageFont.truetype(os.path.join(FONT_DIR, "Roboto-Bold.ttf"), 36)
-            self.subtitle_font = ImageFont.truetype(os.path.join(FONT_DIR, "Roboto-Regular.ttf"), 24)
-            self.text_font = ImageFont.truetype(os.path.join(FONT_DIR, "Roboto-Regular.ttf"), 20)
-            self.small_font = ImageFont.truetype(os.path.join(FONT_DIR, "Roboto-Regular.ttf"), 16)
+            self.font_b_36 = ImageFont.truetype(_PATHS["DEFAULT_BOLD_FONT_PATH"], 36)
+            self.font_b_28 = ImageFont.truetype(_PATHS["DEFAULT_BOLD_FONT_PATH"], 28)
+            self.font_b_24 = ImageFont.truetype(_PATHS["DEFAULT_BOLD_FONT_PATH"], 24)
+            self.font_m_24 = ImageFont.truetype(_PATHS["DEFAULT_FONT_PATH"], 24)
+            self.font_m_18 = ImageFont.truetype(_PATHS["DEFAULT_FONT_PATH"], 18)
+            self.emoji_font_24 = ImageFont.truetype(_PATHS["DEFAULT_EMOJI_FONT_PATH_NOTO"], 24)
         except Exception as e:
             logger.error(f"Error loading fonts: {e}")
-            raise
+            # Fallback to default fonts
+            self.font_b_36 = self.font_b_28 = self.font_b_24 = self.font_m_24 = self.font_m_18 = self.emoji_font_24 = ImageFont.load_default()
             
     def _load_background(self):
         """Load the background image from guild settings or use a solid color."""
@@ -222,24 +234,69 @@ class BetSlipGenerator:
             logger.error(f"Error loading team logos: {e}")
             raise
             
-    def _load_league_logo(self, league: str) -> Image.Image:
-        """Load a league logo."""
-        try:
-            sport_category = get_sport_category_for_path(league)
-            if not sport_category:
-                logger.warning(f"No sport category found for league: {league}")
-                return None
-                
-            logo_path = os.path.join(LEAGUES_SUBDIR, sport_category, f"{league.lower()}.png")
-            if os.path.exists(logo_path):
-                return Image.open(logo_path)
-            else:
-                logger.warning(f"League logo not found: {logo_path}")
-                return None
-        except Exception as e:
-            logger.error(f"Error loading league logo for {league}: {e}")
+    def _load_league_logo(self, league: str) -> Optional[Image.Image]:
+        """Load a league logo with caching."""
+        if not league:
             return None
             
+        try:
+            cache_key = f"league_{league}"
+            now = time.time()
+            
+            # Check cache first
+            if cache_key in self._logo_cache:
+                logo, ts = self._logo_cache[cache_key]
+                if now - ts <= self._cache_expiry:
+                    return logo
+                else:
+                    del self._logo_cache[cache_key]
+            
+            # Get the league directory
+            sport = get_sport_category_for_path(league.upper())
+            fname = f"{league.lower().replace(' ', '_')}.png"
+            logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper())
+            logo_path = os.path.join(logo_dir, fname)
+            os.makedirs(logo_dir, exist_ok=True)
+            
+            # Log the attempt
+            absolute_logo_path = os.path.abspath(logo_path)
+            file_exists = os.path.exists(absolute_logo_path)
+            logger.info(
+                "Loading league logo - League: '%s', Sport: '%s', Path: '%s', Exists: %s",
+                league, sport, absolute_logo_path, file_exists
+            )
+            
+            # Try to load the logo
+            logo = None
+            if file_exists:
+                try:
+                    logo = Image.open(absolute_logo_path).convert("RGBA")
+                except Exception as e:
+                    logger.error("Error loading league logo %s: %s", absolute_logo_path, e)
+            
+            # Cache the logo if we have one
+            if logo:
+                self._cleanup_cache()
+                if len(self._logo_cache) >= self._max_cache_size:
+                    # Remove oldest entry if cache is full
+                    oldest_key = min(self._logo_cache, key=lambda k: self._logo_cache[k][1])
+                    del self._logo_cache[oldest_key]
+                self._logo_cache[cache_key] = (logo.copy(), now)
+                return logo
+                
+            logger.warning(
+                "No logo found for league %s (path: %s)",
+                league, absolute_logo_path
+            )
+            return None
+            
+        except Exception as e:
+            logger.error(
+                "Error in _load_league_logo for %s: %s",
+                league, e, exc_info=True
+            )
+            return None
+
     def _get_team_logo(self, team_name: str) -> Image.Image:
         """Get a team logo by name."""
         normalized_name = normalize_team_name(team_name)
@@ -364,36 +421,44 @@ class BetSlipGenerator:
         return normalized
 
     def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
+        """Load a team logo with caching."""
         if not team_name or not league:
             return None
+            
         try:
             cache_key = f"team_{team_name}_{league}"
             now = time.time()
+            
+            # Check cache first
             if cache_key in self._logo_cache:
                 logo, ts = self._logo_cache[cache_key]
                 if now - ts <= self._cache_expiry:
                     return logo
                 else:
                     del self._logo_cache[cache_key]
+            
+            # Get the team directory
             team_dir = self._ensure_team_dir_exists(league)
             normalized_name = self._normalize_team_name(team_name)
             logo_path = os.path.join(team_dir, f"{normalized_name}.png")
-
-            # --- START REFINED LOGGING ---
+            
+            # Log the attempt
             absolute_logo_path = os.path.abspath(logo_path)
             file_exists = os.path.exists(absolute_logo_path)
             logger.info(
-                "Team logo details - Team: '%s', Normalized: '%s', League: '%s', Path: '%s', Exists: %s",
+                "Loading team logo - Team: '%s', Normalized: '%s', League: '%s', Path: '%s', Exists: %s",
                 team_name, normalized_name, league, absolute_logo_path, file_exists
             )
-            # --- END REFINED LOGGING ---
-
+            
+            # Try to load the logo
             logo = None
             if file_exists:
                 try:
                     logo = Image.open(absolute_logo_path).convert("RGBA")
                 except Exception as e:
-                    logger.error("Err loading %s: %s", absolute_logo_path, e)
+                    logger.error("Error loading team logo %s: %s", absolute_logo_path, e)
+            
+            # Fallback to default logo if needed
             if logo is None:
                 default_path = _PATHS["DEFAULT_TEAM_LOGO_PATH"]
                 abs_default = os.path.abspath(default_path)
@@ -405,25 +470,29 @@ class BetSlipGenerator:
                             team_name, absolute_logo_path
                         )
                     except Exception as e:
-                        logger.error("Err loading default %s: %s", abs_default, e)
+                        logger.error("Error loading default logo %s: %s", abs_default, e)
                 else:
                     logger.warning("Default team logo not found: %s", abs_default)
+            
+            # Cache the logo if we have one
             if logo:
                 self._cleanup_cache()
                 if len(self._logo_cache) >= self._max_cache_size:
-                    self._logo_cache.pop(
-                        min(self._logo_cache, key=lambda k: self._logo_cache[k][1]), None
-                    )
+                    # Remove oldest entry if cache is full
+                    oldest_key = min(self._logo_cache, key=lambda k: self._logo_cache[k][1])
+                    del self._logo_cache[oldest_key]
                 self._logo_cache[cache_key] = (logo.copy(), now)
                 return logo
+                
             logger.warning(
-                "Final: No logo loaded for %s (%s) path: %s",
+                "No logo loaded for %s (%s) path: %s",
                 team_name, league, absolute_logo_path
             )
             return None
+            
         except Exception as e:
             logger.error(
-                "Err _load_team_logo %s (%s): %s",
+                "Error in _load_team_logo for %s (%s): %s",
                 team_name, league, e, exc_info=True
             )
             return None
@@ -443,57 +512,6 @@ class BetSlipGenerator:
             except Exception as e:
                 logger.error("Err loading lock icon: %s", e)
         return self._lock_icon_cache
-
-    def _load_league_logo(self, league: str) -> Optional[Image.Image]:
-        if not league:
-            return None
-        try:
-            cache_key = f"league_{league}"
-            now = time.time()
-            if cache_key in self._logo_cache:
-                logo, ts = self._logo_cache[cache_key]
-                if now - ts <= self._cache_expiry:
-                    return logo
-                else:
-                    del self._logo_cache[cache_key]
-            sport = get_sport_category_for_path(league.upper())
-            fname = f"{league.lower().replace(' ', '_')}.png"
-            logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper())
-            logo_path = os.path.join(logo_dir, fname)
-            os.makedirs(logo_dir, exist_ok=True)
-
-            # --- START REFINED LOGGING ---
-            absolute_logo_path = os.path.abspath(logo_path)
-            file_exists = os.path.exists(absolute_logo_path)
-            logger.info(
-                "League logo details - League: '%s', Sport: '%s', Path: '%s', Exists: %s",
-                league, sport, absolute_logo_path, file_exists
-            )
-            # --- END REFINED LOGGING ---
-
-            logo = None
-            if file_exists:
-                try:
-                    with Image.open(absolute_logo_path) as img_file:
-                        logo = img_file.convert('RGBA')
-                except Exception as e:
-                    logger.error("Err loading %s: %s", absolute_logo_path, e)
-            if logo:
-                self._cleanup_cache()
-                if len(self._logo_cache) >= self._max_cache_size:
-                    self._logo_cache.pop(
-                        min(self._logo_cache, key=lambda k: self._logo_cache[k][1]), None
-                    )
-                self._logo_cache[cache_key] = (logo.copy(), now)
-                return logo
-            logger.warning(
-                "No logo found for league %s (path: %s)",
-                league, absolute_logo_path
-            )
-            return None
-        except Exception as e:
-            logger.error("Err _load_league_logo %s: %s", league, e, exc_info=True)
-            return None
 
     def generate_bet_slip(
         self, home_team: str, away_team: str, league: Optional[str], line: str,
