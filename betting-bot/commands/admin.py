@@ -427,7 +427,13 @@ class AdminCog(commands.Cog):
         """Handle update images button click"""
         try:
             await interaction.response.defer()
-            view = GuildSettingsView(self.bot, interaction, is_paid=True)
+            view = GuildSettingsView(
+                bot=self.bot,
+                guild=interaction.guild,
+                admin_service=self.admin_service,
+                original_interaction=interaction,
+                is_paid=True
+            )
             if existing_settings:
                 view.settings = dict(existing_settings)
             await interaction.followup.send(
@@ -447,7 +453,13 @@ class AdminCog(commands.Cog):
         """Handle full setup button click"""
         try:
             await interaction.response.defer()
-            view = GuildSettingsView(self.bot, interaction, is_paid=True)
+            view = GuildSettingsView(
+                bot=self.bot,
+                guild=interaction.guild,
+                admin_service=self.admin_service,
+                original_interaction=interaction,
+                is_paid=True
+            )
             await interaction.followup.send(
                 "Starting full server setup...",
                 view=view,
