@@ -937,9 +937,9 @@ class StraightBetWorkflowView(View):
             self.stop()
 
     async def _handle_units_selection(self, interaction: discord.Interaction, units: float):
-        """Handle units selection and generate bet slip preview"""
-        self.units = units
+        """Handle units selection and generate bet slip preview."""
         self.current_step = 6
+        self.units = units
         
         # Initialize bet slip generator if not already done
         if self.bet_slip_generator is None:
@@ -947,44 +947,46 @@ class StraightBetWorkflowView(View):
             
         try:
             # Generate bet slip preview
-            bet_slip = self.bet_slip_generator.generate_bet_slip(
+            bet_slip_image = self.bet_slip_generator.generate_bet_slip(
                 home_team=self.home_team,
                 away_team=self.away_team,
                 league=self.league,
                 line=self.line,
                 odds=self.odds,
-                units=self.units,
+                units=units,
                 bet_id=self.bet_id,
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
+                bet_type="straight"
             )
             
-            if bet_slip:
+            if bet_slip_image:
                 # Create BytesIO buffer for the image
-                buffer = BytesIO()
-                bet_slip.save(buffer, format='PNG')
-                buffer.seek(0)
+                image_buffer = BytesIO()
+                bet_slip_image.save(image_buffer, format='PNG')
+                image_buffer.seek(0)
                 
-                # Create discord.File from the buffer
-                file = discord.File(buffer, filename='bet_slip.png')
+                # Create discord.File object
+                bet_slip_file = discord.File(image_buffer, filename=f"bet_slip_{self.bet_id}.png")
                 
-                # Edit the message with the bet slip preview
+                # Edit message with bet slip preview
                 await self.edit_message(
-                    content=self.get_current_content(),
+                    content=self.get_content(),
                     view=self,
-                    file=file
+                    file=bet_slip_file
                 )
+                
                 logger.debug(f"Bet slip preview generated and attached for bet {self.bet_id}")
             else:
-                logger.error(f"Failed to generate bet slip preview for bet {self.bet_id}")
-                # Still update the message even if image generation fails
+                logger.warning(f"Failed to generate bet slip preview for bet {self.bet_id}")
                 await self.edit_message(
-                    content=self.get_current_content(),
+                    content=self.get_content(),
                     view=self
                 )
+            
         except Exception as e:
             logger.error(f"Error generating bet slip preview: {str(e)}")
-            # Still update the message even if image generation fails
+            # Continue with the workflow even if image generation fails
             await self.edit_message(
-                content=self.get_current_content(),
+                content=self.get_content(),
                 view=self
             )
