@@ -233,7 +233,10 @@ class GuildSettingsView(discord.ui.View):
                 items = interaction.guild.roles
 
             if not items:
-                await interaction.followup.send(f"No {step['name'].lower()} found. Please create one and try again.", ephemeral=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(f"No {step['name'].lower()} found. Please create one and try again.", ephemeral=True)
+                else:
+                    await interaction.followup.send(f"No {step['name'].lower()} found. Please create one and try again.", ephemeral=True)
                 return
 
             # Create a new view that inherits from the current view
@@ -245,13 +248,16 @@ class GuildSettingsView(discord.ui.View):
             view.add_item(select)
             
             if not initial:
-                await interaction.response.send_message(f"Select a {step['name']}:", view=view, ephemeral=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(f"Select a {step['name']}:", view=view, ephemeral=True)
+                else:
+                    await interaction.followup.send(f"Select a {step['name']}:", view=view, ephemeral=True)
             else:
                 await interaction.followup.send(f"Select a {step['name']}:", view=view, ephemeral=True)
         except Exception as e:
             logger.error(f"Error in process_next_selection: {str(e)}")
             if not interaction.response.is_done():
-                await interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
+                await interaction.response.send_message("An error occurred during setup. Please try again.", ephemeral=True)
             else:
                 await interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
 
