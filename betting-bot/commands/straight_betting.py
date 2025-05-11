@@ -937,76 +937,79 @@ class StraightBetWorkflowView(View):
             if self.preview_image_bytes: self.preview_image_bytes.close()
             self.stop()
 
-    async def _handle_units_selection(self, interaction: discord.Interaction, units: float):
+    async def _handle_units_selection(self, interaction: discord.Interaction, units: int):
         """Handle units selection and generate bet slip preview."""
         try:
-            # Update the bet record with the selected units
-            await self.db_manager.execute(
+            # Update bet with selected units
+            await self.bot.db_manager.execute(
                 """
                 UPDATE bets 
                 SET units = %s
                 WHERE bet_serial = %s
                 """,
-                (units, self.bet_serial)
+                (units, self.bet_details.get('bet_serial'))
             )
-
+            
+            # Update bet details
+            self.bet_details['units'] = units
+            
             # Generate bet slip preview
             try:
-                # Get bet details from database
-                bet = await self.db_manager.fetch_one(
-                    """
-                    SELECT * FROM bets WHERE bet_serial = %s
-                    """,
-                    (self.bet_serial,)
+                # Create bet slip generator
+                generator = BetSlipGenerator()
+                
+                # Generate bet slip image
+                image_path = await generator.generate_bet_slip(
+                    bet_details=self.bet_details,
+                    is_preview=True
                 )
                 
-                if not bet:
-                    logger.error(f"Bet {self.bet_serial} not found in database")
-                    return
-
-                # Generate bet slip image
-                image_generator = BetSlipGenerator()
-                bet_slip_path = await image_generator.generate_bet_slip(
-                    bet_serial=self.bet_serial,
-                    home_team=bet['bet_details']['team'],
-                    away_team=bet['bet_details']['opponent'],
-                    league=bet['league'],
-                    bet_type='straight'
-                )
-
-                if bet_slip_path:
-                    # Create file object from the generated image
-                    file = discord.File(bet_slip_path, filename="bet_slip.png")
+                if image_path and os.path.exists(image_path):
+                    # Create file object for the image
+                    file = discord.File(image_path, filename="bet_slip.png")
                     
-                    # Update the message with the bet slip preview
-                    await self.message.edit(
-                        content=self.get_content(),
-                        view=self,
-                        file=file
+                    # Create embed for bet slip preview
+                    embed = discord.Embed(
+                        title="Bet Slip Preview",
+                        description="Here's your bet slip preview:",
+                        color=discord.Color.blue()
+                    )
+                    embed.set_image(url="attachment://bet_slip.png")
+                    
+                    # Send the preview
+                    await interaction.followup.send(
+                        embed=embed,
+                        file=file,
+                        ephemeral=True
                     )
                 else:
-                    logger.warning(f"Failed to generate bet slip preview for bet {self.bet_serial}")
-                    await self.message.edit(
-                        content=self.get_content(),
-                        view=self
+                    await interaction.followup.send(
+                        "Failed to generate bet slip preview. Please try again.",
+                        ephemeral=True
                     )
             except Exception as e:
                 logger.error(f"Error generating bet slip preview: {str(e)}")
                 logger.error(traceback.format_exc())
-                await self.message.edit(
-                    content=self.get_content(),
-                    view=self
+                await interaction.followup.send(
+                    "Failed to generate bet slip preview. Please try again.",
+                    ephemeral=True
                 )
-
-            # Move to the next step
-            await self.go_next(interaction)
         except Exception as e:
             logger.error(f"Error in _handle_units_selection: {str(e)}")
             logger.error(traceback.format_exc())
-            await interaction.response.send_message(
-                "An error occurred while processing your bet. Please try again.",
-                ephemeral=True
-            )
+            try:
+                await interaction.followup.send(
+                    "An error occurred while processing your bet. Please try again.",
+                    ephemeral=True
+                )
+            except discord.errors.InteractionResponded:
+                # If we can't send a new message, try to edit the original response
+                try:
+                    await interaction.edit_original_response(
+                        content="An error occurred while processing your bet. Please try again."
+                    )
+                except Exception as edit_error:
+                    logger.error(f"Error editing original response: {str(edit_error)}")
 
     def get_content(self) -> str:
         """Get the content for the current step."""

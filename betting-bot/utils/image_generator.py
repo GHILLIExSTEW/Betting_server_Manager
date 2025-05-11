@@ -246,7 +246,7 @@ class BetSlipGenerator:
         """Load a team logo from the static directory."""
         try:
             # Get the sport from the league
-            sport = self._get_sport_from_league(league)
+            sport = get_sport_category_for_path(league.upper())
             if not sport:
                 logger.error(f"Could not determine sport for league: {league}")
                 return None
@@ -257,21 +257,33 @@ class BetSlipGenerator:
                 return None
 
             # Load the team logo
-            logo_path = os.path.join(team_dir, f"{team_name.lower()}.png")
+            # Normalize team name for filename consistency
+            normalized_team_name = normalize_team_name(team_name)
+            logo_path = os.path.join(team_dir, f"{normalized_team_name}.png")
+
             if os.path.exists(logo_path):
                 return Image.open(logo_path)
             else:
                 logger.warning(f"Team logo not found: {logo_path}")
+                # Attempt to load default logo
+                if os.path.exists(self.DEFAULT_LOGO_PATH):
+                    return Image.open(self.DEFAULT_LOGO_PATH)
                 return None
         except Exception as e:
             logger.error(f"Error in _load_team_logo for {team_name} ({league}): {str(e)}")
             logger.error(traceback.format_exc())
+            # Attempt to load default logo on error
+            try:
+                if os.path.exists(self.DEFAULT_LOGO_PATH):
+                    return Image.open(self.DEFAULT_LOGO_PATH)
+            except Exception as def_e:
+                logger.error(f"Error loading default logo: {def_e}")
             return None
 
     def _ensure_team_dir_exists(self, league: str) -> Optional[str]:
         """Ensure the team directory exists and return its path."""
         try:
-            sport = self._get_sport_from_league(league)
+            sport = get_sport_category_for_path(league.upper())
             if not sport:
                 logger.error(f"Could not determine sport for league: {league}")
                 return None
