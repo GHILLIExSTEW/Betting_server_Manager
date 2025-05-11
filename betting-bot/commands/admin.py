@@ -296,6 +296,25 @@ class GuildSettingsView(discord.ui.View):
         self.embed_channels = []  # Track selected embed channels
         self.command_channels = []  # Track selected command channels
         self.waiting_for_url = False  # Track if we're waiting for a URL input
+        
+        # Create necessary directories for this guild
+        self._create_guild_directories()
+
+    def _create_guild_directories(self):
+        """Create necessary directories for the guild."""
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            guild_dirs = [
+                os.path.join(base_dir, 'static', 'guilds', str(self.guild.id)),  # For guild-specific assets
+                os.path.join(base_dir, 'assets', 'logos', str(self.guild.id)),   # For guild logos
+                os.path.join(base_dir, 'data', 'guilds', str(self.guild.id))     # For guild-specific data
+            ]
+            
+            for dir_path in guild_dirs:
+                os.makedirs(dir_path, exist_ok=True)
+                logger.info(f"Created directory: {dir_path}")
+        except Exception as e:
+            logger.error(f"Error creating guild directories: {e}")
 
     async def start_selection(self):
         """Start the selection process"""
@@ -328,12 +347,12 @@ class GuildSettingsView(discord.ui.View):
                 self.waiting_for_url = True
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        f"Please provide the {step['name'].lower()} or type 'skip' to skip this step:",
+                        f"Please upload an image for {step['name'].lower()} or type 'skip' to skip this step:",
                         ephemeral=True
                     )
                 else:
                     await interaction.followup.send(
-                        f"Please provide the {step['name'].lower()} or type 'skip' to skip this step:",
+                        f"Please upload an image for {step['name'].lower()} or type 'skip' to skip this step:",
                         ephemeral=True
                     )
                 return
@@ -395,23 +414,49 @@ class GuildSettingsView(discord.ui.View):
                 await interaction.followup.send("An error occurred during setup. Please try again.", ephemeral=True)
 
     async def handle_url_input(self, message: discord.Message):
-        """Handle URL input from user"""
+        """Handle file uploads or URL input from user"""
         if not self.waiting_for_url:
             return
 
         step = self.SETUP_STEPS[self.current_step]
-        content = message.content.strip()
         setting_key = step['setting_key']
 
-        if content.lower() == 'skip':
-            self.settings[setting_key] = None
+        # Check for file attachments first
+        if message.attachments:
+            attachment = message.attachments[0]  # Get the first attachment
+            if not attachment.content_type.startswith('image/'):
+                await message.channel.send(f"❌ Please upload an image file for {step['name']}.")
+                return
+
+            try:
+                # Download the attachment
+                response = requests.get(attachment.url, timeout=10, stream=True)
+                response.raise_for_status()
+                image_data = BytesIO(response.content)
+                
+                with Image.open(image_data) as img:
+                    if img.format not in ['PNG', 'JPEG', 'JPG', 'GIF', 'WEBP']:
+                        await message.channel.send(f"❌ Invalid image format for {step['name']}. Use PNG, JPG, GIF, or WEBP.")
+                        return
+                    
+                    # Save as PNG for consistency
+                    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    guild_dir = os.path.join(base_dir, 'static', 'guilds', str(self.guild.id))
+                    os.makedirs(guild_dir, exist_ok=True)
+                    save_path = os.path.join(guild_dir, f"{setting_key}.png")
+                    img.save(save_path, 'PNG')
+                    self.settings[setting_key] = save_path
+                    
+            except Exception as e:
+                logger.error(f"Failed to process uploaded image for {setting_key}: {e}")
+                await message.channel.send(f"❌ Failed to process the uploaded image for {step['name']}.")
+                return
         else:
-            # If this is a URL step, download and save the image
-            if setting_key in [
-                'guild_background',
-                'bot_image_mask',
-                'default_parlay_image'
-            ]:
+            # Handle URL input as before
+            content = message.content.strip()
+            if content.lower() == 'skip':
+                self.settings[setting_key] = None
+            else:
                 try:
                     response = requests.get(content, timeout=10, stream=True)
                     response.raise_for_status()
@@ -430,15 +475,11 @@ class GuildSettingsView(discord.ui.View):
                         os.makedirs(guild_dir, exist_ok=True)
                         save_path = os.path.join(guild_dir, f"{setting_key}.png")
                         img.save(save_path, 'PNG')
-                        # Store the local path (relative to betting-bot/static/guilds/{guild_id}/...)
                         self.settings[setting_key] = save_path
                 except Exception as e:
-                    logger = logging.getLogger(__name__)
                     logger.error(f"Failed to download/save image for {setting_key}: {e}")
                     await message.channel.send(f"❌ Failed to download or save the image for {step['name']}.")
                     return
-            else:
-                self.settings[setting_key] = content
 
         self.waiting_for_url = False
         self.current_step += 1
@@ -448,7 +489,7 @@ class GuildSettingsView(discord.ui.View):
             next_step = self.SETUP_STEPS[self.current_step]
             if next_step.get('is_premium_only', False) and next_step['select'] is None:
                 await message.channel.send(
-                    f"Please provide the {next_step['name'].lower()} or type 'skip' to skip this step:"
+                    f"Please upload an image for {next_step['name'].lower()} or type 'skip' to skip this step:"
                 )
                 self.waiting_for_url = True
                 return
@@ -677,7 +718,7 @@ class AdminCog(commands.Cog):
             
             # Send initial message asking for URL
             await interaction.response.send_message(
-                f"Please provide the {view.SETUP_STEPS[view.current_step]['name'].lower()} or type 'skip' to skip this step:",
+                f"Please upload an image for {view.SETUP_STEPS[view.current_step]['name'].lower()} or type 'skip' to skip this step:",
                 ephemeral=True
             )
             view.waiting_for_url = True
