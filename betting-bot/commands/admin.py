@@ -592,8 +592,12 @@ class AdminCog(commands.Cog):
             if existing_settings:
                 view.settings = dict(existing_settings)
             
-            # Skip to image URL requests
-            view.current_step = len(view.SETUP_STEPS)  # Set to last step to trigger finalize
+            # Find the first image URL step
+            for i, step in enumerate(view.SETUP_STEPS):
+                if step.get('is_premium_only', False) and step['select'] is None:
+                    view.current_step = i
+                    break
+            
             await interaction.followup.send(
                 "Please provide the image URLs for your server:",
                 view=view,
