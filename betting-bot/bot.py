@@ -33,8 +33,14 @@ class BettingBot(commands.Bot):
         self.user_service = None
         self.bet_service = None
         self.db_manager = DatabaseManager()
-        self.bet_slip_generator = BetSlipGenerator()
+        self.bet_slip_generator = None  # Initialize as None, will be set per guild
         self.cleanup_tasks = CleanupTasks(self.db_manager)
+
+    async def get_bet_slip_generator(self, guild_id: int) -> BetSlipGenerator:
+        """Get or create a BetSlipGenerator for a specific guild."""
+        if self.bet_slip_generator is None or self.bet_slip_generator.guild_id != guild_id:
+            self.bet_slip_generator = BetSlipGenerator(guild_id=guild_id)
+        return self.bet_slip_generator
 
     async def setup_hook(self):
         """Setup hook that runs when the bot starts."""

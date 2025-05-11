@@ -453,8 +453,14 @@ class ParlayBetWorkflowView(View):
         self.message: Optional[Union[discord.WebhookMessage, discord.InteractionMessage]] = None 
         self.is_processing = False 
         self.latest_interaction = interaction 
-        self.bet_slip_generator = BetSlipGenerator() 
+        self.bet_slip_generator = None  # Will be initialized when needed
         self.preview_image_bytes: Optional[io.BytesIO] = None 
+
+    async def get_bet_slip_generator(self) -> BetSlipGenerator:
+        """Get the BetSlipGenerator for the current guild."""
+        if self.bet_slip_generator is None:
+            self.bet_slip_generator = await self.bot.get_bet_slip_generator(self.original_interaction.guild_id)
+        return self.bet_slip_generator
 
     def _format_odds_with_sign(self, odds: Optional[float]) -> str:
         if odds is None: return "N/A"
@@ -754,7 +760,7 @@ class ParlayBetWorkflowView(View):
                  league = legs[0].get('league', 'UNKNOWN_LEAGUE') if legs else 'UNKNOWN_LEAGUE'
                  game_ids = {leg.get('game_id') for leg in legs if leg.get('game_id') and leg.get('game_id') != 'Other'}
                  is_sgp = len(game_ids) == 1 and len(legs) > 1
-                 bet_slip_image = self.bet_slip_generator.generate_bet_slip(
+                 bet_slip_image = await self.get_bet_slip_generator().generate_bet_slip(
                      home_team=legs[0].get('team', 'N/A') if legs else 'N/A', away_team=legs[0].get('opponent', 'N/A') if legs else 'N/A',
                      league=league, line="Parlay", odds=total_odds, units=units, bet_id=str(bet_serial),
                      timestamp=datetime.now(timezone.utc), bet_type="parlay", parlay_legs=legs, is_same_game=is_sgp

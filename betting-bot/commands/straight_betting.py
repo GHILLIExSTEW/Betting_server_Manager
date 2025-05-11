@@ -570,9 +570,15 @@ class StraightBetWorkflowView(View):
         self.message = message_to_control
         self.is_processing = False
         self.latest_interaction = interaction
-        self.bet_slip_generator = BetSlipGenerator()
+        self.bet_slip_generator = None  # Will be initialized when needed
         self.preview_image_bytes: Optional[io.BytesIO] = None
         self.team_logos: Dict[str, Optional[str]] = {}
+
+    async def get_bet_slip_generator(self) -> BetSlipGenerator:
+        """Get the BetSlipGenerator for the current guild."""
+        if self.bet_slip_generator is None:
+            self.bet_slip_generator = await self.bot.get_bet_slip_generator(self.original_interaction.guild_id)
+        return self.bet_slip_generator
 
     async def _preload_team_logos(
         self, team1: str, team2: str, league: str

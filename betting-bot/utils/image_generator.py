@@ -17,6 +17,7 @@ from config.asset_paths import (
     get_sport_category_for_path
 )
 from config.team_mappings import normalize_team_name
+from database.database_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -231,8 +232,10 @@ except Exception as e:
 
 
 class BetSlipGenerator:
-    def __init__(self):
+    def __init__(self, guild_id: Optional[int] = None):
         """Initialize the bet slip generator with required assets."""
+        self.guild_id = guild_id
+        self.db_manager = DatabaseManager()
         self._load_fonts()
         self._load_background()
         self._load_team_logos()
@@ -250,9 +253,27 @@ class BetSlipGenerator:
             raise
             
     def _load_background(self):
-        """Load the background image."""
+        """Load the background image from guild settings or use a solid color."""
         try:
-            # Create a solid color background instead of loading an image
+            if self.guild_id:
+                # Try to get the guild's background image from settings
+                query = """
+                    SELECT guild_background
+                    FROM guild_settings
+                    WHERE guild_id = %s
+                """
+                result = self.db_manager.fetch_one(query, (self.guild_id,))
+                if result and result[0]:
+                    try:
+                        self.background = Image.open(result[0]).convert('RGB')
+                        # Resize to standard dimensions if needed
+                        if self.background.size != (800, 400):
+                            self.background = self.background.resize((800, 400), Image.Resampling.LANCZOS)
+                        return
+                    except Exception as e:
+                        logger.warning(f"Failed to load guild background image: {e}")
+            
+            # Fallback to solid color background
             self.background = Image.new('RGB', (800, 400), color=(45, 45, 45))  # Dark gray background
         except Exception as e:
             logger.error(f"Error creating background: {e}")
