@@ -20,6 +20,7 @@ import os
 from discord.ext import commands
 from io import BytesIO
 import traceback
+import json
 
 # Import directly from utils
 from utils.errors import (
@@ -955,18 +956,68 @@ class StraightBetWorkflowView(View):
             
             # Generate bet slip preview
             try:
+                # Get bet details from database
+                bet_query = """
+                    SELECT b.bet_serial, b.league, b.bet_type, b.bet_details, b.units, b.odds, b.created_at,
+                           g.home_team_name, g.away_team_name
+                    FROM bets b
+                    LEFT JOIN games g ON b.game_id = g.id
+                    WHERE b.bet_serial = %s
+                """
+                current_bet_serial = self.bet_details.get('bet_serial')
+                if not current_bet_serial:
+                    logger.error("Bet serial not found in bet_details for image generation.")
+                    await interaction.followup.send("Error generating preview: Bet ID missing.", ephemeral=True)
+                    return
+
+                bet = await self.bot.db_manager.fetch_one(bet_query, (current_bet_serial,))
+
+                if not bet:
+                    logger.error(f"Bet {current_bet_serial} not found in database for preview generation.")
+                    await interaction.followup.send("Error generating preview: Bet data not found.", ephemeral=True)
+                    return
+
+                # Extract bet_details if it's a JSON string
+                bet_details_dict = {}
+                if isinstance(bet.get('bet_details'), str):
+                    try:
+                        bet_details_dict = json.loads(bet['bet_details'])
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse bet_details JSON for bet {current_bet_serial}")
+                elif isinstance(bet.get('bet_details'), dict):
+                    bet_details_dict = bet['bet_details']
+
+                # Determine home and away teams
+                home_team_name = bet.get('home_team_name') or bet_details_dict.get('team')
+                away_team_name = bet.get('away_team_name') or bet_details_dict.get('opponent')
+
+                if not home_team_name or not away_team_name:
+                    logger.error(f"Could not determine home/away teams for bet {current_bet_serial}")
+                    home_team_name = bet_details_dict.get('team', 'N/A')
+                    away_team_name = bet_details_dict.get('opponent', 'N/A')
+
                 # Create bet slip generator
                 generator = BetSlipGenerator()
                 
-                # Generate bet slip image
-                image_path = await generator.generate_bet_slip(
-                    bet_details=self.bet_details,
-                    is_preview=True
+                # Generate bet slip image with individual arguments
+                bet_slip_image = generator.generate_bet_slip(
+                    home_team=home_team_name,
+                    away_team=away_team_name,
+                    league=bet['league'],
+                    line=bet_details_dict.get('line'),
+                    odds=float(bet['odds']),
+                    units=float(units),
+                    bet_id=str(current_bet_serial),
+                    timestamp=bet['created_at'],
+                    bet_type=bet['bet_type']
                 )
                 
-                if image_path and os.path.exists(image_path):
+                if bet_slip_image:
                     # Create file object for the image
-                    file = discord.File(image_path, filename="bet_slip.png")
+                    self.preview_image_bytes = io.BytesIO()
+                    bet_slip_image.save(self.preview_image_bytes, format='PNG')
+                    self.preview_image_bytes.seek(0)
+                    file = discord.File(self.preview_image_bytes, filename="bet_slip.png")
                     
                     # Create embed for bet slip preview
                     embed = discord.Embed(

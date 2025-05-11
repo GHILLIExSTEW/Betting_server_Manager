@@ -288,7 +288,8 @@ class BetSlipGenerator:
                 logger.error(f"Could not determine sport for league: {league}")
                 return None
 
-            team_dir = os.path.join(self.static_dir, "logos", "teams", sport, league)
+            # Use LEAGUE_TEAM_BASE_DIR instead of static_dir
+            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, sport, league.upper())
             os.makedirs(team_dir, exist_ok=True)
             return team_dir
         except Exception as e:
