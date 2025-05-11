@@ -262,15 +262,21 @@ class GuildSettingsView(discord.ui.View):
         {
             'name': 'Bot Avatar URL',
             'select': None,  # This will be handled by TextInputModal
-            'setting_key': 'bot_avatar_url',
+            'setting_key': 'bot_image_mask',
             'is_premium_only': True
         },
         {
             'name': 'Guild Background URL',
             'select': None,  # This will be handled by TextInputModal
-            'setting_key': 'guild_background_url',
+            'setting_key': 'guild_background',
             'is_premium_only': True
         },
+        {
+            'name': 'Default Parlay Image',
+            'select': None,  # This will be handled by TextInputModal
+            'setting_key': 'default_parlay_image',
+            'is_premium_only': True
+        }
         # Note: User avatars are stored per user in the cappers table's image_path column
         # and are only available for premium guild members with the authorized role
     ]
