@@ -321,14 +321,18 @@ class GuildSettingsView(discord.ui.View):
 
             # Handle text input steps (for image URLs)
             if step['select'] is None:
+                modal = TextInputModal(title=f"Enter {step['name']}", setting_key=step['setting_key'])
+                modal.view = self
                 if not interaction.response.is_done():
-                    modal = TextInputModal(title=f"Enter {step['name']}", setting_key=step['setting_key'])
-                    modal.view = self
                     await interaction.response.send_modal(modal)
                 else:
-                    modal = TextInputModal(title=f"Enter {step['name']}", setting_key=step['setting_key'])
-                    modal.view = self
-                    await interaction.followup.send_modal(modal)
+                    # If we can't send a modal, send a message with instructions
+                    await interaction.followup.send(
+                        f"Please use the `/setid` command to set your {step['name'].lower()}.",
+                        ephemeral=True
+                    )
+                    self.current_step += 1
+                    await self.process_next_selection(interaction)
                 return
 
             select_class = step['select']
