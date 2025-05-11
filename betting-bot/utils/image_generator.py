@@ -7,6 +7,7 @@ import io
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import traceback
+import requests
 
 from PIL import Image, ImageDraw, ImageFont
 from config.asset_paths import (
@@ -435,6 +436,24 @@ class BetSlipGenerator:
                 logger.error("Err loading lock icon: %s", e)
         return self._lock_icon_cache
 
+    async def get_guild_background(self) -> Optional[Image.Image]:
+        """Fetch the guild background image from the DB or return None if not set."""
+        if not self.guild_id:
+            return None
+        try:
+            settings = await self.db_manager.fetch_one(
+                "SELECT guild_background FROM guild_settings WHERE guild_id = %s",
+                (self.guild_id,)
+            )
+            guild_bg_url = settings.get("guild_background") if settings else None
+            if guild_bg_url:
+                response = requests.get(guild_bg_url, timeout=5)
+                if response.status_code == 200:
+                    return Image.open(io.BytesIO(response.content)).convert("RGBA")
+        except Exception as e:
+            logger.error(f"Error loading guild background: {e}")
+        return None
+
     def generate_bet_slip(
         self,
         home_team: str,
@@ -447,11 +466,21 @@ class BetSlipGenerator:
         bet_type: str = "straight",
         line: Optional[str] = None,
         parlay_legs: Optional[List[Dict]] = None,
-        is_same_game: bool = False
+        is_same_game: bool = False,
+        background_img: Optional[Image.Image] = None
     ) -> Optional[Image.Image]:
         """Generate a bet slip image."""
         try:
             logger.info(f"Generating bet slip - Home: '{home_team}', Away: '{away_team}', League: '{league}', Type: {bet_type}")
+            
+            background_color = "#23232a"  # Default fallback color
+            width, height = 600, 400
+            if background_img:
+                background_img = background_img.resize((width, height), Image.Resampling.LANCZOS)
+                img = background_img.copy()
+            else:
+                img = Image.new('RGBA', (width, height), background_color)
+            draw = ImageDraw.Draw(img)
             
             # Load fonts
             logger.info("Loading fonts...")
@@ -475,10 +504,6 @@ class BetSlipGenerator:
                 return None
             logger.info(f"Successfully loaded home team logo for: '{home_team}'")
             logger.info(f"Successfully loaded away team logo for: '{away_team}'")
-            
-            # Create base image
-            img = Image.new('RGB', (800, 1200), color='white')
-            draw = ImageDraw.Draw(img)
             
             # Draw header
             self._draw_header(draw, league_logo, league)

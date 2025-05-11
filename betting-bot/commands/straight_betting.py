@@ -997,9 +997,12 @@ class StraightBetWorkflowView(View):
                     away_team_name = bet_details_dict.get('opponent', 'N/A')
 
                 # Create bet slip generator
-                generator = BetSlipGenerator()
+                generator = BetSlipGenerator(guild_id=interaction.guild_id)
                 
-                # Generate bet slip image with individual arguments
+                # Fetch the guild background image (async)
+                background_img = await generator.get_guild_background()
+                
+                # Generate bet slip image with individual arguments and background
                 bet_slip_image = generator.generate_bet_slip(
                     home_team=home_team_name,
                     away_team=away_team_name,
@@ -1009,7 +1012,8 @@ class StraightBetWorkflowView(View):
                     units=float(units),
                     bet_id=str(current_bet_serial),
                     timestamp=bet['created_at'],
-                    bet_type=bet['bet_type']
+                    bet_type=bet['bet_type'],
+                    background_img=background_img
                 )
                 
                 if bet_slip_image:
