@@ -181,15 +181,35 @@ class BetSlipGenerator:
     def _load_fonts(self):
         """Load required fonts."""
         try:
-            self.font_b_36 = ImageFont.truetype(_PATHS["DEFAULT_BOLD_FONT_PATH"], 36)
-            self.font_b_28 = ImageFont.truetype(_PATHS["DEFAULT_BOLD_FONT_PATH"], 28)
-            self.font_b_24 = ImageFont.truetype(_PATHS["DEFAULT_BOLD_FONT_PATH"], 24)
-            self.font_m_24 = ImageFont.truetype(_PATHS["DEFAULT_FONT_PATH"], 24)
-            self.font_m_18 = ImageFont.truetype(_PATHS["DEFAULT_FONT_PATH"], 18)
-            self.emoji_font_24 = ImageFont.truetype(_PATHS["DEFAULT_EMOJI_FONT_PATH_NOTO"], 24)
+            # Try to load fonts from the assets directory first
+            font_path = os.path.join(ASSETS_DIR, "fonts", "Roboto-Regular.ttf")
+            bold_font_path = os.path.join(ASSETS_DIR, "fonts", "Roboto-Bold.ttf")
+            emoji_font_path = os.path.join(ASSETS_DIR, "fonts", "NotoColorEmoji-Regular.ttf")
+            
+            if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
+                logger.warning("Font files not found in assets directory, trying system fonts")
+                # Fallback to system fonts
+                font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+                bold_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                emoji_font_path = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
+                
+                if not all(os.path.exists(p) for p in [font_path, bold_font_path, emoji_font_path]):
+                    logger.warning("System fonts not found, using default font")
+                    # Use default font as last resort
+                    self.font_b_36 = self.font_b_28 = self.font_b_24 = self.font_m_24 = self.font_m_18 = self.emoji_font_24 = ImageFont.load_default()
+                    return
+
+            # Load fonts with proper error handling
+            self.font_b_36 = ImageFont.truetype(bold_font_path, 36)
+            self.font_b_28 = ImageFont.truetype(bold_font_path, 28)
+            self.font_b_24 = ImageFont.truetype(bold_font_path, 24)
+            self.font_m_24 = ImageFont.truetype(font_path, 24)
+            self.font_m_18 = ImageFont.truetype(font_path, 18)
+            self.emoji_font_24 = ImageFont.truetype(emoji_font_path, 24)
+            
         except Exception as e:
             logger.error(f"Error loading fonts: {e}")
-            # Fallback to default fonts
+            # Fallback to default font
             self.font_b_36 = self.font_b_28 = self.font_b_24 = self.font_m_24 = self.font_m_18 = self.emoji_font_24 = ImageFont.load_default()
             
     def _load_background(self):
@@ -233,192 +253,24 @@ class BetSlipGenerator:
         except Exception as e:
             logger.error(f"Error loading team logos: {e}")
             raise
-            
-    def _load_league_logo(self, league: str) -> Optional[Image.Image]:
-        """Load a league logo with caching."""
-        if not league:
-            return None
-            
+
+    def _load_league_logos(self):
+        """Load league logos."""
+        self.league_logos = {}
         try:
-            cache_key = f"league_{league}"
-            now = time.time()
-            
-            # Check cache first
-            if cache_key in self._logo_cache:
-                logo, ts = self._logo_cache[cache_key]
-                if now - ts <= self._cache_expiry:
-                    return logo
-                else:
-                    del self._logo_cache[cache_key]
-            
-            # Get the league directory
-            sport = get_sport_category_for_path(league.upper())
-            fname = f"{league.lower().replace(' ', '_')}.png"
-            logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper())
-            logo_path = os.path.join(logo_dir, fname)
-            os.makedirs(logo_dir, exist_ok=True)
-            
-            # Log the attempt
-            absolute_logo_path = os.path.abspath(logo_path)
-            file_exists = os.path.exists(absolute_logo_path)
-            logger.info(
-                "Loading league logo - League: '%s', Sport: '%s', Path: '%s', Exists: %s",
-                league, sport, absolute_logo_path, file_exists
-            )
-            
-            # Try to load the logo
-            logo = None
-            if file_exists:
-                try:
-                    logo = Image.open(absolute_logo_path).convert("RGBA")
-                except Exception as e:
-                    logger.error("Error loading league logo %s: %s", absolute_logo_path, e)
-            
-            # Cache the logo if we have one
-            if logo:
-                self._cleanup_cache()
-                if len(self._logo_cache) >= self._max_cache_size:
-                    # Remove oldest entry if cache is full
-                    oldest_key = min(self._logo_cache, key=lambda k: self._logo_cache[k][1])
-                    del self._logo_cache[oldest_key]
-                self._logo_cache[cache_key] = (logo.copy(), now)
-                return logo
-                
-            logger.warning(
-                "No logo found for league %s (path: %s)",
-                league, absolute_logo_path
-            )
-            return None
-            
+            for sport_category in os.listdir(self.LEAGUE_LOGO_BASE_DIR):
+                sport_path = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport_category)
+                if os.path.isdir(sport_path):
+                    for league_dir in os.listdir(sport_path):
+                        league_path = os.path.join(sport_path, league_dir)
+                        if os.path.isdir(league_path):
+                            for logo_file in os.listdir(league_path):
+                                if logo_file.endswith('.png'):
+                                    league_name = os.path.splitext(logo_file)[0]
+                                    self.league_logos[league_name] = Image.open(os.path.join(league_path, logo_file))
         except Exception as e:
-            logger.error(
-                "Error in _load_league_logo for %s: %s",
-                league, e, exc_info=True
-            )
-            return None
-
-    def _get_team_logo(self, team_name: str) -> Image.Image:
-        """Get a team logo by name."""
-        normalized_name = normalize_team_name(team_name)
-        if normalized_name in self.team_logos:
-            return self.team_logos[normalized_name]
-        logger.warning(f"Team logo not found for: {team_name} (normalized: {normalized_name})")
-        return None
-
-    def _format_odds_with_sign(self, odds: Optional[Any]) -> str:
-        if odds is None:
-            return "N/A"
-        try:
-            odds_num = int(float(odds))
-            return f"+{odds_num}" if odds_num > 0 else str(odds_num)
-        except (ValueError, TypeError):
-            logger.warning("Invalid odds format: %s", odds)
-            return "N/A"
-
-    def _ensure_team_dir_exists(self, league: str) -> str:
-        league_upper = league.upper()
-        if league_upper.startswith("NCAA"):
-            sport = get_sport_category_for_path(league_upper)
-            if sport == DEFAULT_FALLBACK_SPORT_CATEGORY:
-                sport = "UNKNOWN_NCAA_SPORT"
-            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, "NCAA", sport)
-        else:
-            sport = get_sport_category_for_path(league_upper)
-            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, sport, league_upper)
-        os.makedirs(team_dir, exist_ok=True)
-        return team_dir
-
-    def _cleanup_cache(self):
-        now = time.time()
-        if now - self._last_cache_cleanup > 300:
-            expired = [
-                k for k, (_, ts) in self._logo_cache.items()
-                if now - ts > self._cache_expiry
-            ]
-            for k in expired:
-                self._logo_cache.pop(k, None)
-            self._last_cache_cleanup = now
-
-    def _normalize_team_name(self, team_name: str) -> str:
-        """Normalize team name to match logo file naming convention."""
-        # Common team name mappings
-        team_mappings = {
-            # NHL Teams
-            "Oilers": "edmonton_oilers",
-            "Flames": "calgary_flames",
-            "Canucks": "vancouver_canucks",
-            "Maple Leafs": "toronto_maple_leafs",
-            "Senators": "ottawa_senators",
-            "Canadiens": "montreal_canadiens",
-            "Bruins": "boston_bruins",
-            "Sabres": "buffalo_sabres",
-            "Rangers": "new_york_rangers",
-            "Islanders": "new_york_islanders",
-            "Devils": "new_jersey_devils",
-            "Flyers": "philadelphia_flyers",
-            "Penguins": "pittsburgh_penguins",
-            "Capitals": "washington_capitals",
-            "Hurricanes": "carolina_hurricanes",
-            "Panthers": "florida_panthers",
-            "Lightning": "tampa_bay_lightning",
-            "Red Wings": "detroit_red_wings",
-            "Blackhawks": "chicago_blackhawks",
-            "Blues": "st_louis_blues",
-            "Wild": "minnesota_wild",
-            "Jets": "winnipeg_jets",
-            "Avalanche": "colorado_avalanche",
-            "Stars": "dallas_stars",
-            "Predators": "nashville_predators",
-            "Coyotes": "arizona_coyotes",
-            "Golden Knights": "vegas_golden_knights",
-            "Kraken": "seattle_kraken",
-            "Sharks": "san_jose_sharks",
-            "Kings": "los_angeles_kings",
-            "Ducks": "anaheim_ducks",
-            
-            # NFL Teams
-            "49ers": "san_francisco_49ers",
-            "Bears": "chicago_bears",
-            "Bengals": "cincinnati_bengals",
-            "Bills": "buffalo_bills",
-            "Broncos": "denver_broncos",
-            "Browns": "cleveland_browns",
-            "Buccaneers": "tampa_bay_buccaneers",
-            "Cardinals": "arizona_cardinals",
-            "Chargers": "los_angeles_chargers",
-            "Chiefs": "kansas_city_chiefs",
-            "Colts": "indianapolis_colts",
-            "Cowboys": "dallas_cowboys",
-            "Dolphins": "miami_dolphins",
-            "Eagles": "philadelphia_eagles",
-            "Falcons": "atlanta_falcons",
-            "Giants": "new_york_giants",
-            "Jaguars": "jacksonville_jaguars",
-            "Jets": "new_york_jets",
-            "Lions": "detroit_lions",
-            "Packers": "green_bay_packers",
-            "Panthers": "carolina_panthers",
-            "Patriots": "new_england_patriots",
-            "Raiders": "las_vegas_raiders",
-            "Rams": "los_angeles_rams",
-            "Ravens": "baltimore_ravens",
-            "Saints": "new_orleans_saints",
-            "Seahawks": "seattle_seahawks",
-            "Steelers": "pittsburgh_steelers",
-            "Texans": "houston_texans",
-            "Titans": "tennessee_titans",
-            "Vikings": "minnesota_vikings",
-            "Commanders": "washington_commanders"
-        }
-        
-        # First check if we have a direct mapping
-        if team_name in team_mappings:
-            return team_mappings[team_name]
-        
-        # If no direct mapping, try to normalize the name
-        normalized = team_name.lower().replace(" ", "_")
-        logger.info("Normalized team name from '%s' to '%s'", team_name, normalized)
-        return normalized
+            logger.error(f"Error loading league logos: {e}")
+            # Don't raise, just log the error and continue with empty dict
 
     def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
         """Load a team logo with caching."""
@@ -680,3 +532,171 @@ class BetSlipGenerator:
         tw = bbox[2] - bbox[0]; th = bbox[3] - bbox[1]; odds_y = start_y + (leg_height / 2) - (th / 2)
         draw.text((width - 40 - tw, int(odds_y)), odds_txt, 'white', self.font_b_28)
         return start_y + leg_height
+
+    def _ensure_team_dir_exists(self, league: str) -> str:
+        league_upper = league.upper()
+        if league_upper.startswith("NCAA"):
+            sport = get_sport_category_for_path(league_upper)
+            if sport == DEFAULT_FALLBACK_SPORT_CATEGORY:
+                sport = "UNKNOWN_NCAA_SPORT"
+            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, "NCAA", sport)
+        else:
+            sport = get_sport_category_for_path(league_upper)
+            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, sport, league_upper)
+        os.makedirs(team_dir, exist_ok=True)
+        return team_dir
+
+    def _cleanup_cache(self):
+        now = time.time()
+        if now - self._last_cache_cleanup > 300:
+            expired = [
+                k for k, (_, ts) in self._logo_cache.items()
+                if now - ts > self._cache_expiry
+            ]
+            for k in expired:
+                self._logo_cache.pop(k, None)
+            self._last_cache_cleanup = now
+
+    def _normalize_team_name(self, team_name: str) -> str:
+        """Normalize team name to match logo file naming convention."""
+        # Common team name mappings
+        team_mappings = {
+            # NHL Teams
+            "Oilers": "edmonton_oilers",
+            "Flames": "calgary_flames",
+            "Canucks": "vancouver_canucks",
+            "Maple Leafs": "toronto_maple_leafs",
+            "Senators": "ottawa_senators",
+            "Canadiens": "montreal_canadiens",
+            "Bruins": "boston_bruins",
+            "Sabres": "buffalo_sabres",
+            "Rangers": "new_york_rangers",
+            "Islanders": "new_york_islanders",
+            "Devils": "new_jersey_devils",
+            "Flyers": "philadelphia_flyers",
+            "Penguins": "pittsburgh_penguins",
+            "Capitals": "washington_capitals",
+            "Hurricanes": "carolina_hurricanes",
+            "Panthers": "florida_panthers",
+            "Lightning": "tampa_bay_lightning",
+            "Red Wings": "detroit_red_wings",
+            "Blackhawks": "chicago_blackhawks",
+            "Blues": "st_louis_blues",
+            "Wild": "minnesota_wild",
+            "Jets": "winnipeg_jets",
+            "Avalanche": "colorado_avalanche",
+            "Stars": "dallas_stars",
+            "Predators": "nashville_predators",
+            "Coyotes": "arizona_coyotes",
+            "Golden Knights": "vegas_golden_knights",
+            "Kraken": "seattle_kraken",
+            "Sharks": "san_jose_sharks",
+            "Kings": "los_angeles_kings",
+            "Ducks": "anaheim_ducks",
+            
+            # NFL Teams
+            "49ers": "san_francisco_49ers",
+            "Bears": "chicago_bears",
+            "Bengals": "cincinnati_bengals",
+            "Bills": "buffalo_bills",
+            "Broncos": "denver_broncos",
+            "Browns": "cleveland_browns",
+            "Buccaneers": "tampa_bay_buccaneers",
+            "Cardinals": "arizona_cardinals",
+            "Chargers": "los_angeles_chargers",
+            "Chiefs": "kansas_city_chiefs",
+            "Colts": "indianapolis_colts",
+            "Cowboys": "dallas_cowboys",
+            "Dolphins": "miami_dolphins",
+            "Eagles": "philadelphia_eagles",
+            "Falcons": "atlanta_falcons",
+            "Giants": "new_york_giants",
+            "Jaguars": "jacksonville_jaguars",
+            "Jets": "new_york_jets",
+            "Lions": "detroit_lions",
+            "Packers": "green_bay_packers",
+            "Panthers": "carolina_panthers",
+            "Patriots": "new_england_patriots",
+            "Raiders": "las_vegas_raiders",
+            "Rams": "los_angeles_rams",
+            "Ravens": "baltimore_ravens",
+            "Saints": "new_orleans_saints",
+            "Seahawks": "seattle_seahawks",
+            "Steelers": "pittsburgh_steelers",
+            "Texans": "houston_texans",
+            "Titans": "tennessee_titans",
+            "Vikings": "minnesota_vikings",
+            "Commanders": "washington_commanders"
+        }
+        
+        # First check if we have a direct mapping
+        if team_name in team_mappings:
+            return team_mappings[team_name]
+        
+        # If no direct mapping, try to normalize the name
+        normalized = team_name.lower().replace(" ", "_")
+        logger.info("Normalized team name from '%s' to '%s'", team_name, normalized)
+        return normalized
+
+    def _load_league_logo(self, league: str) -> Optional[Image.Image]:
+        """Load a league logo with caching."""
+        if not league:
+            return None
+            
+        try:
+            cache_key = f"league_{league}"
+            now = time.time()
+            
+            # Check cache first
+            if cache_key in self._logo_cache:
+                logo, ts = self._logo_cache[cache_key]
+                if now - ts <= self._cache_expiry:
+                    return logo
+                else:
+                    del self._logo_cache[cache_key]
+            
+            # Get the league directory
+            sport = get_sport_category_for_path(league.upper())
+            fname = f"{league.lower().replace(' ', '_')}.png"
+            logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper())
+            logo_path = os.path.join(logo_dir, fname)
+            os.makedirs(logo_dir, exist_ok=True)
+            
+            # Log the attempt
+            absolute_logo_path = os.path.abspath(logo_path)
+            file_exists = os.path.exists(absolute_logo_path)
+            logger.info(
+                "Loading league logo - League: '%s', Sport: '%s', Path: '%s', Exists: %s",
+                league, sport, absolute_logo_path, file_exists
+            )
+            
+            # Try to load the logo
+            logo = None
+            if file_exists:
+                try:
+                    logo = Image.open(absolute_logo_path).convert("RGBA")
+                except Exception as e:
+                    logger.error("Error loading league logo %s: %s", absolute_logo_path, e)
+            
+            # Cache the logo if we have one
+            if logo:
+                self._cleanup_cache()
+                if len(self._logo_cache) >= self._max_cache_size:
+                    # Remove oldest entry if cache is full
+                    oldest_key = min(self._logo_cache, key=lambda k: self._logo_cache[k][1])
+                    del self._logo_cache[oldest_key]
+                self._logo_cache[cache_key] = (logo.copy(), now)
+                return logo
+                
+            logger.warning(
+                "No logo found for league %s (path: %s)",
+                league, absolute_logo_path
+            )
+            return None
+            
+        except Exception as e:
+            logger.error(
+                "Error in _load_league_logo for %s: %s",
+                league, e, exc_info=True
+            )
+            return None
