@@ -798,41 +798,45 @@ class StraightBetWorkflowView(View):
                 if "units_str" not in self.bet_details:
                      await self.edit_message(content="❌ Units missing.", view=None); self.stop(); self.is_processing = False; return
                 
-                # Get available text channels
-                text_channels = [
-                    channel for channel in interaction.guild.text_channels
-                    if channel.permissions_for(interaction.guild.me).send_messages
-                    and not channel.name.startswith('embed_')  # Exclude embed channels
-                ]
-                
-                # Add channel select and cancel button
-                self.add_item(ChannelSelect(self, text_channels))
-                self.add_item(CancelButton(self))
-                
-                # Generate preview image
-                file_to_send = None
+                # Get embed channels from guild settings
                 try:
-                    bet_slip_image = self.bet_slip_generator.generate_bet_slip(
-                        home_team=self.bet_details.get('team', 'Unknown'),
-                        away_team=self.bet_details.get('opponent', 'Unknown'),
-                        league=self.bet_details.get('league', 'UNKNOWN'),
-                        line=self.bet_details.get('line', 'N/A'),
-                        odds=float(self.bet_details.get('odds', 0)),
-                        units=float(self.bet_details.get('units_str', 1.0)),
-                        bet_id=str(self.bet_details.get('bet_serial', 'PREVIEW')),
-                        timestamp=datetime.now(timezone.utc),
-                        bet_type="straight"
+                    settings = await self.bot.db_manager.fetch_one(
+                        "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
+                        (interaction.guild_id,)
                     )
-                    if bet_slip_image:
-                        self.preview_image_bytes = io.BytesIO()
-                        bet_slip_image.save(self.preview_image_bytes, format='PNG')
-                        self.preview_image_bytes.seek(0)
-                        file_to_send = File(self.preview_image_bytes, filename="bet_preview.png")
+                    if not settings:
+                        await self.edit_message(content="❌ Guild settings not found. Please contact an administrator.", view=None)
+                        self.stop()
+                        return
+                    
+                    embed_channel_ids = [settings['embed_channel_1'], settings['embed_channel_2']]
+                    embed_channel_ids = [cid for cid in embed_channel_ids if cid is not None]
+                    
+                    if not embed_channel_ids:
+                        await self.edit_message(content="❌ No embed channels configured. Please contact an administrator.", view=None)
+                        self.stop()
+                        return
+                    
+                    channels = []
+                    for channel_id in embed_channel_ids:
+                        channel = interaction.guild.get_channel(channel_id)
+                        if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
+                            channels.append(channel)
+                    
+                    if not channels:
+                        await self.edit_message(content="❌ No writable embed channels found. Please contact an administrator.", view=None)
+                        self.stop()
+                        return
+                    
+                    self.add_item(ChannelSelect(self, channels))
+                    self.add_item(CancelButton(self))
+                    step_content = f"**Finalize Bet**: Review & Select Channel"
+                    await self.edit_message(content=step_content, view=self)
                 except Exception as e:
-                    logger.error(f"Failed to generate preview image: {e}")
-                
-                await self.edit_message(content=f"{step_content}: Review & Select Channel", view=self, file=file_to_send)
-                self.is_processing = False; return
+                    logger.exception(f"Error fetching guild settings for channel selection: {e}")
+                    await self.edit_message(content="❌ Error fetching channel settings. Please try again.", view=None)
+                    self.stop()
+                    return
 
             elif self.current_step == 7:
                 if not all(k in self.bet_details for k in ['bet_serial', 'channel_id']):

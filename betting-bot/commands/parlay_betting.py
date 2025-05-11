@@ -684,15 +684,45 @@ class ParlayBetWorkflowView(View):
                      logger.exception(f"Failed to generate parlay slip image: {e}")
                      await self.edit_message_for_current_leg(interaction, content="❌ Failed to generate preview.", view=None); self.stop(); return
                  
-                 channels = [ch for ch in interaction.guild.text_channels 
-                           if ch.permissions_for(interaction.guild.me).send_messages 
-                           and not ch.name.startswith('embed_')] if interaction.guild else []
-                 if not channels:
-                     await self.edit_message_for_current_leg(interaction, content="❌ No writable channels found. Please ensure there are channels available for posting bets.", view=None); self.stop(); return
-                 self.add_item(ChannelSelect(self, channels))
-                 self.add_item(CancelButton(self))
-                 step_content = f"**Finalize Parlay**: Review & Select Channel"
-                 await self.edit_message_for_current_leg(interaction, content=step_content, view=self, file=file_to_send)
+                 # Get embed channels from guild settings
+                 try:
+                     settings = await self.bot.db_manager.fetch_one(
+                         "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
+                         (interaction.guild_id,)
+                     )
+                     if not settings:
+                         await self.edit_message_for_current_leg(interaction, content="❌ Guild settings not found. Please contact an administrator.", view=None)
+                         self.stop()
+                         return
+                     
+                     embed_channel_ids = [settings['embed_channel_1'], settings['embed_channel_2']]
+                     embed_channel_ids = [cid for cid in embed_channel_ids if cid is not None]
+                     
+                     if not embed_channel_ids:
+                         await self.edit_message_for_current_leg(interaction, content="❌ No embed channels configured. Please contact an administrator.", view=None)
+                         self.stop()
+                         return
+                     
+                     channels = []
+                     for channel_id in embed_channel_ids:
+                         channel = interaction.guild.get_channel(channel_id)
+                         if channel and isinstance(channel, TextChannel) and channel.permissions_for(interaction.guild.me).send_messages:
+                             channels.append(channel)
+                     
+                     if not channels:
+                         await self.edit_message_for_current_leg(interaction, content="❌ No writable embed channels found. Please contact an administrator.", view=None)
+                         self.stop()
+                         return
+                     
+                     self.add_item(ChannelSelect(self, channels))
+                     self.add_item(CancelButton(self))
+                     step_content = f"**Finalize Parlay**: Review & Select Channel"
+                     await self.edit_message_for_current_leg(interaction, content=step_content, view=self, file=file_to_send)
+                 except Exception as e:
+                     logger.exception(f"Error fetching guild settings for channel selection: {e}")
+                     await self.edit_message_for_current_leg(interaction, content="❌ Error fetching channel settings. Please try again.", view=None)
+                     self.stop()
+                     return
             elif self.current_step == 8: # Confirmation
                  if not all(k in self.bet_details for k in ['bet_serial', 'channel_id', 'units_str', 'total_odds_str', 'legs']):
                      await self.edit_message_for_current_leg(interaction, content="❌ Details incomplete.", view=None); self.stop(); return
