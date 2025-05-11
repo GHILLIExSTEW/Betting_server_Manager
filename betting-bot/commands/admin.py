@@ -434,6 +434,9 @@ class TextInputModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
+            # Defer the interaction first
+            await interaction.response.defer(ephemeral=True)
+            
             value = self.children[0].value.strip()
             view = self.view
             
@@ -456,7 +459,7 @@ class TextInputModal(discord.ui.Modal):
                         setting_key=step['setting_key']
                     )
                     next_modal.view = view
-                    await interaction.response.send_modal(next_modal)
+                    await interaction.followup.send_modal(next_modal)
                     return
                 view.current_step += 1
             
