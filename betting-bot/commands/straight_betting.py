@@ -797,7 +797,25 @@ class StraightBetWorkflowView(View):
             elif self.current_step == 6:
                 if "units_str" not in self.bet_details:
                      await self.edit_message(content="❌ Units missing.", view=None); self.stop(); self.is_processing = False; return
-                # ... (Image generation logic for file_to_send) ...
+                
+                # Get available text channels
+                text_channels = [
+                    channel for channel in interaction.guild.text_channels
+                    if channel.permissions_for(interaction.guild.me).send_messages
+                ]
+                
+                # Add channel select and cancel button
+                self.add_item(ChannelSelect(self, text_channels))
+                self.add_item(CancelButton(self))
+                
+                # Generate preview image if needed
+                file_to_send = None
+                if hasattr(self, 'bet_slip_generator'):
+                    try:
+                        file_to_send = await self.bet_slip_generator.generate_preview(self.bet_details)
+                    except Exception as e:
+                        logger.error(f"Failed to generate preview image: {e}")
+                
                 await self.edit_message(content=f"{step_content}: Review & Select Channel", view=self, file=file_to_send)
                 self.is_processing = False; return
 
