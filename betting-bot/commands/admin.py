@@ -497,6 +497,27 @@ class AdminCog(commands.Cog):
     def __init__(self, bot: commands.Bot, admin_service):
         self.bot = bot
         self.admin_service = admin_service
+        self.active_views = {}  # Track active views by user ID
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Handle URL input messages"""
+        if message.author.bot:
+            return
+
+        # Check if this user has an active view waiting for URL input
+        if message.author.id in self.active_views:
+            view = self.active_views[message.author.id]
+            if view.waiting_for_url:
+                try:
+                    await view.handle_url_input(message)
+                    # If we're done with all URL inputs, remove the view
+                    if not view.waiting_for_url:
+                        del self.active_views[message.author.id]
+                except Exception as e:
+                    logger.error(f"Error handling URL input: {str(e)}")
+                    await message.channel.send("An error occurred while processing your input. Please try again.", ephemeral=True)
+                    del self.active_views[message.author.id]
 
     @app_commands.command(name="setup", description="Run the interactive server setup.")
     @app_commands.checks.has_permissions(administrator=True)
@@ -627,6 +648,9 @@ class AdminCog(commands.Cog):
                 ephemeral=True
             )
             view.waiting_for_url = True
+            
+            # Store the view for this user
+            self.active_views[interaction.user.id] = view
             
         except Exception as e:
             logger.error(f"Error in update images callback: {str(e)}")
