@@ -375,7 +375,7 @@ class GameService:
                 params.append(status)
 
             query = base_query + " AND ".join(filters)
-            query += " ORDER BY g.start_time DESC NULLS LAST LIMIT %s"
+            query += " ORDER BY CASE WHEN g.start_time IS NULL THEN 1 ELSE 0 END, g.start_time DESC LIMIT %s"
             params.append(limit)
 
             return await self.db.fetch_all(query, *params)

@@ -119,7 +119,8 @@ class GameSelect(Select):
             options.append(
                 SelectOption(label=label[:100], value=str(game_api_id))
             )
-        options.append(SelectOption(label="Other (Manual Entry)", value="Other"))
+        if len(options) < 25:
+            options.append(SelectOption(label="Other (Manual Entry)", value="Other"))
         super().__init__(
             placeholder="Select Game (or Other)...",
             options=options,
