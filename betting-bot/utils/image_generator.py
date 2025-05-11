@@ -128,13 +128,22 @@ def load_fonts():
         bold_font_path = os.getenv('FONT_BOLD_PATH')
         emoji_font_path = os.getenv('FONT_EMOJI_PATH')
         
-        # Normalize paths for container environment
+        # Get container base directory
+        container_base = '/home/container/betting-bot'
+        
+        # Convert relative paths to absolute paths
         if font_path:
             font_path = font_path.replace('\\', '/')
+            if not os.path.isabs(font_path):
+                font_path = os.path.join(container_base, font_path)
         if bold_font_path:
             bold_font_path = bold_font_path.replace('\\', '/')
+            if not os.path.isabs(bold_font_path):
+                bold_font_path = os.path.join(container_base, bold_font_path)
         if emoji_font_path:
             emoji_font_path = emoji_font_path.replace('\\', '/')
+            if not os.path.isabs(emoji_font_path):
+                emoji_font_path = os.path.join(container_base, emoji_font_path)
         
         logger.info("Loading fonts from environment variables:")
         logger.info(f"FONT_REGULAR_PATH: {font_path}")
