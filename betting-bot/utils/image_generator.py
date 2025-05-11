@@ -181,8 +181,11 @@ class BetSlipGenerator:
         self.guild_id = guild_id
         self.db_manager = DatabaseManager()
         self.padding = 20
-        self.LEAGUE_TEAM_BASE_DIR = TEAMS_SUBDIR
-        self.LEAGUE_LOGO_BASE_DIR = LEAGUES_SUBDIR
+        self.LEAGUE_TEAM_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "teams")
+        self.LEAGUE_LOGO_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "leagues")
+        self.TEAM_LOGO_BASE_DIR = os.path.join(BASE_DIR, "assets", "league_logos", "leagues")
+        self.DEFAULT_LOGO_PATH = os.path.join(BASE_DIR, "static", "logos", "default_logo.png")
+        self.LOCK_ICON_PATH = os.path.join(BASE_DIR, "static", "logos", "lock_icon.png")
         self._logo_cache = {}
         self._lock_icon_cache = None
         self._last_cache_cleanup = time.time()
@@ -278,7 +281,7 @@ class BetSlipGenerator:
             
             # Fallback to default logo if needed
             if logo is None:
-                default_path = _PATHS["DEFAULT_TEAM_LOGO_PATH"]
+                default_path = self.DEFAULT_LOGO_PATH
                 abs_default = os.path.abspath(default_path)
                 if os.path.exists(abs_default):
                     try:
@@ -318,7 +321,7 @@ class BetSlipGenerator:
     def _load_lock_icon(self) -> Optional[Image.Image]:
         if self._lock_icon_cache is None:
             try:
-                path = _PATHS["DEFAULT_LOCK_ICON_PATH"]
+                path = self.LOCK_ICON_PATH
                 abs_path = os.path.abspath(path)
                 if os.path.exists(abs_path):
                     with Image.open(abs_path) as lock_img:
