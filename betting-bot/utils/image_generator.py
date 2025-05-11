@@ -287,6 +287,53 @@ class BetSlipGenerator:
                 self._logo_cache.pop(k, None)
             self._last_cache_cleanup = now
 
+    def _normalize_team_name(team_name: str) -> str:
+        """Normalize team name to match logo file naming convention."""
+        # Common team name mappings
+        team_mappings = {
+            # NHL Teams
+            "Oilers": "edmonton_oilers",
+            "Flames": "calgary_flames",
+            "Canucks": "vancouver_canucks",
+            "Maple Leafs": "toronto_maple_leafs",
+            "Senators": "ottawa_senators",
+            "Canadiens": "montreal_canadiens",
+            "Bruins": "boston_bruins",
+            "Sabres": "buffalo_sabres",
+            "Rangers": "new_york_rangers",
+            "Islanders": "new_york_islanders",
+            "Devils": "new_jersey_devils",
+            "Flyers": "philadelphia_flyers",
+            "Penguins": "pittsburgh_penguins",
+            "Capitals": "washington_capitals",
+            "Hurricanes": "carolina_hurricanes",
+            "Panthers": "florida_panthers",
+            "Lightning": "tampa_bay_lightning",
+            "Red Wings": "detroit_red_wings",
+            "Blackhawks": "chicago_blackhawks",
+            "Blues": "st_louis_blues",
+            "Wild": "minnesota_wild",
+            "Jets": "winnipeg_jets",
+            "Avalanche": "colorado_avalanche",
+            "Stars": "dallas_stars",
+            "Predators": "nashville_predators",
+            "Coyotes": "arizona_coyotes",
+            "Golden Knights": "vegas_golden_knights",
+            "Kraken": "seattle_kraken",
+            "Sharks": "san_jose_sharks",
+            "Kings": "los_angeles_kings",
+            "Ducks": "anaheim_ducks",
+        }
+        
+        # First check if we have a direct mapping
+        if team_name in team_mappings:
+            return team_mappings[team_name]
+        
+        # If no direct mapping, try to normalize the name
+        normalized = team_name.lower().replace(" ", "_")
+        logger.info("Normalized team name from '%s' to '%s'", team_name, normalized)
+        return normalized
+
     def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
         if not team_name or not league:
             return None
@@ -300,15 +347,15 @@ class BetSlipGenerator:
                 else:
                     del self._logo_cache[cache_key]
             team_dir = self._ensure_team_dir_exists(league)
-            fname_base = team_name.lower().replace(" ", "_")
-            logo_path = os.path.join(team_dir, f"{fname_base}.png")
+            normalized_name = self._normalize_team_name(team_name)
+            logo_path = os.path.join(team_dir, f"{normalized_name}.png")
 
             # --- START REFINED LOGGING ---
             absolute_logo_path = os.path.abspath(logo_path)
             file_exists = os.path.exists(absolute_logo_path)
             logger.info(
-                "Team logo details - Team: '%s', League: '%s', Path: '%s', Exists: %s",
-                team_name, league, absolute_logo_path, file_exists
+                "Team logo details - Team: '%s', Normalized: '%s', League: '%s', Path: '%s', Exists: %s",
+                team_name, normalized_name, league, absolute_logo_path, file_exists
             )
             # --- END REFINED LOGGING ---
 
