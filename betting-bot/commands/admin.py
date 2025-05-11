@@ -441,8 +441,23 @@ class TextInputModal(discord.ui.Modal):
             # Move to next step
             view.current_step += 1
             
-            # Process next step
-            await view.process_next_selection(interaction)
+            # Check if there are more image URL steps
+            while view.current_step < len(view.SETUP_STEPS):
+                step = view.SETUP_STEPS[view.current_step]
+                if step.get('is_premium_only', False) and step['select'] is None:
+                    # Create and send the next modal
+                    next_modal = TextInputModal(
+                        title=f"Enter {step['name']}", 
+                        setting_key=step['setting_key']
+                    )
+                    next_modal.view = view
+                    await interaction.response.send_modal(next_modal)
+                    return
+                view.current_step += 1
+            
+            # If we've gone through all steps, finalize
+            await view.finalize_setup(interaction)
+            
         except Exception as e:
             logger.error(f"Error in TextInputModal submission: {str(e)}")
             if not interaction.response.is_done():
@@ -588,6 +603,9 @@ class AdminCog(commands.Cog):
     async def update_images_callback(self, interaction: discord.Interaction, existing_settings=None):
         """Handle update images button click"""
         try:
+            # Defer the interaction first
+            await interaction.response.defer()
+            
             # Create a new view for image URL requests
             view = GuildSettingsView(
                 bot=self.bot,
@@ -605,15 +623,20 @@ class AdminCog(commands.Cog):
                     view.current_step = i
                     break
             
-            # Send initial message and start selection without deferring
-            await interaction.response.send_message(
+            # Send initial message
+            await interaction.followup.send(
                 "Please provide the image URLs for your server:",
-                view=view,
                 ephemeral=True
             )
             
-            # Start with image URL requests
-            await view.process_next_selection(interaction)
+            # Create and send the first modal
+            modal = TextInputModal(
+                title=f"Enter {view.SETUP_STEPS[view.current_step]['name']}", 
+                setting_key=view.SETUP_STEPS[view.current_step]['setting_key']
+            )
+            modal.view = view
+            await interaction.followup.send_modal(modal)
+            
         except Exception as e:
             logger.error(f"Error in update images callback: {str(e)}")
             if not interaction.response.is_done():
