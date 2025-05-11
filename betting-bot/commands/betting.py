@@ -10,8 +10,8 @@ import logging
 from typing import Optional
 
 # Import from same directory
-from straight_betting import StraightBetWorkflowView
-from parlay_betting import ParlayBetWorkflowView
+from .straight_betting import StraightBetWorkflowView
+from .parlay_betting import ParlayBetWorkflowView
 
 logger = logging.getLogger(__name__)
 
