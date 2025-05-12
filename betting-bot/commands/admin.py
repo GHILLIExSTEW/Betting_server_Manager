@@ -305,8 +305,7 @@ class GuildSettingsView(discord.ui.View):
         try:
             base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             guild_dirs = [
-                os.path.join(base_dir, 'static', 'guilds', str(self.guild.id)),  # For guild-specific assets
-                os.path.join(base_dir, 'assets', 'logos', str(self.guild.id)),   # For guild logos
+                os.path.join(base_dir, 'static', 'logos', str(self.guild.id)),  # For guild logos and assets
                 os.path.join(base_dir, 'data', 'guilds', str(self.guild.id))     # For guild-specific data
             ]
             
@@ -441,7 +440,7 @@ class GuildSettingsView(discord.ui.View):
                     
                     # Save as PNG for consistency
                     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    guild_dir = os.path.join(base_dir, 'static', 'guilds', str(self.guild.id))
+                    guild_dir = os.path.join(base_dir, 'static', 'logos', str(self.guild.id))
                     os.makedirs(guild_dir, exist_ok=True)
                     save_path = os.path.join(guild_dir, f"{setting_key}.png")
                     img.save(save_path, 'PNG')
@@ -471,7 +470,7 @@ class GuildSettingsView(discord.ui.View):
                             return
                         # Save as PNG for consistency
                         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                        guild_dir = os.path.join(base_dir, 'static', 'guilds', str(self.guild.id))
+                        guild_dir = os.path.join(base_dir, 'static', 'logos', str(self.guild.id))
                         os.makedirs(guild_dir, exist_ok=True)
                         save_path = os.path.join(guild_dir, f"{setting_key}.png")
                         img.save(save_path, 'PNG')
