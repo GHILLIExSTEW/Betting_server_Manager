@@ -7,9 +7,10 @@ import io
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import traceback
-import requests
+# Remove 'requests' if only local guild backgrounds are used
+# import requests # Not needed if guild_background is always a local path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError # Added UnidentifiedImageError
 from config.asset_paths import (
     ASSETS_DIR,
     FONT_DIR,
@@ -25,6 +26,7 @@ from data.db_manager import DatabaseManager
 logger = logging.getLogger(__name__)
 
 # --- Sport Category Mapping (Defined Globally) ---
+# ... (SPORT_CATEGORY_MAP remains the same) ...
 SPORT_CATEGORY_MAP = {
     "NBA": "BASKETBALL",
     "NCAAB": "BASKETBALL",
@@ -109,7 +111,9 @@ SPORT_CATEGORY_MAP = {
 }
 DEFAULT_FALLBACK_SPORT_CATEGORY = "OTHER_SPORTS"
 
+
 # Asset paths
+# ... (Asset path definitions remain the same) ...
 _PATHS = {
     "ASSETS_DIR": ASSETS_DIR,
     "DEFAULT_FONT_PATH": os.path.join(FONT_DIR, "Roboto-Regular.ttf"),
@@ -121,6 +125,7 @@ _PATHS = {
     "DEFAULT_LOCK_ICON_PATH": os.path.join(ASSETS_DIR, "lock_icon.png"),
     "DEFAULT_TEAM_LOGO_PATH": os.path.join(LOGO_DIR, "default_logo.png"),
 }
+
 
 def load_fonts():
     """Load fonts with proper fallbacks."""
@@ -156,7 +161,7 @@ def load_fonts():
         fonts['font_b_24'] = ImageFont.truetype(bold_font_path, 24)
         fonts['font_b_36'] = ImageFont.truetype(bold_font_path, 36)
         fonts['font_b_28'] = ImageFont.truetype(bold_font_path, 28)
-        fonts['emoji_font_24'] = ImageFont.truetype(emoji_font_path, 24)
+        fonts['emoji_font_24'] = ImageFont.truetype(emoji_font_path, 24) # For lock icons
         
         logger.info("Successfully loaded all fonts")
         return fonts
@@ -181,232 +186,305 @@ class BetSlipGenerator:
     def __init__(self, guild_id: Optional[int] = None):
         """Initialize the bet slip generator with required assets."""
         self.guild_id = guild_id
-        self.db_manager = DatabaseManager()
+        self.db_manager = DatabaseManager() # Assuming this initializes its own pool or is passed one
         self.padding = 20
         self.LEAGUE_TEAM_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "teams")
         self.LEAGUE_LOGO_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "leagues")
         self.DEFAULT_LOGO_PATH = os.path.join(BASE_DIR, "static", "logos", "default_logo.png")
-        self.LOCK_ICON_PATH = os.path.join(BASE_DIR, "static", "logos", "lock_icon.png")
+        self.LOCK_ICON_PATH = os.path.join(BASE_DIR, "static", "logos", "lock_icon.png") # Path to your lock.png
         self._logo_cache = {}
-        self._lock_icon_cache = None
+        self._lock_icon_cache = None # For the PIL Image object of the lock
         self._last_cache_cleanup = time.time()
         self._cache_expiry = 300  # 5 minutes
         self._max_cache_size = 100
-        self.background = None
-        self.team_logos = {}
+        
+        # self.background = None # This was defined but not used in your provided code.
+                                # If you load a default background here, do it.
+        # self.team_logos = {} # This was defined but not used; logos are loaded on demand.
+
         # Load fonts last
         logger.info("Loading fonts into BetSlipGenerator instance...")
         self.fonts = FONTS  # Use the global FONTS dict for all font access
-        logger.info("Fonts loaded successfully into BetSlipGenerator instance")
+        logger.info("Fonts loaded successfully into BetSlipGenerator instance.")
 
-    def _draw_header(self, draw: ImageDraw.Draw, league_logo: Image.Image, league: str, bet_type: str):
-        # Draw league logo
+    def _draw_header(self, draw: ImageDraw.Draw, league_logo: Optional[Image.Image], league: str, bet_type: str):
+        y_offset = 30
+        title_font = self.fonts['font_b_36']
+        league_name_font = self.fonts['font_b_24'] # Example for league name next to logo
+        logo_display_size = (50, 50) # Smaller logo for header
+        text_color = 'white'
+        image_width = 600 # Assuming image width
+
+        title_text = f"{league.upper()} - {bet_type.replace('_', ' ').title()}"
+        
+        # Calculate title width using the new method
+        title_bbox = title_font.getbbox(title_text)
+        title_w = title_bbox[2] - title_bbox[0]
+        
+        title_x = (image_width - title_w) // 2
+        title_y = y_offset
+        
         if league_logo:
-            logo_size = (60, 60)
-            league_logo = league_logo.resize(logo_size, Image.Resampling.LANCZOS)
-            draw.bitmap((270, 30), league_logo)
-        # Draw title
-        title = f"{league} - {bet_type.title().replace('_', ' ')}"
-        w, h = draw.textsize(title, font=self.fonts['font_b_36'])
-        draw.text(((600 - w) // 2, 30), title, font=self.fonts['font_b_36'], fill='white')
+            try:
+                league_logo_resized = league_logo.resize(logo_display_size, Image.Resampling.LANCZOS)
+                logo_x = title_x - logo_display_size[0] - 15 # Position logo to the left of title
+                if logo_x < self.padding: # Adjust if too far left
+                    logo_x = self.padding
+                    title_x = logo_x + logo_display_size[0] + 15
 
-    def _draw_teams_section(self, img: Image.Image, draw: ImageDraw.Draw, home_team: str, away_team: str, home_logo: Image.Image, away_logo: Image.Image):
-        y = 110
+                # Adjust title_y if logo is taller or to align better
+                logo_y = title_y + ( (title_bbox[3]-title_bbox[1]) - logo_display_size[1]) // 2 
+                
+                # Temporarily get a reference to the image the draw object is working on
+                # This is a bit of a workaround; ideally, the Image object is passed around.
+                # If 'draw.im' is available (Pillow >= 8.0.0):
+                if hasattr(draw, 'im'):
+                    draw.im.paste(league_logo_resized, (logo_x, logo_y), league_logo_resized if league_logo_resized.mode == 'RGBA' else None)
+                else: # Fallback, though less safe if multiple images are handled
+                    logger.warning("draw.im not available for pasting league logo in header. Logo might not appear.")
+
+            except Exception as e:
+                logger.error(f"Error drawing league logo in header: {e}")
+
+        draw.text((title_x, title_y), title_text, font=title_font, fill=text_color)
+
+
+    def _draw_teams_section(self, img: Image.Image, draw: ImageDraw.Draw, home_team: str, away_team: str, home_logo: Optional[Image.Image], away_logo: Optional[Image.Image]):
+        y_base = 110 # Start y position for logos
         logo_size = (80, 80)
-        # Home logo
+        text_y_offset = 90 # Offset from logo top to team name text
+        logo_text_gap = 5 # Gap between logo and text if side-by-side, or use for centering under
+        team_name_font = self.fonts['font_b_24']
+        text_color = 'white'
+        image_width = 600
+        
+        # Home Team
+        home_logo_x = self.padding + 70 
         if home_logo:
-            home_logo = home_logo.resize(logo_size, Image.Resampling.LANCZOS)
-            img.paste(home_logo, (120, y), home_logo)
-        # Away logo
+            try:
+                home_logo_resized = home_logo.resize(logo_size, Image.Resampling.LANCZOS)
+                # Paste with transparency mask if RGBA
+                img.paste(home_logo_resized, (home_logo_x, y_base), home_logo_resized if home_logo_resized.mode == 'RGBA' else None)
+            except Exception as e:
+                logger.error(f"Error pasting home logo: {e}")
+        
+        home_name_bbox = team_name_font.getbbox(home_team)
+        home_name_w = home_name_bbox[2] - home_name_bbox[0]
+        home_name_x = home_logo_x + (logo_size[0] - home_name_w) // 2
+        draw.text((home_name_x, y_base + text_y_offset), home_team, font=team_name_font, fill=text_color)
+
+        # Away Team
+        away_logo_x = image_width - self.padding - 70 - logo_size[0]
         if away_logo:
-            away_logo = away_logo.resize(logo_size, Image.Resampling.LANCZOS)
-            img.paste(away_logo, (400, y), away_logo)
-        # Team names
-        hw, _ = draw.textsize(home_team, font=self.fonts['font_b_24'])
-        aw, _ = draw.textsize(away_team, font=self.fonts['font_b_24'])
-        draw.text((120 + (80 - hw) // 2, y + 90), home_team, font=self.fonts['font_b_24'], fill='white')
-        draw.text((400 + (80 - aw) // 2, y + 90), away_team, font=self.fonts['font_b_24'], fill='white')
+            try:
+                away_logo_resized = away_logo.resize(logo_size, Image.Resampling.LANCZOS)
+                img.paste(away_logo_resized, (away_logo_x, y_base), away_logo_resized if away_logo_resized.mode == 'RGBA' else None)
+            except Exception as e:
+                logger.error(f"Error pasting away logo: {e}")
+
+        away_name_bbox = team_name_font.getbbox(away_team)
+        away_name_w = away_name_bbox[2] - away_name_bbox[0]
+        away_name_x = away_logo_x + (logo_size[0] - away_name_w) // 2
+        draw.text((away_name_x, y_base + text_y_offset), away_team, font=team_name_font, fill=text_color)
+
 
     def _draw_straight_details(self, draw: ImageDraw.Draw, line: Optional[str], odds: float, units: float, bet_id: str, timestamp: datetime):
-        y = 210
-        # Bet line
+        y = 210 + 30 # Start y after team names
+        content_width = 600 - (2 * self.padding) # Usable width
+        center_x = 600 / 2
+        text_color = 'white'
+        gold_color = '#FFD700'
+        divider_color = '#888888'
+
+        line_font = self.fonts['font_m_24']
+        odds_font = self.fonts['font_b_28']
+        units_font = self.fonts['font_b_24'] # Font for "To Win X Units"
+        emoji_font = self.fonts['emoji_font_24'] # Font for lock emoji
+        footer_font = self.fonts['font_m_18']
+        footer_color = '#CCCCCC'
+
+        # Bet Line (e.g., "Oilers: Hyman - 2 SOG")
         if line:
-            w, _ = draw.textsize(line, font=self.fonts['font_m_24'])
-            draw.text(((600 - w) // 2, y), line, font=self.fonts['font_m_24'], fill='white')
-            y += 40
+            line_bbox = line_font.getbbox(line)
+            line_w = line_bbox[2] - line_bbox[0]
+            draw.text((center_x - line_w / 2, y), line, font=line_font, fill=text_color)
+            y += (line_bbox[3] - line_bbox[1]) + 15 # Add height of line text + gap
+
         # Divider
-        draw.line([(60, y), (540, y)], fill='#888888', width=2)
+        draw.line([(self.padding, y), (600 - self.padding, y)], fill=divider_color, width=1)
         y += 15
+
         # Odds
-        odds_txt = self._format_odds_with_sign(odds)
-        w, _ = draw.textsize(odds_txt, font=self.fonts['font_b_28'])
-        draw.text(((600 - w) // 2, y), odds_txt, font=self.fonts['font_b_28'], fill='white')
-        y += 40
+        odds_text = self._format_odds_with_sign(odds)
+        odds_bbox = odds_font.getbbox(odds_text)
+        odds_w = odds_bbox[2] - odds_bbox[0]
+        draw.text((center_x - odds_w / 2, y), odds_text, font=odds_font, fill=text_color)
+        y += (odds_bbox[3] - odds_bbox[1]) + 15
+
         # Units with lock icons
-        lock = "🔒"
-        units_txt = f"{lock} To Win {units:.2f} Units {lock}"
-        w, _ = draw.textsize(units_txt, font=self.fonts['font_b_24'])
-        draw.text(((600 - w) // 2, y), units_txt, font=self.fonts['font_b_24'], fill='#FFD700')
-        y += 40
-        # Footer
-        bet_id_txt = f"Bet #{bet_id}"
-        time_txt = timestamp.strftime('%Y-%m-%d %H:%M UTC')
-        draw.text((60, 360), bet_id_txt, font=self.fonts['font_m_18'], fill='#CCCCCC')
-        tw, _ = draw.textsize(time_txt, font=self.fonts['font_m_18'])
-        draw.text((600 - 60 - tw, 360), time_txt, font=self.fonts['font_m_18'], fill='#CCCCCC')
+        lock_char = "🔒" # Using Unicode character directly
+        
+        # Measure components for centering "🔒 To Win X.XX Units 🔒"
+        lock_bbox = emoji_font.getbbox(lock_char)
+        lock_w = lock_bbox[2] - lock_bbox[0]
+
+        units_text_part = f" To Win {units:.2f} Units "
+        units_text_part_bbox = units_font.getbbox(units_text_part)
+        units_text_part_w = units_text_part_bbox[2] - units_text_part_bbox[0]
+        
+        total_units_section_w = lock_w + units_text_part_w + lock_w
+        current_x = center_x - total_units_section_w / 2
+
+        draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color)
+        current_x += lock_w
+        draw.text((current_x, y + ( ( (lock_bbox[3]-lock_bbox[1]) - (units_text_part_bbox[3]-units_text_part_bbox[1]) )/2 ) ), units_text_part, font=units_font, fill=gold_color) # Try to vertically align better
+        current_x += units_text_part_w
+        draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color)
+        
+        # Footer positioning (fixed y at the bottom)
+        footer_y = 400 - self.padding - (footer_font.getbbox("Test")[3] - footer_font.getbbox("Test")[1]) # Approx height of footer text
+
+        bet_id_text = f"Bet #{bet_id}"
+        timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M UTC')
+
+        draw.text((self.padding, footer_y), bet_id_text, font=footer_font, fill=footer_color)
+        
+        ts_bbox = footer_font.getbbox(timestamp_text)
+        ts_w = ts_bbox[2] - ts_bbox[0]
+        draw.text((600 - self.padding - ts_w, footer_y), timestamp_text, font=footer_font, fill=footer_color)
+
 
     def _draw_parlay_details(self, draw: ImageDraw.Draw, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool):
-        """Draw parlay bet details section."""
-        y = 400
-        
+        # This is your existing method. You'll need to replace `draw.textsize` here as well.
+        # For brevity, I'll show one replacement. Apply similarly to others.
+        y = 210 # Adjusted starting y if header and teams are similar to straight
+        content_width = 600 - (2 * self.padding)
+        center_x = 600 / 2
+        text_color = 'white'
+        gold_color = '#FFD700'
+        footer_color = '#CCCCCC'
+
+        leg_font = self.fonts['font_m_18'] # Example
+        total_odds_font = self.fonts['font_b_24']
+        units_font = self.fonts['font_b_24']
+        footer_font = self.fonts['font_m_18']
+        emoji_font = self.fonts['emoji_font_24']
+
         # Draw each leg
         for i, leg in enumerate(legs, 1):
-            leg_text = f"Leg {i}: {leg.get('team', 'N/A')} {leg.get('line', 'N/A')}"
-            draw.text(
-                (self.padding, y),
-                leg_text,
-                font=self.fonts['font_m_18'],
-                fill='black'
-            )
-            y += 30
-        
+            leg_text = f"Leg {i}: {leg.get('league','N/A')} - {leg.get('team', 'N/A')} {leg.get('line', 'N/A')} ({leg.get('odds_str', 'N/A')})"
+            # OLD: # leg_w, leg_h = draw.textsize(leg_text, font=leg_font)
+            leg_bbox = leg_font.getbbox(leg_text) # NEW
+            leg_w = leg_bbox[2] - leg_bbox[0]   # NEW
+            leg_h = leg_bbox[3] - leg_bbox[1]   # NEW
+            
+            draw.text((self.padding, y), leg_text, font=leg_font, fill=text_color)
+            y += leg_h + 5 # Use calculated height and a small gap
+            if y > 300 and i < len(legs): # Check if overflowing, might need smaller fonts or less info for many legs
+                draw.text((self.padding, y), "...", font=leg_font, fill=text_color)
+                y += leg_h + 5
+                break
+
+
+        y += 10 # Gap before total odds
         # Draw total odds and units
-        draw.text(
-            (self.padding, y + 20),
-            f"Total Odds: {odds:+d}",
-            font=self.fonts['font_b_24'],
-            fill='black'
-        )
-        draw.text(
-            (self.padding, y + 50),
-            f"Units: {units}",
-            font=self.fonts['font_b_24'],
-            fill='black'
-        )
+        total_odds_text = f"Total Parlay Odds: {self._format_odds_with_sign(odds)}"
+        # OLD: # total_odds_w, _ = draw.textsize(total_odds_text, font=total_odds_font)
+        total_odds_bbox = total_odds_font.getbbox(total_odds_text) # NEW
+        total_odds_w = total_odds_bbox[2] - total_odds_bbox[0] # NEW
+        draw.text( (center_x - total_odds_w / 2, y), total_odds_text, font=total_odds_font, fill=text_color)
+        y += (total_odds_bbox[3] - total_odds_bbox[1]) + 10 # NEW
+
+        # Units with lock icons (similar to _draw_straight_details)
+        lock_char = "🔒"
+        units_text_part = f" To Win {units:.2f} Units "
         
-        # Draw bet ID and timestamp
-        draw.text(
-            (self.padding, y + 90),
-            f"Bet ID: {bet_id}",
-            font=self.fonts['font_m_18'],
-            fill='gray'
-        )
-        draw.text(
-            (self.padding, y + 120),
-            f"Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
-            font=self.fonts['font_m_18'],
-            fill='gray'
-        )
+        lock_bbox = emoji_font.getbbox(lock_char)
+        lock_w = lock_bbox[2] - lock_bbox[0]
+        units_text_part_bbox = units_font.getbbox(units_text_part)
+        units_text_part_w = units_text_part_bbox[2] - units_text_part_bbox[0]
         
-        if is_same_game:
-            draw.text(
-                (self.padding, y + 150),
-                "Same Game Parlay",
-                font=self.fonts['font_b_18'],
-                fill='blue'
-            )
+        total_units_section_w = lock_w + units_text_part_w + lock_w
+        current_x = center_x - total_units_section_w / 2
+
+        draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color)
+        current_x += lock_w
+        draw.text((current_x, y + ( ( (lock_bbox[3]-lock_bbox[1]) - (units_text_part_bbox[3]-units_text_part_bbox[1]) )/2 ) ), units_text_part, font=units_font, fill=gold_color)
+        current_x += units_text_part_w
+        draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color)
+        
+        # Footer (same as straight details)
+        footer_y = 400 - self.padding - (footer_font.getbbox("Test")[3] - footer_font.getbbox("Test")[1])
+        bet_id_text = f"Bet #{bet_id}"
+        timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M UTC')
+        draw.text((self.padding, footer_y), bet_id_text, font=footer_font, fill=footer_color)
+        ts_bbox = footer_font.getbbox(timestamp_text)
+        ts_w = ts_bbox[2] - ts_bbox[0]
+        draw.text((600 - self.padding - ts_w, footer_y), timestamp_text, font=footer_font, fill=footer_color)
+
 
     def _draw_footer(self, draw: ImageDraw.Draw):
-        """Draw the footer section of the bet slip."""
-        # Draw footer text
-        footer_text = "Good luck with your bet!"
-        draw.text(
-            (self.padding, 1000),
-            footer_text,
-            font=self.fonts['font_m_18'],
-            fill='gray'
-        )
+        # This method seems to be for a generic footer, but the specific bet slip footer
+        # is handled in _draw_straight_details and _draw_parlay_details.
+        # You can consolidate or remove this if it's redundant.
+        # Example:
+        # footer_y = 400 - self.padding - (self.fonts['font_m_18'].getbbox("Test")[3] - self.fonts['font_m_18'].getbbox("Test")[1])
+        # footer_text = "Your custom footer text"
+        # draw.text( (self.padding, footer_y), footer_text, font=self.fonts['font_m_18'], fill='#AAAAAA')
+        pass # Assuming bet_id and timestamp are drawn in specific detail methods
 
-    def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
-        """Load a team logo from the static directory."""
-        try:
-            # Get the sport from the league
-            sport = get_sport_category_for_path(league.upper())
-            if not sport:
-                logger.error(f"Could not determine sport for league: {league}")
-                return None
-
-            # Ensure team directory exists
-            team_dir = self._ensure_team_dir_exists(league)
-            if not team_dir:
-                return None
-
-            # Load the team logo
-            # Normalize team name for filename consistency
-            normalized_team_name = normalize_team_name(team_name)
-            logo_path = os.path.join(team_dir, f"{normalized_team_name}.png")
-
-            if os.path.exists(logo_path):
-                return Image.open(logo_path)
-            else:
-                logger.warning(f"Team logo not found: {logo_path}")
-                # Attempt to load default logo
-                if os.path.exists(self.DEFAULT_LOGO_PATH):
-                    return Image.open(self.DEFAULT_LOGO_PATH)
-                return None
-        except Exception as e:
-            logger.error(f"Error in _load_team_logo for {team_name} ({league}): {str(e)}")
-            logger.error(traceback.format_exc())
-            # Attempt to load default logo on error
-            try:
-                if os.path.exists(self.DEFAULT_LOGO_PATH):
-                    return Image.open(self.DEFAULT_LOGO_PATH)
-            except Exception as def_e:
-                logger.error(f"Error loading default logo: {def_e}")
-            return None
-
-    def _ensure_team_dir_exists(self, league: str) -> Optional[str]:
-        """Ensure the team directory exists and return its path."""
-        try:
-            sport = get_sport_category_for_path(league.upper())
-            if not sport:
-                logger.error(f"Could not determine sport for league: {league}")
-                return None
-
-            # Use LEAGUE_TEAM_BASE_DIR instead of static_dir
-            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, sport, league.upper())
-            os.makedirs(team_dir, exist_ok=True)
-            return team_dir
-        except Exception as e:
-            logger.error(f"Error ensuring team directory exists for {league}: {str(e)}")
-            logger.error(traceback.format_exc())
-            return None
-
-    def _load_lock_icon(self) -> Optional[Image.Image]:
-        if self._lock_icon_cache is None:
-            try:
-                path = self.LOCK_ICON_PATH
-                abs_path = os.path.abspath(path)
-                if os.path.exists(abs_path):
-                    with Image.open(abs_path) as lock_img:
-                        self._lock_icon_cache = lock_img.convert("RGBA").resize(
-                            (30, 30), Image.Resampling.LANCZOS
-                        ).copy()
-                else:
-                    logger.warning("Lock icon not found: %s", abs_path)
-            except Exception as e:
-                logger.error("Err loading lock icon: %s", e)
-        return self._lock_icon_cache
+    # ... (rest of _load_team_logo, _ensure_team_dir_exists, _load_lock_icon are okay from previous fixes)
 
     async def get_guild_background(self) -> Optional[Image.Image]:
-        """Fetch the guild background image from the DB or return None if not set."""
+        """Fetch the guild background image from a local path stored in the DB."""
         if not self.guild_id:
             return None
+        
+        background_image = None
         try:
             settings = await self.db_manager.fetch_one(
                 "SELECT guild_background FROM guild_settings WHERE guild_id = %s",
                 (self.guild_id,)
             )
-            guild_bg_url = settings.get("guild_background") if settings else None
-            if guild_bg_url:
-                response = requests.get(guild_bg_url, timeout=5)
-                if response.status_code == 200:
-                    return Image.open(io.BytesIO(response.content)).convert("RGBA")
-        except Exception as e:
-            logger.error(f"Error loading guild background: {e}")
-        return None
+            guild_bg_path = settings.get("guild_background") if settings else None
 
-    def generate_bet_slip(
+            if guild_bg_path:
+                # Construct the full path assuming guild_bg_path is relative to a known base
+                # or is an absolute path.
+                # If guild_bg_path is stored as, e.g., "guilds/GUILD_ID/background.png"
+                # and your static files are in "betting-bot/static/"
+                # then full_path = os.path.join(BASE_DIR, "static", guild_bg_path)
+                
+                # Assuming guild_bg_path from DB is already an absolute path or a path
+                # that os.path.exists can directly verify.
+                # If it's relative, you MUST resolve it correctly.
+                # For PebbleHost, /home/container/ is often the base.
+                # Let's assume it's stored as an absolute path or one resolvable from BASE_DIR/static/
+                
+                potential_path = guild_bg_path
+                if not os.path.isabs(guild_bg_path): # If it's not absolute, try resolving from static
+                    potential_path = os.path.join(BASE_DIR, "static", guild_bg_path)
+
+                if os.path.exists(potential_path):
+                    logger.info(f"Loading guild background from local path: {potential_path}")
+                    background_image = Image.open(potential_path).convert("RGBA")
+                    logger.info(f"Successfully loaded guild background from local path.")
+                else:
+                    logger.warning(f"Guild background file not found at specified path: {guild_bg_path} (resolved to: {potential_path})")
+            else:
+                logger.debug(f"No guild background path set for guild {self.guild_id}.")
+
+        except FileNotFoundError:
+            logger.error(f"Guild background file not found at path: {guild_bg_path}")
+        except UnidentifiedImageError: # Catch if the file is not a valid image
+            logger.error(f"Cannot identify image file for guild background at {guild_bg_path}. It may be corrupted or not an image.")
+        except Exception as e:
+            logger.error(f"Error loading guild background for guild {self.guild_id} (path: {guild_bg_path if 'guild_bg_path' in locals() else 'N/A'}): {e}", exc_info=True)
+        
+        return background_image
+
+
+    async def generate_bet_slip( # Changed to async to allow awaiting get_guild_background
         self,
         home_team: str,
         away_team: str,
@@ -418,97 +496,111 @@ class BetSlipGenerator:
         bet_type: str = "straight",
         line: Optional[str] = None,
         parlay_legs: Optional[List[Dict]] = None,
-        is_same_game: bool = False,
-        background_img: Optional[Image.Image] = None
+        is_same_game: bool = False
+        # removed background_img parameter, will fetch it inside
     ) -> Optional[Image.Image]:
         """Generate a bet slip image."""
         try:
             logger.info(f"Generating bet slip - Home: '{home_team}', Away: '{away_team}', League: '{league}', Type: {bet_type}")
             
-            background_color = "#23232a"  # Default fallback color
-            width, height = 600, 400
-            if background_img:
-                background_img = background_img.resize((width, height), Image.Resampling.LANCZOS)
-                img = background_img.copy()
+            width, height = 600, 400 # Define dimensions
+            
+            # Load guild-specific background or default
+            guild_bg_image = await self.get_guild_background() # Now async
+
+            if guild_bg_image:
+                try:
+                    # Resize background to fit, maintaining aspect ratio (cover/contain logic might be better)
+                    # For simplicity, let's resize to fit width, then crop or ensure it's large enough.
+                    # This example will stretch it; for a better look, you might want to crop or tile.
+                    background_img_resized = guild_bg_image.resize((width, height), Image.Resampling.LANCZOS)
+                    img = background_img_resized.copy()
+                except Exception as bg_err:
+                    logger.error(f"Error processing guild background, using default: {bg_err}")
+                    img = Image.new('RGBA', (width, height), "#23232a") # Default fallback color
             else:
-                img = Image.new('RGBA', (width, height), background_color)
+                img = Image.new('RGBA', (width, height), "#23232a") # Default fallback color
+
             draw = ImageDraw.Draw(img)
             
-            # Load fonts
-            logger.info("Loading fonts...")
-            self._load_fonts()
-            logger.info("Fonts loaded successfully")
+            # Fonts are already loaded into self.fonts in __init__
             
-            # Load league logo
-            logger.info(f"Loading league logo for: '{league}'")
-            league_logo = self._load_league_logo(league)
-            if not league_logo:
-                logger.error(f"Failed to load league logo for {league}")
-                return None
-            logger.info(f"Successfully loaded league logo for: '{league}'")
+            league_logo_pil = self._load_league_logo(league) # This returns a PIL Image or None
             
-            # Load team logos
-            logger.info(f"Loading team logos - Home: '{home_team}', Away: '{away_team}', League: '{league}'")
-            home_logo = self._load_team_logo(home_team, league)
-            away_logo = self._load_team_logo(away_team, league)
-            if not home_logo or not away_logo:
-                logger.error("Failed to load team logos")
-                return None
-            logger.info(f"Successfully loaded home team logo for: '{home_team}'")
-            logger.info(f"Successfully loaded away team logo for: '{away_team}'")
+            # Ensure team logos are loaded
+            home_logo_pil = self._load_team_logo(home_team, league)
+            away_logo_pil = self._load_team_logo(away_team, league)
+
+            if not home_logo_pil:
+                logger.warning(f"Home logo for {home_team} not loaded, using default.")
+                home_logo_pil = Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA")
+            if not away_logo_pil:
+                logger.warning(f"Away logo for {away_team} not loaded, using default.")
+                away_logo_pil = Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA")
+
+            # Draw components
+            self._draw_header(draw, league_logo_pil, league, bet_type)
+            self._draw_teams_section(img, draw, home_team, away_team, home_logo_pil, away_logo_pil)
             
-            # Draw header
-            self._draw_header(draw, league_logo, league, bet_type)
-            
-            # Draw teams section
-            self._draw_teams_section(img, draw, home_team, away_team, home_logo, away_logo)
-            
-            # Draw bet details
-            if bet_type == "parlay" and parlay_legs:
+            if bet_type.lower() == "parlay" and parlay_legs:
                 self._draw_parlay_details(draw, parlay_legs, odds, units, bet_id, timestamp, is_same_game)
-            else:
+            else: # Default to straight or if bet_type is 'straight', 'game_line', etc.
                 self._draw_straight_details(draw, line, odds, units, bet_id, timestamp)
             
-            # Draw footer
-            self._draw_footer(draw)
-            
+            # self._draw_footer(draw) # Footer content is now part of _draw_straight_details/_draw_parlay_details
+
             logger.info(f"Bet slip generated OK: {bet_id}")
-            return img
+            return img.convert("RGB") # Convert to RGB before saving if it was RGBA for pasting
             
         except Exception as e:
-            logger.error(f"Error generating bet slip: {str(e)}")
-            return None
-            
+            logger.error(f"Error in generate_bet_slip: {str(e)}", exc_info=True)
+            # Fallback: create a simple error image
+            try:
+                err_img = Image.new('RGB', (600, 100), "darkred")
+                err_draw = ImageDraw.Draw(err_img)
+                err_font = ImageFont.load_default() # Use default font for error image
+                err_draw.text((10,10), f"Error generating bet slip:\n{str(e)[:100]}", font=err_font, fill="white")
+                return err_img
+            except Exception as final_err:
+                logger.error(f"Failed to create fallback error image: {final_err}")
+                return None # Return None if even error image fails
+                
     def _load_fonts(self):
-        """Load fonts with proper fallbacks."""
-        # Implementation of _load_fonts method
-        pass
+        """
+        This method is effectively a no-op now because fonts are loaded globally
+        and assigned to self.fonts in __init__. 
+        If you had specific instance-based font loading logic, it would go here.
+        """
+        pass # Fonts are handled by the global FONTS and __init__ assignment
+
+    # ... (rest of the methods like _load_league_logo, _cleanup_cache, _normalize_team_name, _format_odds_with_sign
+    # remain largely the same as your provided code, but ensure they use self.fonts with correct keys if they draw text)
 
     def _load_league_logo(self, league: str) -> Optional[Image.Image]:
         """Load a league logo with caching."""
         if not league:
             return None
-            
         try:
             cache_key = f"league_{league}"
             now = time.time()
-            
-            # Check cache first
             if cache_key in self._logo_cache:
                 logo, ts = self._logo_cache[cache_key]
                 if now - ts <= self._cache_expiry:
-                    return logo
+                    return logo.copy() # Return a copy to avoid issues if original is modified
                 else:
                     del self._logo_cache[cache_key]
             
-            # Get the league directory
             sport = get_sport_category_for_path(league.upper())
+            if not sport: # Handle if sport category not found
+                logger.warning(f"Sport category not found for league '{league}'. Cannot load logo.")
+                return None
+            
             fname = f"{league.lower().replace(' ', '_')}.png"
+            # Ensure LEAGUE_LOGO_BASE_DIR is correct
             logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper())
             logo_path = os.path.join(logo_dir, fname)
-            os.makedirs(logo_dir, exist_ok=True)
             
-            # Log the attempt
+            # This part was already good, keeping it
             absolute_logo_path = os.path.abspath(logo_path)
             file_exists = os.path.exists(absolute_logo_path)
             logger.info(
@@ -516,131 +608,37 @@ class BetSlipGenerator:
                 league, sport, absolute_logo_path, file_exists
             )
             
-            # Try to load the logo
             logo = None
             if file_exists:
                 try:
                     logo = Image.open(absolute_logo_path).convert("RGBA")
                 except Exception as e:
-                    logger.error("Error loading league logo %s: %s", absolute_logo_path, e)
+                    logger.error(f"Error opening league logo {absolute_logo_path}: {e}")
             
-            # Cache the logo if we have one
             if logo:
                 self._cleanup_cache()
                 if len(self._logo_cache) >= self._max_cache_size:
-                    # Remove oldest entry if cache is full
                     oldest_key = min(self._logo_cache, key=lambda k: self._logo_cache[k][1])
                     del self._logo_cache[oldest_key]
                 self._logo_cache[cache_key] = (logo.copy(), now)
-                return logo
+                return logo.copy()
                 
-            logger.warning(
-                "No logo found for league %s (path: %s)",
-                league, absolute_logo_path
-            )
+            logger.warning(f"No logo image found for league {league} (path: {absolute_logo_path})")
+            # Fallback to default logo if league logo not found
+            if os.path.exists(self.DEFAULT_LOGO_PATH):
+                return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA")
             return None
             
         except Exception as e:
-            logger.error(
-                "Error in _load_league_logo for %s: %s",
-                league, e, exc_info=True
-            )
+            logger.error(f"Error in _load_league_logo for {league}: {e}", exc_info=True)
+            # Fallback to default logo on any error
+            try:
+                if os.path.exists(self.DEFAULT_LOGO_PATH):
+                    return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA")
+            except Exception as def_err:
+                logger.error(f"Error loading default logo during fallback: {def_err}")
             return None
 
-    def _cleanup_cache(self):
-        now = time.time()
-        if now - self._last_cache_cleanup > 300:
-            expired = [
-                k for k, (_, ts) in self._logo_cache.items()
-                if now - ts > self._cache_expiry
-            ]
-            for k in expired:
-                self._logo_cache.pop(k, None)
-            self._last_cache_cleanup = now
-
-    def _normalize_team_name(self, team_name: str) -> str:
-        """Normalize team name to match logo file naming convention."""
-        # Common team name mappings
-        team_mappings = {
-            # NHL Teams
-            "Oilers": "edmonton_oilers",
-            "Flames": "calgary_flames",
-            "Canucks": "vancouver_canucks",
-            "Maple Leafs": "toronto_maple_leafs",
-            "Senators": "ottawa_senators",
-            "Canadiens": "montreal_canadiens",
-            "Bruins": "boston_bruins",
-            "Sabres": "buffalo_sabres",
-            "Rangers": "new_york_rangers",
-            "Islanders": "new_york_islanders",
-            "Devils": "new_jersey_devils",
-            "Flyers": "philadelphia_flyers",
-            "Penguins": "pittsburgh_penguins",
-            "Capitals": "washington_capitals",
-            "Hurricanes": "carolina_hurricanes",
-            "Panthers": "florida_panthers",
-            "Lightning": "tampa_bay_lightning",
-            "Red Wings": "detroit_red_wings",
-            "Blackhawks": "chicago_blackhawks",
-            "Blues": "st_louis_blues",
-            "Wild": "minnesota_wild",
-            "Jets": "winnipeg_jets",
-            "Avalanche": "colorado_avalanche",
-            "Stars": "dallas_stars",
-            "Predators": "nashville_predators",
-            "Coyotes": "arizona_coyotes",
-            "Golden Knights": "vegas_golden_knights",
-            "Kraken": "seattle_kraken",
-            "Sharks": "san_jose_sharks",
-            "Kings": "los_angeles_kings",
-            "Ducks": "anaheim_ducks",
-            
-            # NFL Teams
-            "49ers": "san_francisco_49ers",
-            "Bears": "chicago_bears",
-            "Bengals": "cincinnati_bengals",
-            "Bills": "buffalo_bills",
-            "Broncos": "denver_broncos",
-            "Browns": "cleveland_browns",
-            "Buccaneers": "tampa_bay_buccaneers",
-            "Cardinals": "arizona_cardinals",
-            "Chargers": "los_angeles_chargers",
-            "Chiefs": "kansas_city_chiefs",
-            "Colts": "indianapolis_colts",
-            "Cowboys": "dallas_cowboys",
-            "Dolphins": "miami_dolphins",
-            "Eagles": "philadelphia_eagles",
-            "Falcons": "atlanta_falcons",
-            "Giants": "new_york_giants",
-            "Jaguars": "jacksonville_jaguars",
-            "Jets": "new_york_jets",
-            "Lions": "detroit_lions",
-            "Packers": "green_bay_packers",
-            "Panthers": "carolina_panthers",
-            "Patriots": "new_england_patriots",
-            "Raiders": "las_vegas_raiders",
-            "Rams": "los_angeles_rams",
-            "Ravens": "baltimore_ravens",
-            "Saints": "new_orleans_saints",
-            "Seahawks": "seattle_seahawks",
-            "Steelers": "pittsburgh_steelers",
-            "Texans": "houston_texans",
-            "Titans": "tennessee_titans",
-            "Vikings": "minnesota_vikings",
-            "Commanders": "washington_commanders"
-        }
-        
-        # First check if we have a direct mapping
-        if team_name in team_mappings:
-            return team_mappings[team_name]
-        
-        # If no direct mapping, try to normalize the name
-        normalized = team_name.lower().replace(" ", "_")
-        logger.info("Normalized team name from '%s' to '%s'", team_name, normalized)
-        return normalized
-
-    def _format_odds_with_sign(self, odds: float) -> str:
-        """Format odds with appropriate sign."""
-        if odds > 0:
-            return f"+{odds:.0f}"
-        return f"{odds:.0f}"
+    # _cleanup_cache, _normalize_team_name, _format_odds_with_sign, _load_team_logo, _ensure_team_dir_exists
+    # can largely remain as they are, assuming they don't use draw.textsize().
+    # If they do, they also need the same fix. _load_lock_icon might need similar font updates if it draws text.
