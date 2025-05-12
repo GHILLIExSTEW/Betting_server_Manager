@@ -225,29 +225,13 @@ class BetSlipGenerator:
         title_y = y_offset
         
         if league_logo:
-            try:
-                league_logo_resized = league_logo.resize(logo_display_size, Image.Resampling.LANCZOS)
-                logo_x = title_x - logo_display_size[0] - 15 # Position logo to the left of title
-                if logo_x < self.padding: # Adjust if too far left
-                    logo_x = self.padding
-                    title_x = logo_x + logo_display_size[0] + 15
-
-                # Adjust title_y if logo is taller or to align better
-                logo_y = title_y + ( (title_bbox[3]-title_bbox[1]) - logo_display_size[1]) // 2 
-                
-                # Temporarily get a reference to the image the draw object is working on
-                # This is a bit of a workaround; ideally, the Image object is passed around.
-                # If 'draw.im' is available (Pillow >= 8.0.0):
-                if hasattr(draw, 'im'):
-                    draw.im.paste(league_logo_resized, (logo_x, logo_y), league_logo_resized if league_logo_resized.mode == 'RGBA' else None)
-                else: # Fallback, though less safe if multiple images are handled
-                    logger.warning("draw.im not available for pasting league logo in header. Logo might not appear.")
-
-            except Exception as e:
-                logger.error(f"Error drawing league logo in header: {e}")
-
-        draw.text((title_x, title_y), title_text, font=title_font, fill=text_color)
-
+            logo_size = (60, 60)
+            league_logo = league_logo.resize(logo_size, Image.Resampling.LANCZOS)
+            draw.bitmap((270, 30), league_logo)
+        # Draw title
+        title = f"{league} - {bet_type.title().replace('_', ' ')}"
+        w, h = draw.textsize(title, font=self.fonts['font_b_36'])
+        draw.text(((600 - w) // 2, 30), title, font=self.fonts['font_b_36'], fill='white')
 
     def _draw_teams_section(self, img: Image.Image, draw: ImageDraw.Draw, home_team: str, away_team: str, home_logo: Optional[Image.Image], away_logo: Optional[Image.Image]):
         y_base = 110 # Start y position for logos
@@ -276,17 +260,13 @@ class BetSlipGenerator:
         # Away Team
         away_logo_x = image_width - self.padding - 70 - logo_size[0]
         if away_logo:
-            try:
-                away_logo_resized = away_logo.resize(logo_size, Image.Resampling.LANCZOS)
-                img.paste(away_logo_resized, (away_logo_x, y_base), away_logo_resized if away_logo_resized.mode == 'RGBA' else None)
-            except Exception as e:
-                logger.error(f"Error pasting away logo: {e}")
-
-        away_name_bbox = team_name_font.getbbox(away_team)
-        away_name_w = away_name_bbox[2] - away_name_bbox[0]
-        away_name_x = away_logo_x + (logo_size[0] - away_name_w) // 2
-        draw.text((away_name_x, y_base + text_y_offset), away_team, font=team_name_font, fill=text_color)
-
+            away_logo = away_logo.resize(logo_size, Image.Resampling.LANCZOS)
+            img.paste(away_logo, (400, y), away_logo)
+        # Team names
+        hw, _ = draw.textsize(home_team, font=self.fonts['font_b_24'])
+        aw, _ = draw.textsize(away_team, font=self.fonts['font_b_24'])
+        draw.text((120 + (80 - hw) // 2, y + 90), home_team, font=self.fonts['font_b_24'], fill='white')
+        draw.text((400 + (80 - aw) // 2, y + 90), away_team, font=self.fonts['font_b_24'], fill='white')
 
     def _draw_straight_details(self, draw: ImageDraw.Draw, line: Optional[str], odds: float, units: float, bet_id: str, timestamp: datetime):
         y = 210 + 30 # Start y after team names
@@ -305,54 +285,30 @@ class BetSlipGenerator:
 
         # Bet Line (e.g., "Oilers: Hyman - 2 SOG")
         if line:
-            line_bbox = line_font.getbbox(line)
-            line_w = line_bbox[2] - line_bbox[0]
-            draw.text((center_x - line_w / 2, y), line, font=line_font, fill=text_color)
-            y += (line_bbox[3] - line_bbox[1]) + 15 # Add height of line text + gap
-
+            w, _ = draw.textsize(line, font=self.fonts['font_m_24'])
+            draw.text(((600 - w) // 2, y), line, font=self.fonts['font_m_24'], fill='white')
+            y += 40
         # Divider
         draw.line([(self.padding, y), (600 - self.padding, y)], fill=divider_color, width=1)
         y += 15
 
         # Odds
-        odds_text = self._format_odds_with_sign(odds)
-        odds_bbox = odds_font.getbbox(odds_text)
-        odds_w = odds_bbox[2] - odds_bbox[0]
-        draw.text((center_x - odds_w / 2, y), odds_text, font=odds_font, fill=text_color)
-        y += (odds_bbox[3] - odds_bbox[1]) + 15
-
+        odds_txt = self._format_odds_with_sign(odds)
+        w, _ = draw.textsize(odds_txt, font=self.fonts['font_b_28'])
+        draw.text(((600 - w) // 2, y), odds_txt, font=self.fonts['font_b_28'], fill='white')
+        y += 40
         # Units with lock icons
-        lock_char = "🔒" # Using Unicode character directly
-        
-        # Measure components for centering "🔒 To Win X.XX Units 🔒"
-        lock_bbox = emoji_font.getbbox(lock_char)
-        lock_w = lock_bbox[2] - lock_bbox[0]
-
-        units_text_part = f" To Win {units:.2f} Units "
-        units_text_part_bbox = units_font.getbbox(units_text_part)
-        units_text_part_w = units_text_part_bbox[2] - units_text_part_bbox[0]
-        
-        total_units_section_w = lock_w + units_text_part_w + lock_w
-        current_x = center_x - total_units_section_w / 2
-
-        draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color)
-        current_x += lock_w
-        draw.text((current_x, y + ( ( (lock_bbox[3]-lock_bbox[1]) - (units_text_part_bbox[3]-units_text_part_bbox[1]) )/2 ) ), units_text_part, font=units_font, fill=gold_color) # Try to vertically align better
-        current_x += units_text_part_w
-        draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color)
-        
-        # Footer positioning (fixed y at the bottom)
-        footer_y = 400 - self.padding - (footer_font.getbbox("Test")[3] - footer_font.getbbox("Test")[1]) # Approx height of footer text
-
-        bet_id_text = f"Bet #{bet_id}"
-        timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M UTC')
-
-        draw.text((self.padding, footer_y), bet_id_text, font=footer_font, fill=footer_color)
-        
-        ts_bbox = footer_font.getbbox(timestamp_text)
-        ts_w = ts_bbox[2] - ts_bbox[0]
-        draw.text((600 - self.padding - ts_w, footer_y), timestamp_text, font=footer_font, fill=footer_color)
-
+        lock = "🔒"
+        units_txt = f"{lock} To Win {units:.2f} Units {lock}"
+        w, _ = draw.textsize(units_txt, font=self.fonts['font_b_24'])
+        draw.text(((600 - w) // 2, y), units_txt, font=self.fonts['font_b_24'], fill='#FFD700')
+        y += 40
+        # Footer
+        bet_id_txt = f"Bet #{bet_id}"
+        time_txt = timestamp.strftime('%Y-%m-%d %H:%M UTC')
+        draw.text((60, 360), bet_id_txt, font=self.fonts['font_m_18'], fill='#CCCCCC')
+        tw, _ = draw.textsize(time_txt, font=self.fonts['font_m_18'])
+        draw.text((600 - 60 - tw, 360), time_txt, font=self.fonts['font_m_18'], fill='#CCCCCC')
 
     def _draw_parlay_details(self, draw: ImageDraw.Draw, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool):
         # This is your existing method. You'll need to replace `draw.textsize` here as well.
