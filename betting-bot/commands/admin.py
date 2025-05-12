@@ -444,7 +444,9 @@ class GuildSettingsView(discord.ui.View):
                     os.makedirs(guild_dir, exist_ok=True)
                     save_path = os.path.join(guild_dir, f"{setting_key}.png")
                     img.save(save_path, 'PNG')
-                    self.settings[setting_key] = save_path
+                    # Store relative path from betting-bot root
+                    relative_path = os.path.join('static', 'logos', str(self.guild.id), f"{setting_key}.png")
+                    self.settings[setting_key] = relative_path
                     
             except Exception as e:
                 logger.error(f"Failed to process uploaded image for {setting_key}: {e}")
@@ -474,7 +476,9 @@ class GuildSettingsView(discord.ui.View):
                         os.makedirs(guild_dir, exist_ok=True)
                         save_path = os.path.join(guild_dir, f"{setting_key}.png")
                         img.save(save_path, 'PNG')
-                        self.settings[setting_key] = save_path
+                        # Store relative path from betting-bot root
+                        relative_path = os.path.join('static', 'logos', str(self.guild.id), f"{setting_key}.png")
+                        self.settings[setting_key] = relative_path
                 except Exception as e:
                     logger.error(f"Failed to download/save image for {setting_key}: {e}")
                     await message.channel.send(f"❌ Failed to download or save the image for {step['name']}.")
