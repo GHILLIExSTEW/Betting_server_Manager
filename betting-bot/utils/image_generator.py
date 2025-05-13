@@ -409,50 +409,53 @@ class BetSlipGenerator:
     # ... (rest of _load_team_logo, _ensure_team_dir_exists, _load_lock_icon are okay from previous fixes)
 
     async def get_guild_background(self) -> Optional[Image.Image]:
-        """Fetch the guild background image from a local path stored in the DB."""
         if not self.guild_id:
             return None
         
         background_image = None
+        guild_bg_path_from_db = None
         try:
             settings = await self.db_manager.fetch_one(
                 "SELECT guild_background FROM guild_settings WHERE guild_id = %s",
                 (self.guild_id,)
             )
-            guild_bg_path = settings.get("guild_background") if settings else None
+            guild_bg_path_from_db = settings.get("guild_background") if settings else None
 
-            if guild_bg_path:
-                # Construct the full path assuming guild_bg_path is relative to a known base
-                # or is an absolute path.
-                # If guild_bg_path is stored as, e.g., "guilds/GUILD_ID/background.png"
-                # and your static files are in "betting-bot/static/"
-                # then full_path = os.path.join(BASE_DIR, "static", guild_bg_path)
+            if guild_bg_path_from_db:
+                effective_path = guild_bg_path_from_db
+                # If the path from DB is NOT absolute, assume it's relative to 'static' directory
+                # under the bot's BASE_DIR.
+                if not os.path.isabs(guild_bg_path_from_db):
+                    # Check if it already starts with 'static/' (or 'static\\') to avoid duplication
+                    if guild_bg_path_from_db.lower().startswith(('static/', 'static\\')):
+                        # Path from DB like "static/guilds/GUILD_ID/background.png"
+                        # BASE_DIR is .../betting-bot/
+                        # effective_path should be .../betting-bot/static/guilds/GUILD_ID/background.png
+                        # So, we join BASE_DIR with the path from DB.
+                        effective_path = os.path.join(BASE_DIR, guild_bg_path_from_db)
+                    else:
+                        # Path from DB is like "guilds/GUILD_ID/background.png"
+                        # Prepend "static/"
+                        effective_path = os.path.join(BASE_DIR, "static", guild_bg_path_from_db)
                 
-                # Assuming guild_bg_path from DB is already an absolute path or a path
-                # that os.path.exists can directly verify.
-                # If it's relative, you MUST resolve it correctly.
-                # For PebbleHost, /home/container/ is often the base.
-                # Let's assume it's stored as an absolute path or one resolvable from BASE_DIR/static/
-                
-                potential_path = guild_bg_path
-                if not os.path.isabs(guild_bg_path): # If it's not absolute, try resolving from static
-                    potential_path = os.path.join(BASE_DIR, "static", guild_bg_path)
-
-                if os.path.exists(potential_path):
-                    logger.info(f"Loading guild background from local path: {potential_path}")
-                    background_image = Image.open(potential_path).convert("RGBA")
+                if os.path.exists(effective_path):
+                    logger.info(f"Loading guild background from local path: {effective_path}")
+                    background_image = Image.open(effective_path).convert("RGBA")
                     logger.info(f"Successfully loaded guild background from local path.")
                 else:
-                    logger.warning(f"Guild background file not found at specified path: {guild_bg_path} (resolved to: {potential_path})")
+                    logger.warning(f"Guild background file not found. DB path: '{guild_bg_path_from_db}', Checked path: '{effective_path}'.")
             else:
-                logger.debug(f"No guild background path set for guild {self.guild_id}.")
+                logger.debug(f"No guild background path set in DB for guild {self.guild_id}.")
 
         except FileNotFoundError:
-            logger.error(f"Guild background file not found at path: {guild_bg_path}")
-        except UnidentifiedImageError: # Catch if the file is not a valid image
-            logger.error(f"Cannot identify image file for guild background at {guild_bg_path}. It may be corrupted or not an image.")
+            path_info = effective_path if 'effective_path' in locals() else guild_bg_path_from_db
+            logger.error(f"Guild background file not found at path: {path_info}")
+        except UnidentifiedImageError:
+            path_info = effective_path if 'effective_path' in locals() else guild_bg_path_from_db
+            logger.error(f"Cannot identify image file for guild background at {path_info}. It may be corrupted or not an image.")
         except Exception as e:
-            logger.error(f"Error loading guild background for guild {self.guild_id} (path: {guild_bg_path if 'guild_bg_path' in locals() else 'N/A'}): {e}", exc_info=True)
+            path_info = guild_bg_path_from_db if guild_bg_path_from_db else "N/A"
+            logger.error(f"Error loading guild background for guild {self.guild_id} (path: {path_info}): {e}", exc_info=True)
         
         return background_image
 
