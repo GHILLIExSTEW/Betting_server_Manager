@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 # --- UI Component Classes ---
-# (LeagueSelect, LineTypeSelect, GameSelect, HomePlayerSelect, AwayPlayerSelect, ManualEntryButton, CancelButton - these remain unchanged from your provided version)
+# (LeagueSelect, LineTypeSelect, GameSelect, HomePlayerSelect, AwayPlayerSelect, ManualEntryButton, CancelButton remain the same as you provided)
 class LeagueSelect(Select):
     def __init__(self, parent_view: View, leagues: List[str]):
         self.parent_view = parent_view
@@ -369,7 +369,6 @@ class BetDetailsModal(Modal):
                 await interaction.followup.send("❌ All fields are required.", ephemeral=True); return
             try:
                 odds_val = float(odds_str.replace("+", ""))
-                # if -100 < odds_val < 100 and odds_val != 0: raise ValueError("Odds invalid range.") # Optional: Adjust this validation
             except ValueError as ve:
                 await interaction.followup.send(f"❌ Invalid odds: '{odds_str}'. {ve}", ephemeral=True); return
 
@@ -391,7 +390,6 @@ class BetDetailsModal(Modal):
                 self.view.odds = odds_val; self.view.bet_id = str(bet_serial)
                 logger.debug(f"Bet record {bet_serial} created from modal.")
 
-                # Generate bet slip image
                 try:
                     bet_slip_generator = await self.view.get_bet_slip_generator()
                     
@@ -400,11 +398,11 @@ class BetDetailsModal(Modal):
                         home_team=self.view.home_team, away_team=self.view.away_team,
                         league=self.view.league, line=self.view.line, odds=self.view.odds,
                         units=1.0, bet_id=self.view.bet_id, timestamp=datetime.now(timezone.utc),
-                        bet_type=self.view.bet_details.get("line_type", "straight") # Ensure correct bet_type
+                        bet_type=self.view.bet_details.get("line_type", "straight") 
                     )
-                    if bet_slip_image:
+                    if bet_slip_image: 
                         self.view.preview_image_bytes = io.BytesIO()
-                        # MODIFIED: Call save on the Image object, not the coroutine
+                        # MODIFIED: Correctly call save on the Image object
                         bet_slip_image.save(self.view.preview_image_bytes, format='PNG') 
                         self.view.preview_image_bytes.seek(0)
                         logger.debug(f"Bet slip image generated for bet {bet_serial}")
@@ -559,7 +557,7 @@ class StraightBetWorkflowView(View):
         except discord.HTTPException as e: logger.error(f"HTTP error editing message {self.message.id}: {e}", exc_info=True)
         except Exception as e: logger.exception(f"Unexpected error editing message {self.message.id}: {e}")
     
-    async def go_next(self, interaction: Interaction):
+    async def go_next(self, interaction: Interaction): 
         if self.is_processing:
             logger.debug(f"Skipping go_next (step {self.current_step}); already processing.")
             if not interaction.response.is_done():
@@ -574,10 +572,10 @@ class StraightBetWorkflowView(View):
         
         try:
             self.current_step += 1
-            logger.debug(f"Processing go_next: current_step now {self.current_step} (user {interaction.user.id})")
+            logger.debug(f"Processing go_next for StraightBetWorkflow: current_step now {self.current_step} (user {interaction.user.id})")
             self.clear_items()
             content = self.get_content()
-            new_view_items = []
+            new_view_items = [] 
 
             if self.current_step == 1:
                 allowed_leagues = ["NBA", "NFL", "MLB", "NHL", "NCAAB", "NCAAF", "Soccer", "Tennis", "UFC/MMA"]
@@ -603,7 +601,7 @@ class StraightBetWorkflowView(View):
                 except discord.HTTPException as e:
                     logger.error(f"Failed to send BetDetailsModal from go_next: {e}")
                     await self.edit_message(content="❌ Error opening details form.", view=None); self.stop()
-                self.is_processing = False; return
+                self.is_processing = False; return 
             elif self.current_step == 5: 
                 if "bet_serial" not in self.bet_details: await self.edit_message(content="❌ Bet error.", view=None); self.stop(); return
                 new_view_items.append(UnitsSelect(self))
@@ -619,7 +617,7 @@ class StraightBetWorkflowView(View):
             else:
                 logger.error(f"Unexpected step: {self.current_step}"); await self.edit_message(content="❌ Workflow error.", view=None); self.stop(); return
 
-            if self.current_step < 8 : new_view_items.append(CancelButton(self)) # Assuming 7 is last interactive step before submit
+            if self.current_step < 8 : new_view_items.append(CancelButton(self))
             for item in new_view_items: self.add_item(item)
             
             file_to_send = None
@@ -647,18 +645,17 @@ class StraightBetWorkflowView(View):
             final_discord_file = None
             if self.preview_image_bytes:
                 self.preview_image_bytes.seek(0); final_discord_file = discord.File(self.preview_image_bytes, filename=f"bet_slip_{bet_serial}.png")
-            else: # Regenerate if missing
-                logger.warning(f"Preview missing for bet {bet_serial}. Regenerating for final post.")
-                bet_slip_gen = await self.get_bet_slip_generator()
+            else: 
+                logger.warning(f"Preview missing for bet {bet_serial}. Regenerating."); bet_slip_gen = await self.get_bet_slip_generator()
                 regen_image = await bet_slip_gen.generate_bet_slip(
                     home_team=details.get('team'), away_team=details.get('opponent'), league=details.get('league'),
                     line=details.get('line'), odds=details.get('odds'), units=float(details.get('units_str', 1.0)),
                     bet_id=str(bet_serial), timestamp=datetime.now(timezone.utc), bet_type=details.get('line_type', 'straight')
                 )
                 if regen_image: temp_io = io.BytesIO(); regen_image.save(temp_io, "PNG"); temp_io.seek(0); final_discord_file = discord.File(temp_io, filename=f"bet_slip_{bet_serial}.png")
-                else: logger.error(f"Critical failure to regenerate image for bet {bet_serial}")
+                else: logger.error(f"Critical failure to regen image for bet {bet_serial}")
             
-            content_to_post = f"**New Straight Bet!** (ID: `{bet_serial}`)\nPlaced by: {interaction.user.mention}" # Basic text
+            content_to_post = f"**New Straight Bet!** (ID: `{bet_serial}`)\nPlaced by: {interaction.user.mention}"
             sent_message = await post_channel.send(content=content_to_post, file=final_discord_file)
             logger.info(f"Bet {bet_serial} posted to {post_channel.id} (Msg: {sent_message.id})")
             
@@ -690,7 +687,7 @@ class StraightBetWorkflowView(View):
             try:
                 bet_query = "SELECT b.bet_serial, b.league, b.bet_type, b.bet_details, b.units, b.odds, b.created_at, g.home_team_name, g.away_team_name FROM bets b LEFT JOIN games g ON b.game_id = g.id WHERE b.bet_serial = %s"
                 bet = await self.bot.db_manager.fetch_one(bet_query, (current_bet_serial,))
-                if not bet: logger.error(f"Bet {current_bet_serial} not found for preview."); return
+                if not bet: logger.error(f"Bet {current_bet_serial} not found for preview regen."); return
 
                 bet_details_dict = json.loads(bet['bet_details']) if isinstance(bet.get('bet_details'), str) else bet.get('bet_details', {})
                 home_team_name = bet.get('home_team_name') or bet_details_dict.get('team', 'N/A')
@@ -704,6 +701,7 @@ class StraightBetWorkflowView(View):
                     home_team=home_team_name, away_team=away_team_name, league=bet['league'],
                     line=line_value, odds=float(bet['odds']), units=float(units),
                     bet_id=str(current_bet_serial), timestamp=bet['created_at'], bet_type=bet['bet_type']
+                    # Removed background_img argument
                 )
 
                 if bet_slip_image:
