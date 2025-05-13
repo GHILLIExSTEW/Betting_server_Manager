@@ -378,16 +378,33 @@ class BetSlipGenerator:
         ts_w = ts_bbox[2] - ts_bbox[0]
         draw.text((600 - self.padding - ts_w, footer_y), timestamp_text, font=footer_font, fill=footer_color)
 
-
-    def _draw_footer(self, draw: ImageDraw.Draw):
-        # This method seems to be for a generic footer, but the specific bet slip footer
-        # is handled in _draw_straight_details and _draw_parlay_details.
-        # You can consolidate or remove this if it's redundant.
-        # Example:
-        # footer_y = 400 - self.padding - (self.fonts['font_m_18'].getbbox("Test")[3] - self.fonts['font_m_18'].getbbox("Test")[1])
-        # footer_text = "Your custom footer text"
-        # draw.text( (self.padding, footer_y), footer_text, font=self.fonts['font_m_18'], fill='#AAAAAA')
-        pass # Assuming bet_id and timestamp are drawn in specific detail methods
+    def _draw_footer(self, draw: ImageDraw.Draw, bet_id: str, timestamp: datetime):
+        """Draw the footer with bet ID and timestamp."""
+        # Calculate footer position
+        footer_y = 400 - self.padding - (self.fonts['font_m_18'].getbbox("Test")[3] - self.fonts['font_m_18'].getbbox("Test")[1])
+        
+        # Format timestamp
+        formatted_time = timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
+        
+        # Draw bet ID
+        bet_id_text = f"Bet ID: {bet_id}"
+        draw.text(
+            (self.padding, footer_y),
+            bet_id_text,
+            font=self.fonts['font_m_18'],
+            fill='#AAAAAA'
+        )
+        
+        # Draw timestamp
+        timestamp_text = f"Placed: {formatted_time}"
+        # Calculate width of bet_id_text to position timestamp
+        bet_id_width = self.fonts['font_m_18'].getbbox(bet_id_text)[2]
+        draw.text(
+            (self.padding + bet_id_width + 20, footer_y),  # Add 20px spacing
+            timestamp_text,
+            font=self.fonts['font_m_18'],
+            fill='#AAAAAA'
+        )
 
     # ... (rest of _load_team_logo, _ensure_team_dir_exists, _load_lock_icon are okay from previous fixes)
 
@@ -503,7 +520,7 @@ class BetSlipGenerator:
             else: # Default to straight or if bet_type is 'straight', 'game_line', etc.
                 self._draw_straight_details(draw, line, odds, units, bet_id, timestamp)
             
-            # self._draw_footer(draw) # Footer content is now part of _draw_straight_details/_draw_parlay_details
+            self._draw_footer(draw, bet_id, timestamp)
 
             logger.info(f"Bet slip generated OK: {bet_id}")
             return img.convert("RGB") # Convert to RGB before saving if it was RGBA for pasting
