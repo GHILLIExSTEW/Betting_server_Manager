@@ -10,12 +10,12 @@ import traceback
 
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 from config.asset_paths import (
-    ASSETS_DIR,
-    FONT_DIR,
-    LOGO_DIR,
-    TEAMS_SUBDIR,
-    LEAGUES_SUBDIR,
-    get_sport_category_for_path,
+    # ASSETS_DIR, # Not directly used in this version, paths constructed from BASE_DIR
+    # FONT_DIR,   # Not directly used in this version
+    # LOGO_DIR,   # Not directly used in this version
+    # TEAMS_SUBDIR, # Not directly used in this version
+    # LEAGUES_SUBDIR, # Not directly used in this version
+    get_sport_category_for_path, # Keep if used by other parts of your project
     BASE_DIR
 )
 from config.team_mappings import normalize_team_name
@@ -49,32 +49,21 @@ SPORT_CATEGORY_MAP = {
 }
 DEFAULT_FALLBACK_SPORT_CATEGORY = "OTHER_SPORTS"
 
-_PATHS = {
-    "ASSETS_DIR": ASSETS_DIR,
-    "DEFAULT_FONT_PATH": os.path.join(FONT_DIR, "Roboto-Regular.ttf"),
-    "DEFAULT_BOLD_FONT_PATH": os.path.join(FONT_DIR, "Roboto-Bold.ttf"),
-    "DEFAULT_EMOJI_FONT_PATH_NOTO": os.path.join(FONT_DIR, "NotoColorEmoji-Regular.ttf"),
-    "DEFAULT_EMOJI_FONT_PATH_SEGOE": os.path.join(FONT_DIR, "SegoeUIEmoji.ttf"),
-    "LEAGUE_TEAM_BASE_DIR": TEAMS_SUBDIR,
-    "LEAGUE_LOGO_BASE_DIR": LEAGUES_SUBDIR,
-    "DEFAULT_LOCK_ICON_PATH": os.path.join(ASSETS_DIR, "lock_icon.png"),
-    "DEFAULT_TEAM_LOGO_PATH": os.path.join(LOGO_DIR, "default_logo.png"),
-}
-
 def load_fonts():
     fonts = {}
     try:
-        font_path = os.path.join(BASE_DIR, "assets", "fonts", "Roboto-Regular.ttf")
-        bold_font_path = os.path.join(BASE_DIR, "assets", "fonts", "Roboto-Bold.ttf")
-        emoji_font_path = os.path.join(BASE_DIR, "assets", "fonts", "NotoColorEmoji-Regular.ttf")
+        font_dir = os.path.join(BASE_DIR, "assets", "fonts")
+        font_path = os.path.join(font_dir, "Roboto-Regular.ttf")
+        bold_font_path = os.path.join(font_dir, "Roboto-Bold.ttf")
+        emoji_font_path = os.path.join(font_dir, "NotoColorEmoji-Regular.ttf")
         
         missing_files = []
-        if not os.path.exists(font_path): missing_files.append(font_path)
-        if not os.path.exists(bold_font_path): missing_files.append(bold_font_path)
-        if not os.path.exists(emoji_font_path): missing_files.append(emoji_font_path)
+        for p, name in [(font_path, "Regular"), (bold_font_path, "Bold"), (emoji_font_path, "Emoji")]:
+            if not os.path.exists(p):
+                missing_files.append(f"{name} font at {p}")
         
         if missing_files:
-            logger.error("Font files not found: %s", missing_files)
+            logger.error("Font files not found: %s", "; ".join(missing_files))
             raise FileNotFoundError(f"Font files not found: {', '.join(missing_files)}")
 
         fonts['font_m_18'] = ImageFont.truetype(font_path, 18)
@@ -84,9 +73,11 @@ def load_fonts():
         fonts['font_b_28'] = ImageFont.truetype(bold_font_path, 28)
         fonts['font_b_36'] = ImageFont.truetype(bold_font_path, 36)
         fonts['emoji_font_24'] = ImageFont.truetype(emoji_font_path, 24)
+        logger.info("Custom fonts loaded successfully for global FONTS.")
         return fonts
+        
     except Exception as e:
-        logger.error(f"Critical error loading fonts: {e}", exc_info=True)
+        logger.error(f"Critical error loading custom fonts: {e}. Falling back to default system fonts.", exc_info=True)
         default_font = ImageFont.load_default()
         return {key: default_font for key in ['font_m_18', 'font_m_24', 'font_b_18', 'font_b_24', 'font_b_28', 'font_b_36', 'emoji_font_24']}
 
@@ -95,24 +86,24 @@ FONTS = load_fonts()
 class BetSlipGenerator:
     def __init__(self, guild_id: Optional[int] = None):
         self.guild_id = guild_id
-        self.db_manager = DatabaseManager()
+        self.db_manager = DatabaseManager() 
         self.padding = 20
         self.LEAGUE_TEAM_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "teams")
         self.LEAGUE_LOGO_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "leagues")
         self.DEFAULT_LOGO_PATH = os.path.join(BASE_DIR, "static", "logos", "default_logo.png")
-        self.LOCK_ICON_PATH = os.path.join(BASE_DIR, "static", "logos", "lock_icon.png")
+        # self.LOCK_ICON_PATH = os.path.join(BASE_DIR, "static", "logos", "lock_icon.png") # Path for image lock if needed
         self._logo_cache: Dict[str, tuple[Image.Image, float]] = {}
-        self._lock_icon_cache: Optional[Image.Image] = None
+        # self._lock_icon_cache: Optional[Image.Image] = None # If using image for lock
         self._last_cache_cleanup = time.time()
         self._cache_expiry = 300  # 5 minutes
         self._max_cache_size = 100
         
         logger.info("Initializing BetSlipGenerator instance...")
-        self.fonts = FONTS
+        self.fonts = FONTS # Use globally loaded fonts
         if any(font == ImageFont.load_default() for font in self.fonts.values()):
-            logger.warning("One or more custom fonts failed to load; BetSlipGenerator is using default system fonts.")
+            logger.warning("BetSlipGenerator: One or more custom fonts failed to load; using default system fonts.")
         else:
-            logger.info("Custom fonts loaded successfully into BetSlipGenerator instance.")
+            logger.info("BetSlipGenerator: Custom fonts loaded successfully.")
 
     def _get_text_dimensions(self, text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int]:
         bbox = font.getbbox(text)
@@ -121,9 +112,9 @@ class BetSlipGenerator:
         return width, height
 
     def _draw_header(self, draw: ImageDraw.Draw, image_width: int, league_logo: Optional[Image.Image], league: str, bet_type_str: str):
-        y_offset = 30
+        y_offset = 25 # Slightly higher
         title_font = self.fonts['font_b_36']
-        logo_display_size = (50, 50) 
+        logo_display_size = (45, 45) # Adjusted logo size
         text_color = 'white'
 
         bet_type_display = bet_type_str.replace('_', ' ').title()
@@ -132,39 +123,53 @@ class BetSlipGenerator:
 
         title_text = f"{league.upper()} - {bet_type_display}"
         title_w, title_h = self._get_text_dimensions(title_text, title_font)
-        title_x = (image_width - title_w) // 2
-        title_y = y_offset
         
+        logo_x = self.padding
+        title_x_no_logo = (image_width - title_w) // 2
+
         if league_logo:
             try:
                 league_logo_resized = league_logo.resize(logo_display_size, Image.Resampling.LANCZOS)
-                logo_x = title_x - logo_display_size[0] - 15 
-                if logo_x < self.padding: 
-                    logo_x = self.padding
-                    title_x = logo_x + logo_display_size[0] + 15 + (image_width - (logo_x + logo_display_size[0] + 15) - title_w) // 2
-                logo_y = title_y + (title_h - logo_display_size[1]) // 2 
+                logo_y = y_offset + (title_h - logo_display_size[1]) // 2
                 
+                # Position title next to logo
+                title_x_with_logo = logo_x + logo_display_size[0] + 15
+                
+                # If title with logo goes too far, center the whole block (logo + title)
+                total_width_with_logo = logo_display_size[0] + 15 + title_w
+                if total_width_with_logo < image_width - 2 * self.padding:
+                    start_block_x = (image_width - total_width_with_logo) // 2
+                    logo_x = start_block_x
+                    title_x = logo_x + logo_display_size[0] + 15
+                else: # Fallback if too wide, just place logo left and title next
+                     title_x = title_x_with_logo
+
+
                 if hasattr(draw, 'im'):
                     if league_logo_resized.mode == 'RGBA':
                         draw.im.paste(league_logo_resized, (logo_x, logo_y), league_logo_resized)
                     else:
                         draw.im.paste(league_logo_resized, (logo_x, logo_y))
-                else: 
-                    draw.bitmap((logo_x, logo_y), league_logo_resized) # Fallback
-            except Exception as e: logger.error(f"Error drawing league logo in header: {e}", exc_info=True)
+                else: draw.bitmap((logo_x, logo_y), league_logo_resized)
+            except Exception as e: 
+                logger.error(f"Error drawing league logo in header: {e}", exc_info=True)
+                title_x = title_x_no_logo # Center title if logo fails
+        else:
+            title_x = title_x_no_logo
 
-        draw.text((title_x, title_y), title_text, font=title_font, fill=text_color, anchor="lt")
+        draw.text((title_x, y_offset), title_text, font=title_font, fill=text_color, anchor="lt")
+
 
     def _draw_teams_section(self, img: Image.Image, draw: ImageDraw.Draw, image_width: int, home_team: str, away_team: str, home_logo: Optional[Image.Image], away_logo: Optional[Image.Image]):
-        y_base = 100 
-        logo_size = (80, 80)
-        text_y_offset = logo_size[1] + 10 
+        y_base = 85 # Start y position for logos
+        logo_size = (70, 70) # Slightly smaller
+        text_y_offset = logo_size[1] + 8 
         team_name_font = self.fonts['font_b_24']
         text_color = 'white'
         
-        section_width = image_width // 2 - self.padding
-        home_section_center_x = self.padding + section_width // 2 - 30 
-        away_section_center_x = image_width - self.padding - section_width // 2 + 30 
+        section_width = image_width // 2 - self.padding * 1.5 # Adjusted for spacing
+        home_section_center_x = self.padding + section_width // 2 
+        away_section_center_x = image_width - self.padding - section_width // 2
 
         if home_logo:
             try:
@@ -190,43 +195,49 @@ class BetSlipGenerator:
         away_name_x = away_section_center_x - away_name_w // 2
         draw.text((away_name_x, y_base + text_y_offset), away_team, font=team_name_font, fill=text_color, anchor="lt")
 
+
     def _draw_straight_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, line: Optional[str], odds: float, units: float, bet_id: str, timestamp: datetime):
-        y = 100 + 80 + 10 + 24 + 30 # Start y after team names section + some padding
+        y = 100 + 70 + 10 + 24 + 30 # Start after team section
         center_x = image_width / 2
-        text_color = 'white'; gold_color = '#FFD700'; divider_color = '#888888'
+        text_color = 'white'; gold_color = '#FFD700'; divider_color = '#606060' # Darker grey
+
         line_font = self.fonts['font_m_24']; odds_font = self.fonts['font_b_28']
         units_font = self.fonts['font_b_24']; emoji_font = self.fonts['emoji_font_24']
         
         if line:
             line_w, line_h = self._get_text_dimensions(line, line_font)
             draw.text((center_x, y), line, font=line_font, fill=text_color, anchor="mt")
-            y += line_h + 15 
+            y += line_h + 12 
 
-        draw.line([(self.padding, y), (image_width - self.padding, y)], fill=divider_color, width=1); y += 15
+        draw.line([(self.padding + 20, y), (image_width - self.padding - 20, y)], fill=divider_color, width=2); y += 12
 
         odds_text = self._format_odds_with_sign(odds)
         odds_w, odds_h = self._get_text_dimensions(odds_text, odds_font)
-        draw.text((center_x, y), odds_text, font=odds_font, fill=text_color, anchor="mt"); y += odds_h + 15
+        draw.text((center_x, y), odds_text, font=odds_font, fill=text_color, anchor="mt"); y += odds_h + 12
         
         lock_char = "🔒"; units_text_part = f" To Win {units:.2f} Units "
         lock_w, lock_h = self._get_text_dimensions(lock_char, emoji_font)
         units_text_part_w, units_text_part_h = self._get_text_dimensions(units_text_part, units_font)
         total_units_section_w = lock_w + units_text_part_w + lock_w
         current_x = center_x - total_units_section_w / 2
-        text_y_adj = y + (lock_h - units_text_part_h) // 2
+        
+        # Try to align text middle with emoji middle by adjusting text_y
+        emoji_center_y_offset = lock_h / 2
+        text_center_y_offset = units_text_part_h / 2
+        text_y_for_emoji_align = y + emoji_center_y_offset - text_center_y_offset
 
         draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color, anchor="lt")
         current_x += lock_w
-        draw.text((current_x, text_y_adj), units_text_part, font=units_font, fill=gold_color, anchor="lt")
+        draw.text((current_x, text_y_for_emoji_align), units_text_part, font=units_font, fill=gold_color, anchor="lt")
         current_x += units_text_part_w
         draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color, anchor="lt")
         
     def _draw_parlay_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool):
-        y = 100 + 80 + 10 + 24 + 30; center_x = image_width / 2
-        text_color = 'white'; gold_color = '#FFD700'
+        y = 100 + 70 + 10 + 24 + 20; center_x = image_width / 2
+        text_color = 'white'; gold_color = '#FFD700'; footer_color = '#CCCCCC'; divider_color = '#606060'
         leg_font = self.fonts['font_m_18']; total_odds_font = self.fonts['font_b_24']
         units_font = self.fonts['font_b_24']; emoji_font = self.fonts['emoji_font_24']
-        max_leg_y = image_height - 120
+        max_leg_y = image_height - 120 # Reserve space
 
         for i, leg_data in enumerate(legs):
             leg_text = f"Leg {i+1}: {leg_data.get('league','N/A')} - {leg_data.get('team', 'N/A')} {leg_data.get('line', 'N/A')} ({leg_data.get('odds_str', 'N/A')})"
@@ -236,9 +247,10 @@ class BetSlipGenerator:
             draw.text((self.padding, y), leg_text, font=leg_font, fill=text_color, anchor="lt"); y += leg_h + 5
         
         y += 10 
+        draw.line([(self.padding + 20, y), (image_width - self.padding - 20, y)], fill=divider_color, width=2); y += 12
         total_odds_text = f"Total Parlay Odds: {self._format_odds_with_sign(odds)}"
         total_odds_w, total_odds_h = self._get_text_dimensions(total_odds_text, total_odds_font)
-        draw.text((center_x, y), total_odds_text, font=total_odds_font, fill=text_color, anchor="mt"); y += total_odds_h + 10
+        draw.text( (center_x, y), total_odds_text, font=total_odds_font, fill=text_color, anchor="mt"); y += total_odds_h + 12
 
         lock_char = "🔒"; units_text_part = f" To Win {units:.2f} Units "
         lock_w, lock_h = self._get_text_dimensions(lock_char, emoji_font)
@@ -251,11 +263,11 @@ class BetSlipGenerator:
         draw.text((current_x, text_y_adj), units_text_part, font=units_font, fill=gold_color, anchor="lt")
         current_x += units_text_part_w
         draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color, anchor="lt")
-
+        
     def _draw_footer(self, draw: ImageDraw.Draw, image_width: int, image_height: int, bet_id: str, timestamp: datetime):
         footer_font = self.fonts['font_m_18']; footer_color = '#CCCCCC'
         _ , footer_text_h = self._get_text_dimensions("Test", footer_font)
-        footer_y = image_height - self.padding - footer_text_h
+        footer_y = image_height - self.padding - footer_text_h 
 
         bet_id_text = f"Bet #{bet_id}"
         timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M UTC')
@@ -273,12 +285,19 @@ class BetSlipGenerator:
                 normalized_db_path = guild_bg_path_from_db.replace('\\', '/')
                 if os.path.isabs(normalized_db_path): effective_path = normalized_db_path
                 else:
-                    if normalized_db_path.lower().startswith('static/'): effective_path = os.path.join(BASE_DIR, normalized_db_path)
-                    else: effective_path = os.path.join(BASE_DIR, "static", normalized_db_path)
+                    # Path from DB should be relative to BASE_DIR/static/
+                    # e.g. DB: "guilds/123/bg.png" -> /home/container/betting-bot/static/guilds/123/bg.png
+                    # e.g. DB: "static/guilds/123/bg.png" -> /home/container/betting-bot/static/guilds/123/bg.png (if static is part of path)
+                    if normalized_db_path.lower().startswith('static/'):
+                        effective_path = os.path.join(BASE_DIR, normalized_db_path)
+                    else:
+                        effective_path = os.path.join(BASE_DIR, "static", normalized_db_path)
+                
                 if os.path.exists(effective_path):
-                    logger.info(f"Loading guild background from: {effective_path}")
+                    logger.info(f"Loading guild background from local path: {effective_path}")
                     background_image = Image.open(effective_path).convert("RGBA")
-                else: logger.warning(f"Guild background not found. DB path:'{guild_bg_path_from_db}', Checked:'{effective_path}'.")
+                    logger.info(f"Successfully loaded guild background from local path.")
+                else: logger.warning(f"Guild background file NOT FOUND. DB path:'{guild_bg_path_from_db}', Resolved to:'{effective_path}'.")
             else: logger.debug(f"No guild background path for guild {self.guild_id}.")
         except Exception as e: logger.error(f"Error loading guild background (path:{guild_bg_path_from_db or 'N/A'}): {e}", exc_info=True)
         return background_image
@@ -293,25 +312,33 @@ class BetSlipGenerator:
             width, height = 600, 400
             
             guild_bg_image_pil = await self.get_guild_background()
-            img = Image.new('RGBA', (width, height), "#23232a") # Base image with default color
+            img = Image.new('RGBA', (width, height), "#23232a") 
 
             if guild_bg_image_pil:
                 try:
                     guild_bg_image_pil = guild_bg_image_pil.convert("RGBA")
-                    alpha = guild_bg_image_pil.getchannel('A')
-                    alpha = alpha.point(lambda p: int(p * 0.5)) # 50% transparency
-                    guild_bg_image_pil.putalpha(alpha)
+                    alpha_channel = guild_bg_image_pil.getchannel('A')
+                    semi_transparent_alpha = alpha_channel.point(lambda p: int(p * 0.5))
+                    guild_bg_image_pil.putalpha(semi_transparent_alpha)
                     
-                    # Resize to cover slip dimensions, then crop center
-                    img_w, img_h = guild_bg_image_pil.size; bg_aspect = img_w/img_h; slip_aspect = width/height
-                    if bg_aspect > slip_aspect: # BG wider
-                        new_h = height; new_w = int(bg_aspect * new_h); resized_bg = guild_bg_image_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                        crop_x = (new_w - width) // 2; final_bg_to_paste = resized_bg.crop((crop_x, 0, crop_x + width, height))
-                    else: # BG taller or same aspect
-                        new_w = width; new_h = int(new_w / bg_aspect); resized_bg = guild_bg_image_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                        crop_y = (new_h - height) // 2; final_bg_to_paste = resized_bg.crop((0, crop_y, width, crop_y + height))
+                    bg_w, bg_h = guild_bg_image_pil.size
+                    ratio_w = width / bg_w
+                    ratio_h = height / bg_h
                     
-                    img.paste(final_bg_to_paste, (0,0), final_bg_to_paste) # Paste with its own alpha
+                    if ratio_w > ratio_h: # Fit by width, crop height
+                        new_w = width
+                        new_h = int(bg_h * ratio_w)
+                        resized_bg = guild_bg_image_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                        crop_y = (new_h - height) // 2
+                        final_bg_to_paste = resized_bg.crop((0, crop_y, width, crop_y + height))
+                    else: # Fit by height, crop width
+                        new_h = height
+                        new_w = int(bg_w * ratio_h)
+                        resized_bg = guild_bg_image_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                        crop_x = (new_w - width) // 2
+                        final_bg_to_paste = resized_bg.crop((crop_x, 0, crop_x + width, height))
+
+                    img.paste(final_bg_to_paste, (0,0), final_bg_to_paste)
                     logger.info("Applied guild background with 50% transparency.")
                 except Exception as bg_err: logger.error(f"Error processing guild background: {bg_err}", exc_info=True)
             
@@ -326,9 +353,9 @@ class BetSlipGenerator:
                 try: default_pil_logo = Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA")
                 except Exception as e: logger.error(f"Failed to load default logo: {e}")
             
-            if not league_logo_pil: league_logo_pil = default_pil_logo.copy() if default_pil_logo else None
-            if not home_logo_pil: home_logo_pil = default_pil_logo.copy() if default_pil_logo else None
-            if not away_logo_pil: away_logo_pil = default_pil_logo.copy() if default_pil_logo else None
+            if not league_logo_pil and default_pil_logo: league_logo_pil = default_pil_logo.copy()
+            if not home_logo_pil and default_pil_logo: home_logo_pil = default_pil_logo.copy()
+            if not away_logo_pil and default_pil_logo: away_logo_pil = default_pil_logo.copy()
 
             self._draw_header(draw, width, league_logo_pil, league, bet_type)
             self._draw_teams_section(img, draw, width, home_team, away_team, home_logo_pil, away_logo_pil)
@@ -372,12 +399,15 @@ class BetSlipGenerator:
                 else: del self._logo_cache[cache_key]
             
             sport = get_sport_category_for_path(league.upper())
-            if not sport: logger.warning(f"Sport category not for league '{league}'. Default logo."); return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
+            if not sport: 
+                logger.warning(f"Sport category not for league '{league}'. Default logo."); 
+                return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
             
-            fname = f"{league.lower().replace(' ', '_')}.png"; logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper())
+            fname = f"{league.lower().replace(' ', '_')}.png"; 
+            logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper())
             logo_path = os.path.join(logo_dir, fname); absolute_logo_path = os.path.abspath(logo_path)
             file_exists = os.path.exists(absolute_logo_path)
-            logger.info("Loading league logo - League:'%s', Sport:'%s', Path:'%s', Exists:%s", league, sport, absolute_logo_path, file_exists)
+            logger.info("Loading league logo - League:'%s',Path:'%s',Exists:%s", league, absolute_logo_path, file_exists)
             
             logo = None
             if file_exists:
@@ -389,7 +419,9 @@ class BetSlipGenerator:
                 if len(self._logo_cache) >= self._max_cache_size:
                     oldest_key = min(self._logo_cache, key=lambda k: self._logo_cache[k][1]); del self._logo_cache[oldest_key]
                 self._logo_cache[cache_key] = (logo.copy(), now); return logo.copy()
-            logger.warning(f"No logo for league {league} (path: {absolute_logo_path}). Defaulting."); return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
+                
+            logger.warning(f"No logo for league {league} (path: {absolute_logo_path}). Defaulting."); 
+            return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
         except Exception as e:
             logger.error(f"Error in _load_league_logo for {league}: {e}", exc_info=True)
             try: return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
@@ -423,5 +455,5 @@ class BetSlipGenerator:
             os.makedirs(team_dir, exist_ok=True); return team_dir
         except Exception as e: logger.error(f"Error ensuring team directory for {league}: {e}", exc_info=True); return None
     
-    def _normalize_team_name(self, team_name: str) -> str: return normalize_team_name(team_name)
-    def _format_odds_with_sign(self, odds: float) -> str: return f"+{odds:.0f}" if odds > 0 else f"{odds:.0f}"
+    def _normalize_team_name(self, team_name: str) -> str: return normalize_team_name(team_name) # DEPRECATED - Use global
+    def _format_odds_with_sign(self, odds: float) -> str: return f"+{int(odds)}" if odds > 0 else str(int(odds))
