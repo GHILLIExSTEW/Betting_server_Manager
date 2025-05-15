@@ -160,10 +160,14 @@ class BettingBot(commands.Bot):
             logger.debug("- %s (%s)", guild.name, guild.id)
         logger.info("Latency: %.2f ms", self.latency * 1000)
         try:
+            # Sync global commands once for all servers
             await self.sync_commands_with_retry()
-            for guild in self.guilds:
-                await self.sync_commands_with_retry(guild=guild)
-                await asyncio.sleep(1)
+            # Register guild-specific commands for Cookin' Books
+            cookin_books_guild = discord.Object(id=1328126227013439601)
+            self.tree.copy_global_to(guild=cookin_books_guild)
+            # Ensure load_logos is registered only for Cookin' Books
+            synced = await self.tree.sync(guild=cookin_books_guild)
+            logger.info("Guild-specific commands synced to Cookin' Books (1328126227013439601): %s", [cmd.name for cmd in synced])
             commands_list = [cmd.name for cmd in self.tree.get_commands()]
             logger.info("Commands available after sync: %s", commands_list)
         except Exception as e:
@@ -172,7 +176,8 @@ class BettingBot(commands.Bot):
 
     async def on_guild_join(self, guild: discord.Guild):
         logger.info("Joined new guild: %s (%s)", guild.name, guild.id)
-        await self.sync_commands_with_retry(guild=guild)
+        if guild.id == 1328126227013439601:
+            await self.sync_commands_with_retry(guild=guild)
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         if payload.user_id == self.user.id:
@@ -235,9 +240,8 @@ class SyncCog(commands.Cog):
             commands_list = [cmd.name for cmd in self.bot.tree.get_commands()]
             logger.debug("Commands to sync: %s", commands_list)
             await self.bot.sync_commands_with_retry()
-            for guild in self.bot.guilds:
-                await self.bot.sync_commands_with_retry(guild=guild)
-                await asyncio.sleep(0.5)
+            if interaction.guild_id == 1328126227013439601:
+                await self.bot.sync_commands_with_retry(guild=interaction.guild)
             await interaction.followup.send("Commands synced successfully!", ephemeral=True)
         except Exception as e:
             logger.error("Failed to sync commands: %s", e, exc_info=True)
