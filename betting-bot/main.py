@@ -89,12 +89,11 @@ class Bot(commands.Bot):
         # Sync commands: Clear existing and register once
         try:
             # Clear global commands
-            await self.tree.clear_commands(guild=None)
+            self.tree.clear_commands(guild=None)
             logger.info("Cleared global commands.")
 
             # Sync global commands
             global_commands = ['sync', 'setup', 'setchannel', 'bet', 'remove_user', 'setid', 'stats']
-            self.tree.clear_commands(guild=None)
             await self.tree.sync()
             logger.info(f"Global commands synced: {global_commands}")
 
