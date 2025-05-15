@@ -53,7 +53,7 @@ class Bot(commands.Bot):
 
     async def setup_hook(self):
         logger.info("Starting setup_hook...")
-        await self.db_manager.initialize()
+        await self.db_manager.connect()  # Initialize database connection and schema
 
         extensions = [
             'commands.admin',
