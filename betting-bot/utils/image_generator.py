@@ -131,29 +131,21 @@ class BetSlipGenerator:
             try:
                 league_logo_resized = league_logo.resize(logo_display_size, Image.Resampling.LANCZOS)
                 logo_y = y_offset + (title_h - logo_display_size[1]) // 2
-                
                 # Position title next to logo
                 title_x_with_logo = logo_x + logo_display_size[0] + 15
-                
                 # If title with logo goes too far, center the whole block (logo + title)
                 total_width_with_logo = logo_display_size[0] + 15 + title_w
                 if total_width_with_logo < image_width - 2 * self.padding:
                     start_block_x = (image_width - total_width_with_logo) // 2
                     logo_x = start_block_x
                     title_x = logo_x + logo_display_size[0] + 15
-                else: # Fallback if too wide, just place logo left and title next
-                     title_x = title_x_with_logo
-
-
-                if hasattr(draw, 'im'):
-                    if league_logo_resized.mode == 'RGBA':
-                        draw.im.paste(league_logo_resized, (logo_x, logo_y), league_logo_resized)
-                    else:
-                        draw.im.paste(league_logo_resized, (logo_x, logo_y))
-                else: draw.bitmap((logo_x, logo_y), league_logo_resized)
-            except Exception as e: 
+                else:
+                    title_x = title_x_with_logo
+                # Use img.paste and ensure integer coordinates
+                self.img.paste(league_logo_resized, (int(logo_x), int(logo_y)), league_logo_resized)
+            except Exception as e:
                 logger.error(f"Error drawing league logo in header: {e}", exc_info=True)
-                title_x = title_x_no_logo # Center title if logo fails
+                title_x = title_x_no_logo
         else:
             title_x = title_x_no_logo
 
@@ -175,9 +167,13 @@ class BetSlipGenerator:
             try:
                 home_logo_resized = home_logo.resize(logo_size, Image.Resampling.LANCZOS)
                 home_logo_x = home_section_center_x - logo_size[0] // 2
-                if home_logo_resized.mode == 'RGBA': img.paste(home_logo_resized, (home_logo_x, y_base), home_logo_resized)
-                else: img.paste(home_logo_resized, (home_logo_x, y_base))
-            except Exception as e: logger.error(f"Error pasting home logo: {e}", exc_info=True)
+                # Use img.paste and ensure integer coordinates
+                if home_logo_resized.mode == 'RGBA':
+                    self.img.paste(home_logo_resized, (int(home_logo_x), int(y_base)), home_logo_resized)
+                else:
+                    self.img.paste(home_logo_resized, (int(home_logo_x), int(y_base)))
+            except Exception as e:
+                logger.error(f"Error pasting home logo: {e}", exc_info=True)
         
         home_name_w, _ = self._get_text_dimensions(home_team, team_name_font)
         home_name_x = home_section_center_x - home_name_w // 2
@@ -187,9 +183,13 @@ class BetSlipGenerator:
             try:
                 away_logo_resized = away_logo.resize(logo_size, Image.Resampling.LANCZOS)
                 away_logo_x = away_section_center_x - logo_size[0] // 2
-                if away_logo_resized.mode == 'RGBA': img.paste(away_logo_resized, (away_logo_x, y_base), away_logo_resized)
-                else: img.paste(away_logo_resized, (away_logo_x, y_base))
-            except Exception as e: logger.error(f"Error pasting away logo: {e}", exc_info=True)
+                # Use img.paste and ensure integer coordinates
+                if away_logo_resized.mode == 'RGBA':
+                    self.img.paste(away_logo_resized, (int(away_logo_x), int(y_base)), away_logo_resized)
+                else:
+                    self.img.paste(away_logo_resized, (int(away_logo_x), int(y_base)))
+            except Exception as e:
+                logger.error(f"Error pasting away logo: {e}", exc_info=True)
 
         away_name_w, _ = self._get_text_dimensions(away_team, team_name_font)
         away_name_x = away_section_center_x - away_name_w // 2
