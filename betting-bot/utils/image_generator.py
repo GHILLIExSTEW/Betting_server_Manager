@@ -75,8 +75,6 @@ def load_fonts():
         logger.error(f"Critical error loading custom fonts: {e}. Falling back to default system fonts.", exc_info=True)
         default_font = ImageFont.load_default()
         fonts_fallback = {key: default_font for key in ['font_m_18', 'font_m_24', 'font_b_18', 'font_b_24', 'font_b_28', 'font_b_36']}
-        # Specifically for emoji font, if NotoColorEmoji fails, we still want a default,
-        # though it won't render color emojis. The drawing logic will need to handle this.
         fonts_fallback['emoji_font_24'] = default_font 
         return fonts_fallback
 
@@ -90,17 +88,17 @@ class BetSlipGenerator:
         self.LEAGUE_TEAM_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "teams")
         self.LEAGUE_LOGO_BASE_DIR = os.path.join(BASE_DIR, "static", "logos", "leagues")
         self.DEFAULT_LOGO_PATH = os.path.join(BASE_DIR, "static", "logos", "default_logo.png")
-        self.LOCK_ICON_PATH = "/home/container/betting-bot/static/lock_icon.png" # User specified path
+        self.LOCK_ICON_PATH = "/home/container/betting-bot/static/lock_icon.png"
         
         self._logo_cache: Dict[str, tuple[Image.Image, float]] = {}
         self._lock_icon_cache: Optional[Image.Image] = None
         self._last_cache_cleanup = time.time()
-        self._cache_expiry = 300  # 5 minutes
+        self._cache_expiry = 300
         self._max_cache_size = 100
         
         logger.info("Initializing BetSlipGenerator instance...")
         self.fonts = FONTS 
-        if any(font == ImageFont.load_default() for key, font in self.fonts.items() if key != 'emoji_font_24'): # Exclude emoji font from this specific warning
+        if any(font == ImageFont.load_default() for key, font in self.fonts.items() if key != 'emoji_font_24'):
             logger.warning("BetSlipGenerator: One or more regular/bold custom fonts failed to load; using default system fonts for them.")
         else:
             logger.info("BetSlipGenerator: Regular/bold custom fonts loaded successfully.")
@@ -119,7 +117,6 @@ class BetSlipGenerator:
         except Exception as e:
             logger.error(f"Error loading lock icon from {self.LOCK_ICON_PATH}: {e}. Will fallback to emoji.")
             self._lock_icon_cache = None
-
 
     def _get_text_dimensions(self, text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int]:
         bbox = font.getbbox(text)
@@ -204,31 +201,33 @@ class BetSlipGenerator:
         away_name_x = away_section_center_x - away_name_w // 2
         draw.text((away_name_x, y_base + text_y_offset), away_team, font=team_name_font, fill=text_color, anchor="lt")
 
-    def _draw_lock_element(self, img: Image.Image, draw: ImageDraw.Draw, x: int, y: int, size: tuple[int, int], emoji_font: ImageFont.FreeTypeFont, color: str) -> tuple[int, int, bool]:
-        """Helper to draw lock image or emoji. Returns width, height, and if an element was drawn."""
-        lock_icon_size_for_draw = size # Desired display size for the icon/emoji
+    def _draw_lock_element(self, img: Image.Image, draw: ImageDraw.Draw, x: int, y: int, size: tuple[int, int], emoji_font: ImageFont.FreeTypeFont, color: str, draw_it: bool = True) -> tuple[int, int, bool]:
+        """Helper to draw lock image or emoji. Returns width, height, and if an element would be drawn."""
+        lock_icon_size_for_draw = size 
         if self._lock_icon_cache:
-            try:
-                lock_img_resized = self._lock_icon_cache.resize(lock_icon_size_for_draw, Image.Resampling.LANCZOS)
-                img.paste(lock_img_resized, (int(x), int(y)), lock_img_resized)
-                return lock_icon_size_for_draw[0], lock_icon_size_for_draw[1], True
-            except Exception as e:
-                logger.warning(f"Failed to draw cached lock image: {e}. Falling back to emoji.")
+            if draw_it:
+                try:
+                    lock_img_resized = self._lock_icon_cache.resize(lock_icon_size_for_draw, Image.Resampling.LANCZOS)
+                    img.paste(lock_img_resized, (int(x), int(y)), lock_img_resized)
+                    return lock_icon_size_for_draw[0], lock_icon_size_for_draw[1], True
+                except Exception as e:
+                    logger.warning(f"Failed to draw cached lock image: {e}. Falling back to emoji if possible.")
+            else: # Just return dimensions
+                return lock_icon_size_for_draw[0], lock_icon_size_for_draw[1], True 
         
-        # Fallback to emoji if image not loaded or failed to draw
-        # Check if emoji_font is actually the NotoColorEmoji or the fallback default
         if self.fonts['emoji_font_24'] != ImageFont.load_default():
             lock_char = "🔒"
             emoji_w, emoji_h = self._get_text_dimensions(lock_char, emoji_font)
-            # Adjust emoji draw position if its default size is different from lock_icon_size_for_draw
-            emoji_draw_y = y + (lock_icon_size_for_draw[1] - emoji_h) // 2 
-            draw.text((x, emoji_draw_y), lock_char, font=emoji_font, fill=color, anchor="lt")
-            return emoji_w, emoji_h, True # Return actual emoji dimensions
+            if draw_it:
+                emoji_draw_y = y + (lock_icon_size_for_draw[1] - emoji_h) // 2 
+                draw.text((x, emoji_draw_y), lock_char, font=emoji_font, fill=color, anchor="lt")
+            return emoji_w, emoji_h, True
 
-        logger.warning("Lock icon image and emoji font both unavailable. No lock element drawn.")
-        return 0, 0, False # Nothing drawn
+        if draw_it: # Only log if we were actually trying to draw
+            logger.warning("Lock icon image and emoji font both unavailable. No lock element drawn.")
+        return 0, 0, False
 
-    def _draw_straight_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, line: Optional[str], odds: float, units: float, bet_id: str, timestamp: datetime, img: Image.Image): # Added img
+    def _draw_straight_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, line: Optional[str], odds: float, units: float, bet_id: str, timestamp: datetime, img: Image.Image):
         y = 100 + 70 + 10 + 24 + 30 
         center_x = image_width / 2
         text_color = 'white'; gold_color = '#FFD700'; divider_color = '#606060'
@@ -251,35 +250,32 @@ class BetSlipGenerator:
         units_display_text = f" To Win {units:.2f} {units_str_display} "
         units_text_part_w, units_text_part_h = self._get_text_dimensions(units_display_text, units_font)
 
-        # Attempt to draw lock elements
-        lock_element_size = (units_text_part_h, units_text_part_h) # Base size on text height
+        lock_element_size = (units_text_part_h, units_text_part_h) 
         
-        # Calculate total width
-        temp_lock_w, temp_lock_h, drawn1 = self._draw_lock_element(img, draw, 0, 0, lock_element_size, emoji_font, gold_color) # Dummy draw for size
+        # Get dimensions of lock element without drawing it
+        # THIS IS THE FIX: Added draw_it=False
+        dim_lock_w, dim_lock_h, can_draw_lock = self._draw_lock_element(img, draw, 0, 0, lock_element_size, emoji_font, gold_color, draw_it=False)
         
-        if drawn1: # If first lock was drawn (image or emoji)
-            total_units_section_w = temp_lock_w + units_text_part_w + temp_lock_w
-        else: # No locks will be drawn
+        if can_draw_lock:
+            total_units_section_w = dim_lock_w + units_text_part_w + dim_lock_w
+        else: 
             total_units_section_w = units_text_part_w
 
         current_x = center_x - total_units_section_w / 2
+        lock_drawn_y = y 
         
-        lock_drawn_y = y # Y-coordinate for drawing locks and text
-        
-        actual_lock1_w, actual_lock1_h, lock1_drawn = self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color)
+        actual_lock1_w, actual_lock1_h, lock1_drawn = self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color, draw_it=True)
         if lock1_drawn:
             current_x += actual_lock1_w
 
-        # Adjust text_y to align with the center of the drawn lock (if any) or default y
-        text_draw_y = lock_drawn_y + (actual_lock1_h - units_text_part_h) / 2 if lock1_drawn else lock_drawn_y
+        text_draw_y = lock_drawn_y + (actual_lock1_h - units_text_part_h) / 2 if lock1_drawn and actual_lock1_h > 0 else lock_drawn_y
         draw.text((current_x, text_draw_y), units_display_text, font=units_font, fill=gold_color, anchor="lt")
         current_x += units_text_part_w
         
-        actual_lock2_w, _, lock2_drawn = self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color)
-
-        # y += max(actual_lock1_h if lock1_drawn else 0, units_text_part_h, actual_lock2_h if lock2_drawn else 0) + 15
+        if can_draw_lock: # Only attempt to draw the second lock if the first one was drawable
+            self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color, draw_it=True)
         
-    def _draw_parlay_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool, img: Image.Image): # Added img
+    def _draw_parlay_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool, img: Image.Image):
         y = 100 + 70 + 10 + 24 + 20; center_x = image_width / 2
         text_color = 'white'; gold_color = '#FFD700'; footer_color = '#CCCCCC'; divider_color = '#606060'
         leg_font = self.fonts['font_m_18']; total_odds_font = self.fonts['font_b_24']
@@ -304,26 +300,27 @@ class BetSlipGenerator:
         units_text_part_w, units_text_part_h = self._get_text_dimensions(units_display_text, units_font)
 
         lock_element_size = (units_text_part_h, units_text_part_h)
-        temp_lock_w, temp_lock_h, drawn1 = self._draw_lock_element(img, draw, 0, 0, lock_element_size, emoji_font, gold_color) # Dummy for size
-
-        if drawn1:
-            total_units_section_w = temp_lock_w + units_text_part_w + temp_lock_w
+        # THIS IS THE FIX: Added draw_it=False
+        dim_lock_w, dim_lock_h, can_draw_lock = self._draw_lock_element(img, draw, 0, 0, lock_element_size, emoji_font, gold_color, draw_it=False)
+            
+        if can_draw_lock:
+            total_units_section_w = dim_lock_w + units_text_part_w + dim_lock_w
         else:
             total_units_section_w = units_text_part_w
             
         current_x = center_x - total_units_section_w / 2
         lock_drawn_y = y
 
-        actual_lock1_w, actual_lock1_h, lock1_drawn = self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color)
+        actual_lock1_w, actual_lock1_h, lock1_drawn = self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color, draw_it=True)
         if lock1_drawn:
             current_x += actual_lock1_w
         
-        text_draw_y = lock_drawn_y + (actual_lock1_h - units_text_part_h) / 2 if lock1_drawn else lock_drawn_y
+        text_draw_y = lock_drawn_y + (actual_lock1_h - units_text_part_h) / 2 if lock1_drawn and actual_lock1_h > 0 else lock_drawn_y
         draw.text((current_x, text_draw_y), units_display_text, font=units_font, fill=gold_color, anchor="lt")
         current_x += units_text_part_w
         
-        self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color)
-        # y += max(actual_lock1_h if lock1_drawn else 0, units_text_part_h, actual_lock2_h if lock2_drawn else 0) + 15
+        if can_draw_lock:
+            self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color, draw_it=True)
         
     def _draw_footer(self, draw: ImageDraw.Draw, image_width: int, image_height: int, bet_id: str, timestamp: datetime):
         footer_font = self.fonts['font_m_18']; footer_color = '#CCCCCC'
@@ -419,9 +416,9 @@ class BetSlipGenerator:
             self._draw_teams_section(img, draw, width, home_team, away_team, home_logo_pil, away_logo_pil)
             
             if bet_type.lower() == "parlay" and parlay_legs:
-                self._draw_parlay_details(draw, width, height, parlay_legs, odds, units, bet_id, timestamp, is_same_game, img) # Pass img
+                self._draw_parlay_details(draw, width, height, parlay_legs, odds, units, bet_id, timestamp, is_same_game, img)
             else:
-                self._draw_straight_details(draw, width, height, line, odds, units, bet_id, timestamp, img) # Pass img
+                self._draw_straight_details(draw, width, height, line, odds, units, bet_id, timestamp, img)
             
             self._draw_footer(draw, width, height, bet_id, timestamp)
 
