@@ -53,7 +53,7 @@ class Bot(commands.Bot):
 
     async def setup_hook(self):
         logger.info("Starting setup_hook...")
-        await self.db_manager.connect()  # Initialize database connection and schema
+        await self.db_manager.connect()
 
         extensions = [
             'commands.admin',
@@ -86,21 +86,17 @@ class Bot(commands.Bot):
         )
         logger.info("Services startup initiated.")
 
-        # Sync commands: Clear existing and register once
         try:
-            # Clear global commands
             self.tree.clear_commands(guild=None)
             logger.info("Cleared global commands.")
 
-            # Sync global commands
             global_commands = ['sync', 'setup', 'setchannel', 'bet', 'remove_user', 'setid', 'stats']
             await self.tree.sync()
             logger.info(f"Global commands synced: {global_commands}")
 
-            # Sync guild-specific commands
             for guild in self.guilds:
                 guild_commands = global_commands.copy()
-                if guild.id == 1328126227013439601:  # Cookin' Books
+                if guild.id == 1328126227013439601:
                     guild_commands.append('load_logos')
                 self.tree.clear_commands(guild=guild)
                 await self.tree.sync(guild=guild)
@@ -119,6 +115,11 @@ class Bot(commands.Bot):
         for guild in self.guilds:
             logger.debug(f"- {guild.name} ({guild.id})")
         logger.info(f"Latency: {self.latency * 1000:.2f} ms")
+
+    async def on_message(self, message):
+        if message.author.id != self.user.id:
+            return
+        await self.process_commands(message)
 
 async def main():
     load_dotenv()
