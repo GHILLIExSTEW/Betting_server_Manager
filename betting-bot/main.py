@@ -71,7 +71,7 @@ class Bot(commands.Bot):
             except Exception as e:
                 logger.error(f"Failed to load extension {ext}: {e}", exc_info=True)
 
-        logger.info(f"Extension loading complete. Loaded: {len(self.extensions)}, Failed: 0")
+        logger.info(f"Extension loading complete. Loaded: {len(self.extensions)}")
         logger.info(f"Registered commands before syncing: {[c.name for c in self.tree.get_commands()]}")
 
         logger.info("Starting services...")
@@ -88,7 +88,9 @@ class Bot(commands.Bot):
 
         try:
             self.tree.clear_commands(guild=None)
-            logger.info("Cleared global commands.")
+            for guild in self.guilds:
+                self.tree.clear_commands(guild=guild)
+            logger.info("Cleared all global and guild commands.")
 
             global_commands = ['sync', 'setup', 'setchannel', 'bet', 'remove_user', 'setid', 'stats']
             await self.tree.sync()
@@ -98,7 +100,6 @@ class Bot(commands.Bot):
                 guild_commands = global_commands.copy()
                 if guild.id == 1328126227013439601:
                     guild_commands.append('load_logos')
-                self.tree.clear_commands(guild=guild)
                 await self.tree.sync(guild=guild)
                 logger.info(f"Commands synced to guild {guild.id}: {guild_commands}")
         except Exception as e:
