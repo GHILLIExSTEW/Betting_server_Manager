@@ -1,3 +1,4 @@
+```python
 # betting-bot/utils/image_generator.py
 
 import logging
@@ -202,7 +203,6 @@ class BetSlipGenerator:
         draw.text((away_name_x, y_base + text_y_offset), away_team, font=team_name_font, fill=text_color, anchor="lt")
 
     def _draw_lock_element(self, img: Image.Image, draw: ImageDraw.Draw, x: int, y: int, size: tuple[int, int], emoji_font: ImageFont.FreeTypeFont, color: str, draw_it: bool = True) -> tuple[int, int, bool]:
-        """Helper to draw lock image or emoji. Returns width, height, and if an element would be drawn."""
         lock_icon_size_for_draw = size 
         if self._lock_icon_cache:
             if draw_it:
@@ -212,7 +212,7 @@ class BetSlipGenerator:
                     return lock_icon_size_for_draw[0], lock_icon_size_for_draw[1], True
                 except Exception as e:
                     logger.warning(f"Failed to draw cached lock image: {e}. Falling back to emoji if possible.")
-            else: # Just return dimensions
+            else:
                 return lock_icon_size_for_draw[0], lock_icon_size_for_draw[1], True 
         
         if self.fonts['emoji_font_24'] != ImageFont.load_default():
@@ -223,7 +223,7 @@ class BetSlipGenerator:
                 draw.text((x, emoji_draw_y), lock_char, font=emoji_font, fill=color, anchor="lt")
             return emoji_w, emoji_h, True
 
-        if draw_it: # Only log if we were actually trying to draw
+        if draw_it:
             logger.warning("Lock icon image and emoji font both unavailable. No lock element drawn.")
         return 0, 0, False
 
@@ -252,8 +252,6 @@ class BetSlipGenerator:
 
         lock_element_size = (units_text_part_h, units_text_part_h) 
         
-        # Get dimensions of lock element without drawing it
-        # THIS IS THE FIX: Added draw_it=False
         dim_lock_w, dim_lock_h, can_draw_lock = self._draw_lock_element(img, draw, 0, 0, lock_element_size, emoji_font, gold_color, draw_it=False)
         
         if can_draw_lock:
@@ -272,22 +270,56 @@ class BetSlipGenerator:
         draw.text((current_x, text_draw_y), units_display_text, font=units_font, fill=gold_color, anchor="lt")
         current_x += units_text_part_w
         
-        if can_draw_lock: # Only attempt to draw the second lock if the first one was drawable
+        if can_draw_lock:
             self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color, draw_it=True)
         
-    def _draw_parlay_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool, img: Image.Image):
-        y = 100 + 70 + 10 + 24 + 20; center_x = image_width / 2
-        text_color = 'white'; gold_color = '#FFD700'; footer_color = '#CCCCCC'; divider_color = '#606060'
+    def _draw_parlay_team_logos(self, img: Image.Image, draw: ImageDraw.Draw, image_width: int, team_logos: List[Optional[Image.Image]], max_logos: int = 6):
+        y_base = 85
+        logo_size = (50, 50)
+        spacing = 10
+        logos_per_row = min(3, len(team_logos))  # Up to 3 logos per row
+        rows = (len(team_logos) + logos_per_row - 1) // logos_per_row
+        total_width = logos_per_row * logo_size[0] + (logos_per_row - 1) * spacing
+        start_x = (image_width - total_width) // 2
+
+        for row in range(min(rows, 2)):  # Limit to 2 rows (max 6 logos)
+            for col in range(logos_per_row):
+                idx = row * logos_per_row + col
+                if idx >= len(team_logos) or idx >= max_logos:
+                    break
+                logo = team_logos[idx]
+                if logo:
+                    try:
+                        logo_resized = logo.resize(logo_size, Image.Resampling.LANCZOS)
+                        x = start_x + col * (logo_size[0] + spacing)
+                        y = y_base + row * (logo_size[1] + spacing)
+                        if logo_resized.mode == 'RGBA':
+                            img.paste(logo_resized, (int(x), int(y)), logo_resized)
+                        else:
+                            img.paste(logo_resized, (int(x), int(y)))
+                    except Exception as e:
+                        logger.error(f"Error drawing team logo for parlay at index {idx}: {e}")
+
+        return y_base + rows * (logo_size[1] + spacing) + 10
+
+    def _draw_parlay_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool, img: Image.Image, team_logos: List[Optional[Image.Image]]):
+        # Draw team logos first
+        y = self._draw_parlay_team_logos(img, draw, image_width, team_logos)
+        center_x = image_width / 2
+        text_color = 'white'; gold_color = '#FFD700'; divider_color = '#606060'
         leg_font = self.fonts['font_m_18']; total_odds_font = self.fonts['font_b_24']
         units_font = self.fonts['font_b_24']; emoji_font = self.fonts['emoji_font_24']
-        max_leg_y = image_height - 120 
+        max_leg_y = image_height - 120
 
         for i, leg_data in enumerate(legs):
             leg_text = f"Leg {i+1}: {leg_data.get('league','N/A')} - {leg_data.get('team', 'N/A')} {leg_data.get('line', 'N/A')} ({leg_data.get('odds_str', 'N/A')})"
             _leg_w, leg_h = self._get_text_dimensions(leg_text, leg_font)
-            if y + leg_h > max_leg_y and i < len(legs) -1 :
-                draw.text((self.padding, y), "...", font=leg_font, fill=text_color, anchor="lt"); y += leg_h + 5; break 
-            draw.text((self.padding, y), leg_text, font=leg_font, fill=text_color, anchor="lt"); y += leg_h + 5
+            if y + leg_h > max_leg_y and i < len(legs) - 1:
+                draw.text((self.padding, y), "...", font=leg_font, fill=text_color, anchor="lt")
+                y += leg_h + 5
+                break
+            draw.text((self.padding, y), leg_text, font=leg_font, fill=text_color, anchor="lt")
+            y += leg_h + 5
         
         y += 10 
         draw.line([(self.padding + 20, y), (image_width - self.padding - 20, y)], fill=divider_color, width=2); y += 12
@@ -300,7 +332,6 @@ class BetSlipGenerator:
         units_text_part_w, units_text_part_h = self._get_text_dimensions(units_display_text, units_font)
 
         lock_element_size = (units_text_part_h, units_text_part_h)
-        # THIS IS THE FIX: Added draw_it=False
         dim_lock_w, dim_lock_h, can_draw_lock = self._draw_lock_element(img, draw, 0, 0, lock_element_size, emoji_font, gold_color, draw_it=False)
             
         if can_draw_lock:
@@ -321,7 +352,7 @@ class BetSlipGenerator:
         
         if can_draw_lock:
             self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color, draw_it=True)
-        
+
     def _draw_footer(self, draw: ImageDraw.Draw, image_width: int, image_height: int, bet_id: str, timestamp: datetime):
         footer_font = self.fonts['font_m_18']; footer_color = '#CCCCCC'
         _ , footer_text_h = self._get_text_dimensions("Test", footer_font)
@@ -360,14 +391,15 @@ class BetSlipGenerator:
     async def generate_bet_slip(
         self, home_team: str, away_team: str, league: str, odds: float, units: float, 
         bet_id: str, timestamp: datetime, bet_type: str = "straight", line: Optional[str] = None, 
-        parlay_legs: Optional[List[Dict]] = None, is_same_game: bool = False
+        parlay_legs: Optional[List[Dict]] = None, is_same_game: bool = False,
+        team_logo_paths: Optional[List[str]] = None
     ) -> Optional[Image.Image]:
         try:
             logger.info(f"Generating bet slip - Home:'{home_team}', Away:'{away_team}', League:'{league}', Type:{bet_type}")
             width, height = 600, 400
             
             guild_bg_image_pil = await self.get_guild_background()
-            img = Image.new('RGBA', (width, height), "#23232a") 
+            img = Image.new('RGBA', (width, height), "#23232a")
 
             if guild_bg_image_pil:
                 try:
@@ -380,13 +412,13 @@ class BetSlipGenerator:
                     ratio_w = width / bg_w
                     ratio_h = height / bg_h
                     
-                    if ratio_w > ratio_h: 
+                    if ratio_w > ratio_h:
                         new_w = width
                         new_h = int(bg_h * ratio_w)
                         resized_bg = guild_bg_image_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
                         crop_y = (new_h - height) // 2
                         final_bg_to_paste = resized_bg.crop((0, crop_y, width, crop_y + height))
-                    else: 
+                    else:
                         new_h = height
                         new_w = int(bg_w * ratio_h)
                         resized_bg = guild_bg_image_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -395,29 +427,47 @@ class BetSlipGenerator:
 
                     img.paste(final_bg_to_paste, (0,0), final_bg_to_paste)
                     logger.info("Applied guild background with 50% transparency.")
-                except Exception as bg_err: logger.error(f"Error processing guild background: {bg_err}", exc_info=True)
+                except Exception as bg_err:
+                    logger.error(f"Error processing guild background: {bg_err}", exc_info=True)
             
             draw = ImageDraw.Draw(img)
             
-            league_logo_pil = self._load_league_logo(league)
-            home_logo_pil = self._load_team_logo(home_team, league)
-            away_logo_pil = self._load_team_logo(away_team, league)
+            league_logo_pil = None if bet_type.lower() == "parlay" else self._load_league_logo(league)
+            home_logo_pil = None
+            away_logo_pil = None
+            team_logos = []
+
+            if bet_type.lower() == "parlay" and parlay_legs and team_logo_paths:
+                for logo_path in team_logo_paths:
+                    try:
+                        logo = Image.open(logo_path).convert("RGBA")
+                        team_logos.append(logo)
+                    except Exception as e:
+                        logger.warning(f"Failed to load team logo at {logo_path}: {e}")
+                        default_logo = Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
+                        team_logos.append(default_logo)
+            else:
+                home_logo_pil = self._load_team_logo(home_team, league)
+                away_logo_pil = self._load_team_logo(away_team, league)
             
             default_pil_logo = None
             if os.path.exists(self.DEFAULT_LOGO_PATH):
                 try: default_pil_logo = Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA")
                 except Exception as e: logger.error(f"Failed to load default logo: {e}")
             
-            if not league_logo_pil and default_pil_logo: league_logo_pil = default_pil_logo.copy()
-            if not home_logo_pil and default_pil_logo: home_logo_pil = default_pil_logo.copy()
-            if not away_logo_pil and default_pil_logo: away_logo_pil = default_pil_logo.copy()
+            if not league_logo_pil and default_pil_logo and bet_type.lower() != "parlay":
+                league_logo_pil = default_pil_logo.copy()
+            if not home_logo_pil and default_pil_logo:
+                home_logo_pil = default_pil_logo.copy()
+            if not away_logo_pil and default_pil_logo:
+                away_logo_pil = default_pil_logo.copy()
 
             self._draw_header(img, draw, width, league_logo_pil, league, bet_type)
-            self._draw_teams_section(img, draw, width, home_team, away_team, home_logo_pil, away_logo_pil)
             
             if bet_type.lower() == "parlay" and parlay_legs:
-                self._draw_parlay_details(draw, width, height, parlay_legs, odds, units, bet_id, timestamp, is_same_game, img)
+                self._draw_parlay_details(draw, width, height, parlay_legs, odds, units, bet_id, timestamp, is_same_game, img, team_logos)
             else:
+                self._draw_teams_section(img, draw, width, home_team, away_team, home_logo_pil, away_logo_pil)
                 self._draw_straight_details(draw, width, height, line, odds, units, bet_id, timestamp, img)
             
             self._draw_footer(draw, width, height, bet_id, timestamp)
@@ -428,10 +478,12 @@ class BetSlipGenerator:
         except Exception as e:
             logger.error(f"Error in generate_bet_slip: {str(e)}", exc_info=True)
             try:
-                err_img = Image.new('RGB', (600,100), "darkred"); err_draw = ImageDraw.Draw(err_img)
+                err_img = Image.new('RGB', (600,100), "darkred")
+                err_draw = ImageDraw.Draw(err_img)
                 err_draw.text((10,10), f"Error creating slip:\n{str(e)[:100]}", font=ImageFont.load_default(), fill="white")
                 return err_img
-            except Exception as final_err: logger.error(f"Fallback image failed: {final_err}")
+            except Exception as final_err:
+                logger.error(f"Fallback image failed: {final_err}")
             return None
                 
     def _load_fonts(self): pass 
@@ -512,7 +564,7 @@ class BetSlipGenerator:
                 return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
             except Exception as def_err:
                 logger.error(f"Error loading default team logo during fallback: {def_err}")
-                return None
+            return None
 
     def _ensure_team_dir_exists(self, league: str) -> Optional[str]:
         try:
@@ -532,3 +584,4 @@ class BetSlipGenerator:
 
     def _format_odds_with_sign(self, odds: float) -> str:
         return f"+{int(odds)}" if odds > 0 else str(int(odds))
+```
