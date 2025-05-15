@@ -111,7 +111,7 @@ class BetSlipGenerator:
         height = bbox[3] - bbox[1]
         return width, height
 
-    def _draw_header(self, draw: ImageDraw.Draw, image_width: int, league_logo: Optional[Image.Image], league: str, bet_type_str: str):
+    def _draw_header(self, img: Image.Image, draw: ImageDraw.Draw, image_width: int, league_logo: Optional[Image.Image], league: str, bet_type_str: str):
         y_offset = 25 # Slightly higher
         title_font = self.fonts['font_b_36']
         logo_display_size = (45, 45) # Adjusted logo size
@@ -142,15 +142,13 @@ class BetSlipGenerator:
                 else:
                     title_x = title_x_with_logo
                 # Use img.paste and ensure integer coordinates
-                self.img.paste(league_logo_resized, (int(logo_x), int(logo_y)), league_logo_resized)
+                img.paste(league_logo_resized, (int(logo_x), int(logo_y)), league_logo_resized)
             except Exception as e:
                 logger.error(f"Error drawing league logo in header: {e}", exc_info=True)
                 title_x = title_x_no_logo
         else:
             title_x = title_x_no_logo
-
         draw.text((title_x, y_offset), title_text, font=title_font, fill=text_color, anchor="lt")
-
 
     def _draw_teams_section(self, img: Image.Image, draw: ImageDraw.Draw, image_width: int, home_team: str, away_team: str, home_logo: Optional[Image.Image], away_logo: Optional[Image.Image]):
         y_base = 85 # Start y position for logos
@@ -169,9 +167,9 @@ class BetSlipGenerator:
                 home_logo_x = home_section_center_x - logo_size[0] // 2
                 # Use img.paste and ensure integer coordinates
                 if home_logo_resized.mode == 'RGBA':
-                    self.img.paste(home_logo_resized, (int(home_logo_x), int(y_base)), home_logo_resized)
+                    img.paste(home_logo_resized, (int(home_logo_x), int(y_base)), home_logo_resized)
                 else:
-                    self.img.paste(home_logo_resized, (int(home_logo_x), int(y_base)))
+                    img.paste(home_logo_resized, (int(home_logo_x), int(y_base)))
             except Exception as e:
                 logger.error(f"Error pasting home logo: {e}", exc_info=True)
         
@@ -185,16 +183,15 @@ class BetSlipGenerator:
                 away_logo_x = away_section_center_x - logo_size[0] // 2
                 # Use img.paste and ensure integer coordinates
                 if away_logo_resized.mode == 'RGBA':
-                    self.img.paste(away_logo_resized, (int(away_logo_x), int(y_base)), away_logo_resized)
+                    img.paste(away_logo_resized, (int(away_logo_x), int(y_base)), away_logo_resized)
                 else:
-                    self.img.paste(away_logo_resized, (int(away_logo_x), int(y_base)))
+                    img.paste(away_logo_resized, (int(away_logo_x), int(y_base)))
             except Exception as e:
                 logger.error(f"Error pasting away logo: {e}", exc_info=True)
-
+        
         away_name_w, _ = self._get_text_dimensions(away_team, team_name_font)
         away_name_x = away_section_center_x - away_name_w // 2
         draw.text((away_name_x, y_base + text_y_offset), away_team, font=team_name_font, fill=text_color, anchor="lt")
-
 
     def _draw_straight_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, line: Optional[str], odds: float, units: float, bet_id: str, timestamp: datetime):
         y = 100 + 70 + 10 + 24 + 30 # Start after team section
@@ -357,7 +354,7 @@ class BetSlipGenerator:
             if not home_logo_pil and default_pil_logo: home_logo_pil = default_pil_logo.copy()
             if not away_logo_pil and default_pil_logo: away_logo_pil = default_pil_logo.copy()
 
-            self._draw_header(draw, width, league_logo_pil, league, bet_type)
+            self._draw_header(img, draw, width, league_logo_pil, league, bet_type)
             self._draw_teams_section(img, draw, width, home_team, away_team, home_logo_pil, away_logo_pil)
             
             if bet_type.lower() == "parlay" and parlay_legs:
