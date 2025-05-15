@@ -476,7 +476,30 @@ class ParlayBetWorkflowView(View):
 
             # Step 1: League for current leg
             if self.current_step == 1:
-                allowed_leagues = [ "NBA", "NFL", "MLB", "NHL", "NCAA", "MLS", "EPL", "La Liga", "Serie A", "Bundesliga", "Ligue 1", "KHL", "CFL", "WNBA", "EuroLeague", "NPB", "KBO", "AFL", "Formula 1", "Tennis", "UFC/MMA" ]
+                allowed_leagues = [
+                    "NFL",
+                    "EPL",
+                    "NBA",
+                    "MLB",
+                    "NHL",
+                    "La Liga",
+                    "NCAA",
+                    "Bundesliga",
+                    "Serie A",
+                    "Ligue 1",
+                    "MLS",
+                    "Formula 1",
+                    "Tennis",
+                    "UFC/MMA",
+                    "WNBA",
+                    "CFL",
+                    "AFL",
+                    "Darts",
+                    "EuroLeague",
+                    "NPB",
+                    "KBO",
+                    "KHL"
+                ]
                 self.add_item(LeagueSelect(self, allowed_leagues))
                 content += "Select League"
             # Step 2: Line Type for current leg
