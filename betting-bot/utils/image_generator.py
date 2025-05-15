@@ -1,4 +1,3 @@
-```python
 # betting-bot/utils/image_generator.py
 
 import logging
@@ -584,4 +583,3 @@ class BetSlipGenerator:
 
     def _format_odds_with_sign(self, odds: float) -> str:
         return f"+{int(odds)}" if odds > 0 else str(int(odds))
-```
