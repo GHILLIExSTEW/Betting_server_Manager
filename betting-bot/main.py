@@ -37,13 +37,13 @@ class Bot(commands.Bot):
         intents.presences = True
         super().__init__(command_prefix='/', intents=intents)
         self.db_manager = DatabaseManager()
-        self.admin_service = AdminService(self)
-        self.analytics_service = AnalyticsService(self)
-        self.bet_service = BetService(self)
-        self.game_service = GameService(self)
-        self.user_service = UserService(self)
-        self.voice_service = VoiceService(self)
-        self.data_sync_service = DataSyncService(self)
+        self.admin_service = AdminService(self, self.db_manager)
+        self.analytics_service = AnalyticsService(self, self.db_manager)
+        self.bet_service = BetService(self, self.db_manager)
+        self.game_service = GameService(self, self.db_manager)
+        self.user_service = UserService(self, self.db_manager)
+        self.voice_service = VoiceService(self, self.db_manager)
+        self.data_sync_service = DataSyncService(self, self.db_manager)
         self.bet_slip_generators = {}
 
     async def get_bet_slip_generator(self, guild_id: int) -> BetSlipGenerator:
