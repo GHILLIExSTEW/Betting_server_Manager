@@ -647,7 +647,7 @@ TEAM_MAPPINGS = {
     # Colonial Athletic Association (CAA)
     "Campbell Fighting Camels": "campbell_fighting_camels", "Campbell": "campbell_fighting_camels", # Baseball, Basketball (M/W), Volleyball (W), Soccer (M/W); Football in CAA Football
     "Charleston Cougars": "charleston_cougars", "College of Charleston": "charleston_cougars", "CofC": "charleston_cougars", # Baseball, Basketball (M/W), Volleyball (W), Soccer (M/W); No Football
-    "Delaware Blue Hens": "delaware_blue_hens", "Delaware": "delaware_blue_hens", "UD": "delaware Lee's": "delaware_blue_hens", # Baseball, Basketball (M/W), Volleyball (W), Soccer (M/W); Football in CAA Football
+    "Delaware Blue Hens": "delaware_blue_hens", "Delaware": "delaware_blue_hens", "UD": "delaware_blue_hens", "delaware Lee's": "delaware_blue_hens", # Baseball, Basketball (M/W), Volleyball (W), Soccer (M/W); Football in CAA Football
     "Drexel Dragons": "drexel_dragons", "Drexel": "drexel_dragons", # Basketball (M/W), Volleyball (W), Soccer (M/W); No Baseball, No Football
     "Elon Phoenix": "elon_phoenix", "Elon": "elon_phoenix", # Baseball, Basketball (M/W), Volleyball (W), Soccer (M/W); Football in CAA Football
     "Hampton Pirates": "hampton_pirates", "Hampton": "hampton_pirates", # Basketball (M/W), Volleyball (W), Soccer (W); Football in CAA Football, No Baseball
