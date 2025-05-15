@@ -476,7 +476,7 @@ class ParlayBetWorkflowView(View):
 
             # Step 1: League for current leg
             if self.current_step == 1:
-                allowed_leagues = ["NBA", "NFL", "MLB", "NHL", "NCAAB", "NCAAF", "Soccer", "Tennis", "UFC/MMA"]
+                allowed_leagues = ["NBA", "NFL", "MLB", "NHL", "NCAA", "Soccer", "Tennis", "UFC/MMA"]
                 self.add_item(LeagueSelect(self, allowed_leagues))
                 content += "Select League"
             # Step 2: Line Type for current leg
