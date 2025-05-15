@@ -1,6 +1,6 @@
 # betting-bot/commands/parlay_betting.py
 
-#"""Parlay betting workflow for placing multi-leg bets."""
+"""Parlay betting workflow for placing multi-leg bets."""
 
 import discord
 from discord import app_commands, ButtonStyle, Interaction, SelectOption, TextChannel, File, Embed, Webhook
@@ -12,10 +12,9 @@ import io
 import uuid 
 import os
 import json 
-from discord.ext import commands # Required for Cog
-# Assuming utils are in a directory accessible by PYTHONPATH or relative to project root
+from discord.ext import commands
 from utils.errors import BetServiceError, ValidationError, GameNotFoundError
-from utils.image_generator import BetSlipGenerator # For type hinting and direct calls
+from utils.image_generator import BetSlipGenerator
 from config.asset_paths import get_sport_category_for_path
 
 logger = logging.getLogger(__name__)
@@ -55,18 +54,18 @@ class GameSelect(Select):
     def __init__(self, parent_view: 'ParlayBetWorkflowView', games: List[Dict]):
         self.parent_view = parent_view
         options = []
-        for game in games[:24]: 
+        for game in games[:24]:
             home = game.get('home_team_name', 'Unknown Home')
             away = game.get('away_team_name', 'Unknown Away')
             start_dt_obj = game.get('start_time')
             time_str = "Time N/A"
-            if isinstance(start_dt_obj, str): 
+            if isinstance(start_dt_obj, str):
                 try: start_dt_obj = datetime.fromisoformat(start_dt_obj.replace('Z', '+00:00'))
-                except ValueError: start_dt_obj = None 
+                except ValueError: start_dt_obj = None
             
             if isinstance(start_dt_obj, datetime): time_str = start_dt_obj.strftime('%m/%d %H:%M %Z')
             label = f"{away} @ {home} ({time_str})"
-            game_api_id = game.get('id') 
+            game_api_id = game.get('id')
             if game_api_id is None: logger.warning(f"Game missing 'id': {game}"); continue
             options.append(SelectOption(label=label[:100], value=str(game_api_id)))
         
@@ -75,7 +74,7 @@ class GameSelect(Select):
 
     async def callback(self, interaction: Interaction):
         selected_game_id = self.values[0]
-        self.parent_view.current_leg_construction_details['game_id'] = selected_game_id 
+        self.parent_view.current_leg_construction_details['game_id'] = selected_game_id
         if selected_game_id != "Other":
             game = next((g for g in self.parent_view.games if str(g.get('id')) == selected_game_id), None)
             if game:
@@ -94,16 +93,16 @@ class ManualEntryButton(Button):
 
     async def callback(self, interaction: Interaction):
         logger.debug(f"Manual Entry button clicked by user {interaction.user.id} for parlay leg.")
-        self.parent_view.current_leg_construction_details['game_id'] = "Other" 
+        self.parent_view.current_leg_construction_details['game_id'] = "Other"
         self.disabled = True
-        for item in self.parent_view.children: # Disable other selects/buttons in this step
+        for item in self.parent_view.children:
             if isinstance(item, (Select, Button)) and item != self: item.disabled = True
         
         line_type = self.parent_view.current_leg_construction_details.get('line_type', 'game_line')
         leg_number = len(self.parent_view.bet_details.get('legs', [])) + 1
         try:
             modal = BetDetailsModal(line_type=line_type, is_manual=True, leg_number=leg_number, view_custom_id_suffix=self.parent_view.original_interaction.id)
-            modal.view_ref = self.parent_view # Pass reference to the parent view
+            modal.view_ref = self.parent_view
             await interaction.response.send_modal(modal)
             logger.debug("Manual entry modal for parlay leg sent.")
             await self.parent_view.edit_message_for_current_leg(
@@ -129,29 +128,26 @@ class CancelButton(Button):
         await interaction.response.edit_message(content="Parlay workflow cancelled.", view=None)
         self.parent_view.stop()
 
-class BetDetailsModal(Modal): 
+class BetDetailsModal(Modal):
     def __init__(self, line_type: str, is_manual: bool = False, leg_number: int = 1, view_custom_id_suffix: str = ""):
         title = f"Leg {leg_number}: Enter Details"
-        super().__init__(title=title[:45], custom_id=f"parlay_leg_modal_{leg_number}_{view_custom_id_suffix}") 
+        super().__init__(title=title[:45], custom_id=f"parlay_leg_modal_{leg_number}_{view_custom_id_suffix}")
         self.line_type = line_type
         self.is_manual = is_manual
         self.leg_number = leg_number
-        self.view_ref: Optional['ParlayBetWorkflowView'] = None # To be set before sending
+        self.view_ref: Optional['ParlayBetWorkflowView'] = None
 
         self.team = TextInput(label="Team Involved/Player's Team", required=True, max_length=100, placeholder="Enter team name")
         self.add_item(self.team)
         
         if self.is_manual:
-             self.opponent = TextInput(label="Opponent for this Leg", required=True, max_length=100, placeholder="Enter opponent name")
-             self.add_item(self.opponent)
+            self.opponent = TextInput(label="Opponent for this Leg", required=True, max_length=100, placeholder="Enter opponent name")
+            self.add_item(self.opponent)
 
         prop_label = "Player - Line (e.g., Name O/U Pts)" if line_type == "player_prop" else "Line (e.g., Moneyline, Spread -X.X)"
         prop_placeholder = "E.g., Player Name - Points Over X.X" if line_type == "player_prop" else "E.g., Moneyline, Spread -7.5"
         self.line_input = TextInput(label=prop_label, required=True, max_length=100, placeholder=prop_placeholder)
         self.add_item(self.line_input)
-
-        self.odds = TextInput(label="Odds for this Leg", required=True, max_length=10, placeholder="American odds (e.g., -110, +200)")
-        self.add_item(self.odds)
 
     async def on_submit(self, interaction: Interaction):
         if not self.view_ref:
@@ -166,18 +162,9 @@ class BetDetailsModal(Modal):
             team_value = self.team.value.strip()
             opponent_value = self.opponent.value.strip() if hasattr(self, 'opponent') else self.view_ref.current_leg_construction_details.get('away_team_name', 'N/A')
             line_value = self.line_input.value.strip()
-            odds_str_value = self.odds.value.strip()
 
-            if not team_value or not line_value or not odds_str_value or (self.is_manual and not opponent_value):
+            if not team_value or not line_value or (self.is_manual and not opponent_value):
                 await interaction.followup.send("❌ All fields are required for the leg.", ephemeral=True)
-                return
-
-            try:
-                odds_float = float(odds_str_value.replace('+', ''))
-                if -100 < odds_float < 100 and odds_float != 0:
-                    raise ValueError("Odds out of range.")
-            except ValueError as ve:
-                await interaction.followup.send(f"❌ Invalid odds for leg: '{odds_str_value}'. {ve}", ephemeral=True)
                 return
 
             # Load team logo for this leg
@@ -187,7 +174,6 @@ class BetDetailsModal(Modal):
                 league = self.view_ref.current_leg_construction_details.get('league', 'UNKNOWN')
                 logo_image = bet_slip_gen._load_team_logo(team_value, league)
                 if logo_image:
-                    # Store logo path instead of image to save memory
                     normalized_team_name = bet_slip_gen._normalize_team_name(team_value)
                     sport = get_sport_category_for_path(league.upper()) or 'OTHER_SPORTS'
                     team_dir = os.path.join(bet_slip_gen.LEAGUE_TEAM_BASE_DIR, sport, league.upper())
@@ -205,11 +191,9 @@ class BetDetailsModal(Modal):
                 'team': team_value,
                 'opponent': opponent_value,
                 'line': line_value,
-                'odds': odds_float,
-                'odds_str': odds_str_value,
                 'bet_type': self.line_type,
                 'league': current_details.get('league', 'UNKNOWN'),
-                'team_logo_path': team_logo_path  # Store logo path for this leg
+                'team_logo_path': team_logo_path
             }
             
             if not self.is_manual and current_details.get('home_team_name'):
@@ -238,20 +222,73 @@ class BetDetailsModal(Modal):
         if self.view_ref:
             self.view_ref.stop()
 
+class TotalOddsModal(Modal):
+    def __init__(self, view_custom_id_suffix: str = ""):
+        super().__init__(title="Enter Total Parlay Odds", custom_id=f"parlay_total_odds_{view_custom_id_suffix}")
+        self.view_ref: Optional['ParlayBetWorkflowView'] = None
+        self.odds = TextInput(label="Total Parlay Odds", required=True, max_length=10, placeholder="American odds (e.g., -110, +200)")
+        self.add_item(self.odds)
+
+    async def on_submit(self, interaction: Interaction):
+        if not self.view_ref:
+            logger.error("ParlayBetWorkflowView reference not found in TotalOddsModal.")
+            await interaction.response.send_message("Internal error: View reference missing.", ephemeral=True)
+            return
+
+        logger.debug(f"Parlay Total Odds Modal submitted by user {interaction.user.id}")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            odds_str_value = self.odds.value.strip()
+            if not odds_str_value:
+                await interaction.followup.send("❌ Total odds are required.", ephemeral=True)
+                return
+
+            try:
+                odds_float = float(odds_str_value.replace('+', ''))
+                if -100 < odds_float < 100 and odds_float != 0:
+                    raise ValueError("Odds out of range.")
+            except ValueError as ve:
+                await interaction.followup.send(f"❌ Invalid total odds: '{odds_str_value}'. {ve}", ephemeral=True)
+                return
+
+            self.view_ref.bet_details['total_odds'] = odds_float
+            self.view_ref.bet_details['total_odds_str'] = odds_str_value
+            logger.info(f"Total parlay odds set to {odds_str_value} for bet {self.view_ref.bet_details.get('bet_serial')}")
+
+            await self.view_ref.go_next(interaction)
+        except Exception as e:
+            logger.exception(f"Error in TotalOddsModal on_submit: {e}")
+            await interaction.followup.send("❌ Failed to process total odds. Please restart parlay.", ephemeral=True)
+            if self.view_ref:
+                self.view_ref.stop()
+
+    async def on_error(self, interaction: Interaction, error: Exception) -> None:
+        logger.error(f"Error in TotalOddsModal: {error}", exc_info=True)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message('❌ Modal error.', ephemeral=True)
+            else:
+                await interaction.followup.send('❌ Modal error.', ephemeral=True)
+        except discord.HTTPException:
+            pass
+        if self.view_ref:
+            self.view_ref.stop()
+
 class UnitsSelect(Select):
     def __init__(self, parent_view: 'ParlayBetWorkflowView'):
         self.parent_view = parent_view
-        options = [SelectOption(label=f"{i*0.5:.1f} Units", value=str(i*0.5)) for i in range(1, 7)] # 0.5 to 3.0
+        options = [SelectOption(label=f"{i*0.5:.1f} Units", value=str(i*0.5)) for i in range(1, 7)]
         super().__init__(placeholder="Select Total Units for Parlay...", options=options, min_values=1, max_values=1, custom_id=f"parlay_units_select_{parent_view.original_interaction.id}")
 
     async def callback(self, interaction: Interaction):
         selected_units = float(self.values[0])
         self.parent_view.bet_details["units_str"] = self.values[0]
-        self.parent_view.bet_details["units"] = selected_units # Store float value
+        self.parent_view.bet_details["units"] = selected_units
         logger.debug(f"Parlay Units selected: {selected_units} by user {interaction.user.id}")
         self.disabled = True
         await interaction.response.defer()
-        await self.parent_view._handle_units_selection(interaction, selected_units) # This will regen preview
+        await self.parent_view._handle_units_selection(interaction, selected_units)
         await self.parent_view.go_next(interaction)
 
 class ChannelSelect(Select):
@@ -260,7 +297,7 @@ class ChannelSelect(Select):
         sorted_channels = sorted(channels, key=lambda x: x.name.lower())
         options = [
             SelectOption(label=ch.name, value=str(ch.id), description=f"ID: {ch.id}"[:100])
-            for ch in sorted_channels[:25] 
+            for ch in sorted_channels[:25]
         ]
         if not options:
             options.append(SelectOption(label="No embed channels configured", value="none_configured", emoji="🚫"))
@@ -286,7 +323,7 @@ class ConfirmButton(Button):
     async def callback(self, interaction: Interaction):
         logger.debug(f"Confirm Parlay button clicked by user {interaction.user.id}")
         for item in self.parent_view.children: item.disabled = True
-        await interaction.response.edit_message(view=self.parent_view) 
+        await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view.submit_bet(interaction)
 
 class AddLegButton(Button):
@@ -296,10 +333,9 @@ class AddLegButton(Button):
 
     async def callback(self, interaction: Interaction):
         logger.debug(f"Add Leg button clicked by user {interaction.user.id}")
-        self.parent_view.current_step = 0 
-        self.parent_view.current_leg_construction_details = {} 
-        await interaction.response.defer() 
-        # Message will be edited by go_next
+        self.parent_view.current_step = 0
+        self.parent_view.current_leg_construction_details = {}
+        await interaction.response.defer()
         await self.parent_view.go_next(interaction)
 
 class FinalizeButton(Button):
@@ -313,15 +349,13 @@ class FinalizeButton(Button):
         if not legs_data:
             await interaction.response.send_message("❌ Cannot finalize empty parlay.", ephemeral=True); return
 
-        # Create bet_serial now if not already created (e.g., first finalization)
         if "bet_serial" not in self.parent_view.bet_details:
             try:
-                # Primary league for the parlay can be the league of the first leg, or a general placeholder
                 primary_league = legs_data[0].get('league') if legs_data else "PARLAY"
                 bet_serial = await self.parent_view.bot.bet_service.create_parlay_bet(
                     guild_id=interaction.guild_id, user_id=interaction.user.id,
-                    legs=legs_data, # Initial legs data
-                    channel_id=None, # Will be set later
+                    legs=legs_data,
+                    channel_id=None,
                     league=primary_league
                 )
                 if not bet_serial: raise BetServiceError("Failed to create parlay record (no serial).")
@@ -331,43 +365,37 @@ class FinalizeButton(Button):
                 logger.error(f"Error creating parlay record on finalize: {bse}")
                 await interaction.response.send_message(f"❌ Error initializing parlay: {bse}", ephemeral=True)
                 self.parent_view.stop(); return
-        
-        total_odds = self.parent_view._calculate_parlay_odds(legs_data)
-        self.parent_view.bet_details['total_odds'] = total_odds 
-        self.parent_view.bet_details['total_odds_str'] = self.parent_view._format_odds_with_sign(total_odds) 
 
         for item in self.parent_view.children: item.disabled = True
-        await interaction.response.defer() # Defer before edit
-        
-        self.parent_view.current_step = 4 # To make go_next go to step 5 (Units)
+        await interaction.response.defer()
+        self.parent_view.current_step = 4
         await self.parent_view.go_next(interaction)
 
 class LegDecisionView(View):
-    def __init__(self, parent_view: 'ParlayBetWorkflowView'): 
+    def __init__(self, parent_view: 'ParlayBetWorkflowView'):
         super().__init__(timeout=600)
         self.parent_view = parent_view
         self.add_item(AddLegButton(self.parent_view))
         finalize_button = FinalizeButton(self.parent_view)
-        # Min 1 leg needed to finalize. If 0 legs somehow, disable.
-        finalize_button.disabled = len(self.parent_view.bet_details.get('legs', [])) < 1 
-        self.add_item(finalize_button) 
+        finalize_button.disabled = len(self.parent_view.bet_details.get('legs', [])) < 1
+        self.add_item(finalize_button)
         self.add_item(CancelButton(self.parent_view))
 
 # --- Main Workflow View ---
 class ParlayBetWorkflowView(View):
-    def __init__(self, interaction: Interaction, bot: commands.Bot): 
-        super().__init__(timeout=1800) 
+    def __init__(self, interaction: Interaction, bot: commands.Bot):
+        super().__init__(timeout=1800)
         self.original_interaction = interaction
-        self.bot = bot 
+        self.bot = bot
         self.current_step = 0
         self.bet_details: Dict[str, Any] = {'legs': [], 'bet_type': 'parlay'}
-        self.current_leg_construction_details: Dict[str, Any] = {} 
-        self.games: List[Dict] = [] 
-        self.message: Optional[Union[discord.WebhookMessage, discord.InteractionMessage]] = None 
-        self.is_processing = False 
-        self.latest_interaction = interaction 
-        self.bet_slip_generator: Optional[BetSlipGenerator] = None 
-        self.preview_image_bytes: Optional[io.BytesIO] = None 
+        self.current_leg_construction_details: Dict[str, Any] = {}
+        self.games: List[Dict] = []
+        self.message: Optional[Union[discord.WebhookMessage, discord.InteractionMessage]] = None
+        self.is_processing = False
+        self.latest_interaction = interaction
+        self.bet_slip_generator: Optional[BetSlipGenerator] = None
+        self.preview_image_bytes: Optional[io.BytesIO] = None
 
     async def get_bet_slip_generator(self) -> BetSlipGenerator:
         if self.bet_slip_generator is None:
@@ -377,34 +405,24 @@ class ParlayBetWorkflowView(View):
     def _format_odds_with_sign(self, odds: Optional[Union[float, int]]) -> str:
         if odds is None: return "N/A"
         try:
-            odds_num = int(float(odds)) 
+            odds_num = int(float(odds))
             return f"+{odds_num}" if odds_num > 0 else str(odds_num)
         except (ValueError, TypeError): return "N/A"
 
     def _calculate_parlay_odds(self, legs: List[Dict[str, Any]]) -> float:
-        if not legs: return 0.0
-        total_decimal_odds = 1.0
-        try:
-            for leg in legs:
-                odds = float(leg.get('odds', 0)) 
-                if odds == 0: continue 
-                decimal_leg = (odds / 100.0) + 1.0 if odds > 0 else (100.0 / abs(odds)) + 1.0
-                total_decimal_odds *= decimal_leg
-            if total_decimal_odds <= 1.0: return 0.0 
-            american_odds = (total_decimal_odds - 1.0) * 100.0 if total_decimal_odds >= 2.0 else -100.0 / (total_decimal_odds - 1.0)
-            return round(american_odds)
-        except Exception as e: logger.error(f"Error in _calculate_parlay_odds: {e}"); return 0.0
+        # Since odds are now provided by TotalOddsModal, return stored total odds
+        return self.bet_details.get('total_odds', 0.0)
 
     async def add_leg(self, modal_interaction: Interaction, leg_details: Dict[str, Any]):
         if 'legs' not in self.bet_details: self.bet_details['legs'] = []
         self.bet_details['legs'].append(leg_details)
-        self.current_leg_construction_details = {} 
+        self.current_leg_construction_details = {}
         leg_count = len(self.bet_details['legs'])
         logger.info(f"Leg {leg_count} added to parlay by user {self.original_interaction.user.id}. Details: {leg_details}")
         
         summary_lines = [f"**Parlay Legs ({leg_count}):**"]
         for i, leg in enumerate(self.bet_details['legs']):
-            summary_lines.append(f"{i+1}. {leg.get('league','N/A')}: {leg.get('team','N/A')} {leg.get('line','N/A')} ({leg.get('odds_str','N/A')})")
+            summary_lines.append(f"{i+1}. {leg.get('league','N/A')}: {leg.get('team','N/A')} {leg.get('line','N/A')}")
         summary_text = "\n".join(summary_lines)
 
         decision_view = LegDecisionView(self)
@@ -437,7 +455,7 @@ class ParlayBetWorkflowView(View):
         if interaction.user.id != self.original_interaction.user.id:
             await interaction.response.send_message("You cannot interact with this parlay.", ephemeral=True)
             return False
-        self.latest_interaction = interaction 
+        self.latest_interaction = interaction
         return True
     
     async def edit_message_for_current_leg(self, interaction_context: Interaction, content: Optional[str] = None, view: Optional[View] = None, embed: Optional[discord.Embed] = None, file: Optional[File] = None):
@@ -521,9 +539,9 @@ class ParlayBetWorkflowView(View):
                 leg_number = current_leg_count + 1
                 
                 modal = BetDetailsModal(line_type=line_type, is_manual=is_manual, leg_number=leg_number, view_custom_id_suffix=self.original_interaction.id)
-                modal.view_ref = self 
+                modal.view_ref = self
                 try:
-                    await interaction.response.send_modal(modal) 
+                    await interaction.response.send_modal(modal)
                     content = f"**Parlay Leg {leg_number}**: Please fill details in the popup."
                     await self.edit_message_for_current_leg(interaction, content=content, view=self)
                 except discord.HTTPException as e:
@@ -532,10 +550,24 @@ class ParlayBetWorkflowView(View):
                 self.is_processing = False; return
             elif self.current_step == 5:
                 self.add_item(UnitsSelect(self))
-                content = f"**Finalizing Parlay** (Total Odds: {self.bet_details.get('total_odds_str', 'N/A')}): Select Total Units"
+                content = f"**Finalizing Parlay**: Select Total Units"
             elif self.current_step == 6:
                 if not self.bet_details.get("units_str"):
                     await self.edit_message_for_current_leg(interaction, content="❌ Parlay units not set. Please restart.", view=None); self.stop(); return
+
+                modal = TotalOddsModal(view_custom_id_suffix=self.original_interaction.id)
+                modal.view_ref = self
+                try:
+                    await interaction.response.send_modal(modal)
+                    content = "**Parlay Total Odds**: Please enter total odds in the popup."
+                    await self.edit_message_for_current_leg(interaction, content=content, view=self)
+                except discord.HTTPException as e:
+                    logger.error(f"Parlay: Failed to send TotalOddsModal (step 6): {e}")
+                    await self.edit_message_for_current_leg(interaction, content="❌ Error opening total odds form.", view=None); self.stop()
+                self.is_processing = False; return
+            elif self.current_step == 7:
+                if not self.bet_details.get("total_odds_str"):
+                    await self.edit_message_for_current_leg(interaction, content="❌ Total parlay odds not set. Please restart.", view=None); self.stop(); return
 
                 guild_settings = await self.bot.db_manager.fetch_one(
                     "SELECT embed_channel_1, embed_channel_2 FROM guild_settings WHERE guild_id = %s",
@@ -559,7 +591,7 @@ class ParlayBetWorkflowView(View):
                 
                 self.add_item(ChannelSelect(self, configured_channel_objects))
                 content = f"**Finalizing Parlay - Step {self.current_step}**: Select Channel to Post Parlay"
-            elif self.current_step == 7:
+            elif self.current_step == 8:
                 if not all(k in self.bet_details for k in ['bet_serial', 'channel_id', 'units_str', 'legs', 'total_odds_str']):
                     await self.edit_message_for_current_leg(interaction, content="❌ Parlay details incomplete. Please restart.", view=None); self.stop(); return
                 
@@ -574,7 +606,7 @@ class ParlayBetWorkflowView(View):
                 logger.error(f"ParlayBetWorkflowView: Unexpected step: {self.current_step}")
                 await self.edit_message_for_current_leg(interaction, content="❌ Workflow error.", view=None); self.stop(); return
 
-            if self.current_step <= 7 : self.add_item(CancelButton(self))
+            if self.current_step <= 8: self.add_item(CancelButton(self))
             
             await self.edit_message_for_current_leg(interaction, content=content, view=self, file=getattr(self, 'file_to_send', None))
 
@@ -591,8 +623,7 @@ class ParlayBetWorkflowView(View):
         for i, leg in enumerate(legs, 1):
             summary_parts.append(
                 f"**Leg {i}**: {leg.get('league','N/A')} - "
-                f"{leg.get('team','N/A')} {leg.get('line','N/A')} "
-                f"({leg.get('odds_str','N/A')})"
+                f"{leg.get('team','N/A')} {leg.get('line','N/A')}"
             )
         summary_text = "\n".join(summary_parts)
         summary_text += f"\n\nTotal Odds: **{self.bet_details.get('total_odds_str', 'N/A')}**"
@@ -613,7 +644,6 @@ class ParlayBetWorkflowView(View):
             if self.bet_details.get('legs'):
                 try:
                     primary_league = self.bet_details['legs'][0].get('league') if self.bet_details['legs'] else "PARLAY"
-                    total_odds = self.bet_details.get('total_odds', self._calculate_parlay_odds(self.bet_details['legs']))
                     bet_serial = await self.bot.bet_service.create_parlay_bet(
                         guild_id=self.original_interaction.guild_id,
                         user_id=self.original_interaction.user.id,
@@ -628,12 +658,10 @@ class ParlayBetWorkflowView(View):
                 except BetServiceError as bse:
                     logger.error(f"Error creating parlay record in _handle_units_selection: {bse}")
                     await interaction.followup.send(f"❌ Error initializing parlay: {bse}", ephemeral=True)
-                    self.stop()
-                    return
+                    self.stop(); return
             else:
                 await interaction.followup.send("❌ Parlay has no legs. Cannot set units.", ephemeral=True)
-                self.stop()
-                return
+                self.stop(); return
 
         try:
             await self.bot.db_manager.execute(
@@ -649,7 +677,7 @@ class ParlayBetWorkflowView(View):
                 await self.parent_view.edit_message_for_current_leg(interaction, view=self.parent_view)
             return
 
-        # Generate parlay preview image with all team logos
+        # Generate parlay preview image with all team logos (odds will be added later)
         try:
             legs = self.bet_details.get("legs", [])
             if not legs:
@@ -661,7 +689,6 @@ class ParlayBetWorkflowView(View):
             is_sgp = len(set(leg.get("game_id") for leg in legs if leg.get("game_id"))) == 1 and len(legs) > 1
             header_league = "Parlay" if not is_sgp else legs[0].get('league', 'SGP')
 
-            # Prepare logo paths for all legs
             team_logo_paths = [leg.get('team_logo_path', bet_slip_gen.DEFAULT_LOGO_PATH) for leg in legs]
 
             bet_slip_image = await bet_slip_gen.generate_bet_slip(
