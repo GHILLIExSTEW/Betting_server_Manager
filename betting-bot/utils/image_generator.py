@@ -135,7 +135,7 @@ class BetSlipGenerator:
         elif "Player Prop" in bet_type_display: bet_type_display = "Player Prop"
 
         title_text = f"{league.upper()} - {bet_type_display}"
-        title_w, title_h = self._get_text_dims(title_text, title_font)
+        title_w, title_h = self._get_text_dimensions(title_text, title_font)
         
         logo_x = self.padding
         title_x_no_logo = (image_width - title_w) // 2
@@ -182,7 +182,7 @@ class BetSlipGenerator:
             except Exception as e:
                 logger.error(f"Error pasting home logo: {e}", exc_info=True)
         
-        home_name_w, _ = self._get_text_dims(home_team, team_name_font)
+        home_name_w, _ = self._get_text_dimensions(home_team, team_name_font)
         home_name_x = home_section_center_x - home_name_w // 2
         draw.text((home_name_x, y_base + text_y_offset), home_team, font=team_name_font, fill=text_color, anchor="lt")
 
@@ -197,7 +197,7 @@ class BetSlipGenerator:
             except Exception as e:
                 logger.error(f"Error pasting away logo: {e}", exc_info=True)
         
-        away_name_w, _ = self._get_text_dims(away_team, team_name_font)
+        away_name_w, _ = self._get_text_dimensions(away_team, team_name_font)
         away_name_x = away_section_center_x - away_name_w // 2
         draw.text((away_name_x, y_base + text_y_offset), away_team, font=team_name_font, fill=text_color, anchor="lt")
 
@@ -216,7 +216,7 @@ class BetSlipGenerator:
         
         if self.fonts['emoji_font_24'] != ImageFont.load_default():
             lock_char = "🔒"
-            emoji_w, emoji_h = self._get_text_dims(lock_char, emoji_font)
+            emoji_w, emoji_h = self._get_text_dimensions(lock_char, emoji_font)
             if draw_it:
                 emoji_draw_y = y + (lock_icon_size_for_draw[1] - emoji_h) // 2
                 draw.text((x, emoji_draw_y), lock_char, font=emoji_font, fill=color, anchor="lt")
@@ -235,19 +235,19 @@ class BetSlipGenerator:
         units_font = self.fonts['font_b_24']; emoji_font = self.fonts['emoji_font_24']
         
         if line:
-            line_w, line_h = self._get_text_dims(line, line_font)
+            line_w, line_h = self._get_text_dimensions(line, line_font)
             draw.text((center_x, y), line, font=line_font, fill=text_color, anchor="mt")
             y += line_h + 12
 
         draw.line([(self.padding + 20, y), (image_width - self.padding - 20, y)], fill=divider_color, width=2); y += 12
 
         odds_text = self._format_odds_with_sign(odds)
-        odds_w, odds_h = self._get_text_dims(odds_text, odds_font)
+        odds_w, odds_h = self._get_text_dimensions(odds_text, odds_font)
         draw.text((center_x, y), odds_text, font=odds_font, fill=text_color, anchor="mt"); y += odds_h + 12
         
         units_str_display = "Unit" if units == 1.0 else "Units"
         units_display_text = f" To Win {units:.2f} {units_str_display} "
-        units_text_part_w, units_text_part_h = self._get_text_dims(units_display_text, units_font)
+        units_text_part_w, units_text_part_h = self._get_text_dimensions(units_display_text, units_font)
 
         lock_element_size = (units_text_part_h, units_text_part_h)
         
@@ -284,7 +284,7 @@ class BetSlipGenerator:
 
         for i, (leg_data, logo) in enumerate(zip(legs, team_logos)):
             leg_text = f"Leg {i+1}: {leg_data.get('team', 'N/A')} {leg_data.get('line', 'N/A')} ({leg_data.get('league', 'N/A')})"
-            leg_w, leg_h = self._get_text_dims(leg_text, leg_font)
+            leg_w, leg_h = self._get_text_dimensions(leg_text, leg_font)
             
             # Draw team logo
             if logo:
@@ -310,14 +310,14 @@ class BetSlipGenerator:
 
         # Draw total odds
         odds_text = self._format_odds_with_sign(odds)
-        odds_w, odds_h = self._get_text_dims(odds_text, odds_font)
+        odds_w, odds_h = self._get_text_dimensions(odds_text, odds_font)
         draw.text((center_x, y), odds_text, font=odds_font, fill=text_color, anchor="mt")
         y += odds_h + 12
 
         # Draw units
         units_str_display = "Unit" if units == 1.0 else "Units"
         units_display_text = f" To Win {units:.2f} {units_str_display} "
-        units_text_part_w, units_text_part_h = self._get_text_dims(units_display_text, units_font)
+        units_text_part_w, units_text_part_h = self._get_text_dimensions(units_display_text, units_font)
 
         lock_element_size = (units_text_part_h, units_text_part_h)
         dim_lock_w, dim_lock_h, can_draw_lock = self._draw_lock_element(img, draw, 0, 0, lock_element_size, emoji_font, gold_color, draw_it=False)
@@ -345,13 +345,13 @@ class BetSlipGenerator:
 
     def _draw_footer(self, draw: ImageDraw.Draw, image_width: int, image_height: int, bet_id: str, timestamp: datetime):
         footer_font = self.fonts['font_m_18']; footer_color = '#CCCCCC'
-        _, footer_text_h = self._get_text_dims("Test", footer_font)
+        _, footer_text_h = self._get_text_dimensions("Test", footer_font)
         footer_y = image_height - self.padding - footer_text_h
 
         bet_id_text = f"Bet #{bet_id}"
         timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M UTC')
         draw.text((self.padding, footer_y), bet_id_text, font=footer_font, fill=footer_color, anchor="ls")
-        ts_w, _ = self._get_text_dims(timestamp_text, footer_font)
+        ts_w, _ = self._get_text_dimensions(timestamp_text, footer_font)
         draw.text((image_width - self.padding, footer_y), timestamp_text, font=footer_font, fill=footer_color, anchor="rs")
 
     async def get_guild_background(self) -> Optional[Image.Image]:
@@ -402,7 +402,7 @@ class BetSlipGenerator:
                     guild_bg_image_pil = guild_bg_image_pil.convert("RGBA")
                     alpha_channel = guild_bg_image_pil.getchannel('A')
                     semi_transparent_alpha = alpha_channel.point(lambda p: int(p * 0.5))
-                    guild_bg_image_pil.putalpha(semizinha_transparent_alpha)
+                    guild_bg_image_pil.putalpha(semi_transparent_alpha)
                     
                     bg_w, bg_h = guild_bg_image_pil.size
                     ratio_w = width / bg_w
