@@ -15,6 +15,64 @@ from .parlay_betting import ParlayBetWorkflowView
 
 logger = logging.getLogger(__name__)
 
+# --- Authorization Check Function ---
+async def is_allowed_command_channel(interaction: Interaction) -> bool:
+    """Checks if the command is used in a configured command channel."""
+    if not interaction.guild_id:
+        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        return False
+
+    # Assuming bot.db_manager is accessible
+    db_manager = interaction.client.db_manager # type: ignore
+    if not db_manager:
+        logger.error("Database manager not found on bot client for command channel check.")
+        await interaction.response.send_message("Bot configuration error. Cannot verify command channel.", ephemeral=True)
+        return False
+
+    settings = await db_manager.fetch_one(
+        "SELECT command_channel_1, command_channel_2 FROM guild_settings WHERE guild_id = %s",
+        (interaction.guild_id,)
+    )
+
+    if not settings:
+        await interaction.response.send_message(
+            "Command channels are not configured for this server. Please ask an admin to set them up using `/setup`.",
+            ephemeral=True
+        )
+        return False
+
+    command_channel_1_id = settings.get('command_channel_1')
+    command_channel_2_id = settings.get('command_channel_2')
+
+    allowed_channel_ids = []
+    if command_channel_1_id:
+        allowed_channel_ids.append(int(command_channel_1_id))
+    if command_channel_2_id:
+        allowed_channel_ids.append(int(command_channel_2_id))
+
+    if not allowed_channel_ids:
+        await interaction.response.send_message(
+            "No command channels are configured for betting. Please ask an admin to set them up.",
+            ephemeral=True
+        )
+        return False
+
+    if interaction.channel_id not in allowed_channel_ids:
+        channel_mentions = []
+        for ch_id in allowed_channel_ids:
+            channel = interaction.guild.get_channel(ch_id)
+            if channel:
+                channel_mentions.append(channel.mention)
+            else:
+                channel_mentions.append(f"`Channel ID: {ch_id}` (not found)")
+        
+        await interaction.response.send_message(
+            f"This command can only be used in the designated command channel(s): {', '.join(channel_mentions)}",
+            ephemeral=True
+        )
+        return False
+    
+    return True
 
 # --- UI Component Classes ---
 class BetTypeSelect(Select):
@@ -91,9 +149,9 @@ class CancelButton(Button):
                 f"Error cancelling bet workflow for user {interaction.user}: {e}",
                 exc_info=True,
             )
-            await interaction.followup.send(
-                "❌ Failed to cancel bet workflow.", ephemeral=True
-            )
+            # await interaction.followup.send( # This would fail if edit_message failed due to original interaction being done
+            #     "❌ Failed to cancel bet workflow.", ephemeral=True
+            # )
         self.parent_view.stop()
 
 
@@ -135,18 +193,17 @@ class BetTypeView(View):
         try:
             if bet_type == "straight":
                 logger.debug("Initializing StraightBetWorkflowView")
-                # Pass the original /bet command interaction, the bot, and the message this view is on
                 view = StraightBetWorkflowView(
-                    self.original_interaction,
+                    self.original_interaction, # Pass the original /bet command interaction
                     self.bot,
-                    message_to_control=self.message,
+                    message_to_control=self.message, # Pass the message this view is controlling
                 )
             else:  # parlay
                 logger.debug("Initializing ParlayBetWorkflowView")
                 view = ParlayBetWorkflowView(
-                    self.original_interaction,
+                    self.original_interaction, # Pass the original /bet command interaction
                     self.bot,
-                    message_to_control=self.message,
+                    message_to_control=self.message, # Pass the message this view is controlling
                 )
             # Start the new view's flow, passing the component interaction that triggered it
             await view.start_flow(interaction_from_select)
@@ -176,44 +233,55 @@ class BettingCog(commands.Cog):
         name="bet",
         description="Place a new bet (straight or parlay) through a guided workflow.",
     )
+    @app_commands.check(is_allowed_command_channel)
     async def bet_command(self, interaction: discord.Interaction):
         logger.info(
             f"Bet command initiated by {interaction.user} (ID: {interaction.user.id}) in guild {interaction.guild_id}, channel {interaction.channel_id}"
         )
         try:
-            is_auth = True  # Replace with actual authorization check
-            if not is_auth:
-                logger.warning(
-                    f"Unauthorized bet attempt by {interaction.user} (ID: {interaction.user.id})"
-                )
-                await interaction.response.send_message(
-                    "❌ You are not authorized to place bets.", ephemeral=True
-                )
-                return
+            # Authorization for placing bets (e.g., role-based) can be added here if needed
+            # is_auth = True # Replace with actual authorization check
+            # if not is_auth:
+            #     logger.warning(
+            #         f"Unauthorized bet attempt by {interaction.user} (ID: {interaction.user.id})"
+            #     )
+            #     await interaction.response.send_message(
+            #         "❌ You are not authorized to place bets.", ephemeral=True
+            #     )
+            #     return
+            
             logger.debug("Deferring response for bet command")
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            # No need to defer if the check function already sends a response on failure.
+            # If the check passes, we will send a message with the view.
+            # await interaction.response.defer(ephemeral=True, thinking=True) # Removed defer here
 
             view = BetTypeView(interaction, self.bot)
             logger.debug("Sending bet type selection message")
-            # Store the message sent by followup, so BetTypeView knows which message it's on.
-            view.message = await interaction.followup.send(
+            
+            # Send the initial message. If is_allowed_command_channel failed, this won't execute.
+            await interaction.response.send_message(
                 "Starting bet placement: Please select bet type...",
                 view=view,
                 ephemeral=True,
             )
+            view.message = await interaction.original_response() # Get the message we just sent
             logger.debug("Bet type selection message sent successfully")
+
+        except app_commands.CheckFailure as e:
+            logger.warning(f"Bet command check failed for {interaction.user.id} in channel {interaction.channel_id}: {e}")
+            # The check function `is_allowed_command_channel` handles sending the response.
         except Exception as e:
             logger.exception(
                 f"Error initiating bet command for user {interaction.user} (ID: {interaction.user.id}): {e}"
             )
             error_message = f"❌ An error occurred while starting the betting workflow: {str(e)}"
-            if interaction.response.is_done():
-                await interaction.followup.send(error_message, ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(error_message, ephemeral=True)
             else:
-                # This case should not be reached if defer() was successful
-                await interaction.response.send_message(
-                    error_message, ephemeral=True
-                )
+                try:
+                    await interaction.followup.send(error_message, ephemeral=True)
+                except discord.HTTPException: # Fallback if followup fails
+                    logger.error("Failed to send followup error message for bet command.")
 
 
 async def setup(bot: commands.Bot):
