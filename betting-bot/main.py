@@ -117,11 +117,6 @@ class Bot(commands.Bot):
             logger.debug(f"- {guild.name} ({guild.id})")
         logger.info(f"Latency: {self.latency * 1000:.2f} ms")
 
-    async def on_message(self, message):
-        if message.author.id != self.user.id:
-            return
-        await self.process_commands(message)
-
 async def main():
     load_dotenv()
     logger.info(f"Loaded environment variables from: {os.path.abspath('.env')}")
