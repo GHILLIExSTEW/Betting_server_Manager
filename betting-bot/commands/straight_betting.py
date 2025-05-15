@@ -681,7 +681,30 @@ class StraightBetWorkflowView(View):
             new_view_items = []
 
             if self.current_step == 1:
-                allowed_leagues = [ "NBA", "NFL", "MLB", "NHL", "NCAA", "MLS", "EPL", "La Liga", "Serie A", "Bundesliga", "Ligue 1", "KHL", "CFL", "WNBA", "EuroLeague", "NPB", "KBO", "AFL", "Formula 1", "Tennis", "UFC/MMA" ]
+                allowed_leagues = [
+                    "NFL",
+                    "EPL",
+                    "NBA",
+                    "MLB",
+                    "NHL",
+                    "La Liga",
+                    "NCAA",
+                    "Bundesliga",
+                    "Serie A",
+                    "Ligue 1",
+                    "MLS",
+                    "Formula 1",
+                    "Tennis",
+                    "UFC/MMA",
+                    "WNBA",
+                    "CFL",
+                    "AFL",
+                    "Darts",
+                    "EuroLeague",
+                    "NPB",
+                    "KBO",
+                    "KHL"
+                ]
                 new_view_items.append(LeagueSelect(self, allowed_leagues))
             elif self.current_step == 2:
                 new_view_items.append(LineTypeSelect(self))
