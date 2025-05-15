@@ -196,10 +196,10 @@ class BetSlipGenerator:
     def _draw_straight_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, line: Optional[str], odds: float, units: float, bet_id: str, timestamp: datetime):
         y = 100 + 70 + 10 + 24 + 30 # Start after team section
         center_x = image_width / 2
-        text_color = 'white'; gold_color = '#FFD700'; divider_color = '#606060' # Darker grey
+        text_color = 'white'; gold_color = '#FFD700'; divider_color = '#606060'
 
         line_font = self.fonts['font_m_24']; odds_font = self.fonts['font_b_28']
-        units_font = self.fonts['font_b_24']; emoji_font = self.fonts['emoji_font_24']
+        units_font = self.fonts['font_b_24']; emoji_font = self.fonts['emoji_font_24'] # Ensure emoji font is loaded
         
         if line:
             line_w, line_h = self._get_text_dimensions(line, line_font)
@@ -212,29 +212,33 @@ class BetSlipGenerator:
         odds_w, odds_h = self._get_text_dimensions(odds_text, odds_font)
         draw.text((center_x, y), odds_text, font=odds_font, fill=text_color, anchor="mt"); y += odds_h + 12
         
-        lock_char = "🔒"; units_text_part = f" To Win {units:.2f} Units "
+        # MODIFIED UNITS TEXT
+        lock_char = "🔒" 
+        units_str_display = "Unit" if units == 1.0 else "Units"
+        units_display_text = f" To Win {units:.2f} {units_str_display} "
+
         lock_w, lock_h = self._get_text_dimensions(lock_char, emoji_font)
-        units_text_part_w, units_text_part_h = self._get_text_dimensions(units_text_part, units_font)
+        units_text_part_w, units_text_part_h = self._get_text_dimensions(units_display_text, units_font)
+        
         total_units_section_w = lock_w + units_text_part_w + lock_w
         current_x = center_x - total_units_section_w / 2
         
-        # Try to align text middle with emoji middle by adjusting text_y
-        emoji_center_y_offset = lock_h / 2
-        text_center_y_offset = units_text_part_h / 2
-        text_y_for_emoji_align = y + emoji_center_y_offset - text_center_y_offset
+        text_y_for_emoji_align = y + (lock_h - units_text_part_h) / 2 
 
         draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color, anchor="lt")
         current_x += lock_w
-        draw.text((current_x, text_y_for_emoji_align), units_text_part, font=units_font, fill=gold_color, anchor="lt")
+        draw.text((current_x, text_y_for_emoji_align), units_display_text, font=units_font, fill=gold_color, anchor="lt")
         current_x += units_text_part_w
         draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color, anchor="lt")
+        
+        # y += max(lock_h, units_text_part_h) + 15 # Adjust y for footer if elements below this one
         
     def _draw_parlay_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool):
         y = 100 + 70 + 10 + 24 + 20; center_x = image_width / 2
         text_color = 'white'; gold_color = '#FFD700'; footer_color = '#CCCCCC'; divider_color = '#606060'
         leg_font = self.fonts['font_m_18']; total_odds_font = self.fonts['font_b_24']
         units_font = self.fonts['font_b_24']; emoji_font = self.fonts['emoji_font_24']
-        max_leg_y = image_height - 120 # Reserve space
+        max_leg_y = image_height - 120 
 
         for i, leg_data in enumerate(legs):
             leg_text = f"Leg {i+1}: {leg_data.get('league','N/A')} - {leg_data.get('team', 'N/A')} {leg_data.get('line', 'N/A')} ({leg_data.get('odds_str', 'N/A')})"
@@ -249,17 +253,24 @@ class BetSlipGenerator:
         total_odds_w, total_odds_h = self._get_text_dimensions(total_odds_text, total_odds_font)
         draw.text( (center_x, y), total_odds_text, font=total_odds_font, fill=text_color, anchor="mt"); y += total_odds_h + 12
 
-        lock_char = "🔒"; units_text_part = f" To Win {units:.2f} Units "
+        # MODIFIED UNITS TEXT for PARLAY
+        lock_char = "🔒"
+        units_str_display = "Unit" if units == 1.0 else "Units"
+        units_display_text = f" To Win {units:.2f} {units_str_display} "
+        
         lock_w, lock_h = self._get_text_dimensions(lock_char, emoji_font)
-        units_text_part_w, units_text_part_h = self._get_text_dimensions(units_text_part, units_font)
+        units_text_part_w, units_text_part_h = self._get_text_dimensions(units_display_text, units_font)
+        
         total_units_section_w = lock_w + units_text_part_w + lock_w
         current_x = center_x - total_units_section_w / 2
         text_y_adj = y + (lock_h - units_text_part_h) // 2
+
         draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color, anchor="lt")
         current_x += lock_w
-        draw.text((current_x, text_y_adj), units_text_part, font=units_font, fill=gold_color, anchor="lt")
+        draw.text((current_x, text_y_adj), units_display_text, font=units_font, fill=gold_color, anchor="lt")
         current_x += units_text_part_w
         draw.text((current_x, y), lock_char, font=emoji_font, fill=gold_color, anchor="lt")
+        # y += max(lock_h, units_text_part_h) + 15 # Adjust y for footer
         
     def _draw_footer(self, draw: ImageDraw.Draw, image_width: int, image_height: int, bet_id: str, timestamp: datetime):
         footer_font = self.fonts['font_m_18']; footer_color = '#CCCCCC'
@@ -282,9 +293,6 @@ class BetSlipGenerator:
                 normalized_db_path = guild_bg_path_from_db.replace('\\', '/')
                 if os.path.isabs(normalized_db_path): effective_path = normalized_db_path
                 else:
-                    # Path from DB should be relative to BASE_DIR/static/
-                    # e.g. DB: "guilds/123/bg.png" -> /home/container/betting-bot/static/guilds/123/bg.png
-                    # e.g. DB: "static/guilds/123/bg.png" -> /home/container/betting-bot/static/guilds/123/bg.png (if static is part of path)
                     if normalized_db_path.lower().startswith('static/'):
                         effective_path = os.path.join(BASE_DIR, normalized_db_path)
                     else:
@@ -322,13 +330,13 @@ class BetSlipGenerator:
                     ratio_w = width / bg_w
                     ratio_h = height / bg_h
                     
-                    if ratio_w > ratio_h: # Fit by width, crop height
+                    if ratio_w > ratio_h: 
                         new_w = width
                         new_h = int(bg_h * ratio_w)
                         resized_bg = guild_bg_image_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
                         crop_y = (new_h - height) // 2
                         final_bg_to_paste = resized_bg.crop((0, crop_y, width, crop_y + height))
-                    else: # Fit by height, crop width
+                    else: 
                         new_h = height
                         new_w = int(bg_w * ratio_h)
                         resized_bg = guild_bg_image_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -380,7 +388,7 @@ class BetSlipGenerator:
 
     def _cleanup_cache(self):
         now = time.time()
-        if now - self._last_cache_cleanup > 300:
+        if now - self._last_cache_cleanup > 300: # Clean every 5 mins
             expired_keys = [k for k, (_, ts) in self._logo_cache.items() if now - ts > self._cache_expiry]
             for k in expired_keys: self._logo_cache.pop(k, None)
             self._last_cache_cleanup = now
@@ -393,18 +401,18 @@ class BetSlipGenerator:
             if cache_key in self._logo_cache:
                 logo, ts = self._logo_cache[cache_key]
                 if now - ts <= self._cache_expiry: return logo.copy()
-                else: del self._logo_cache[cache_key]
+                else: del self._logo_cache[cache_key] # Expired
             
-            sport = get_sport_category_for_path(league.upper())
+            sport = get_sport_category_for_path(league.upper()) # Standardize to uppercase for map lookup
             if not sport: 
-                logger.warning(f"Sport category not for league '{league}'. Default logo."); 
+                logger.warning(f"Sport category not found for league '{league}'. Attempting to use default logo."); 
                 return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
             
             fname = f"{league.lower().replace(' ', '_')}.png"; 
-            logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper())
+            logo_dir = os.path.join(self.LEAGUE_LOGO_BASE_DIR, sport, league.upper()) # Use sport category and uppercase league for path
             logo_path = os.path.join(logo_dir, fname); absolute_logo_path = os.path.abspath(logo_path)
             file_exists = os.path.exists(absolute_logo_path)
-            logger.info("Loading league logo - League:'%s',Path:'%s',Exists:%s", league, absolute_logo_path, file_exists)
+            logger.info("Loading league logo - League:'%s', Resolved Sport Category: '%s', Path:'%s', Exists:%s", league, sport, absolute_logo_path, file_exists)
             
             logo = None
             if file_exists:
@@ -412,45 +420,67 @@ class BetSlipGenerator:
                 except Exception as e: logger.error(f"Error opening league logo {absolute_logo_path}: {e}")
             
             if logo:
-                self._cleanup_cache()
+                self._cleanup_cache() # Perform cache cleanup if adding new item
                 if len(self._logo_cache) >= self._max_cache_size:
-                    oldest_key = min(self._logo_cache, key=lambda k: self._logo_cache[k][1]); del self._logo_cache[oldest_key]
-                self._logo_cache[cache_key] = (logo.copy(), now); return logo.copy()
+                    # Basic LRU-like eviction if max size reached
+                    oldest_key = min(self._logo_cache, key=lambda k: self._logo_cache[k][1])
+                    del self._logo_cache[oldest_key]
+                self._logo_cache[cache_key] = (logo.copy(), now) # Store copy in cache
+                return logo.copy() # Return a copy
                 
-            logger.warning(f"No logo for league {league} (path: {absolute_logo_path}). Defaulting."); 
+            logger.warning(f"No logo found for league {league} (path: {absolute_logo_path}). Attempting to use default logo."); 
             return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
         except Exception as e:
             logger.error(f"Error in _load_league_logo for {league}: {e}", exc_info=True)
             try: return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
-            except Exception as def_err: logger.error(f"Error loading default logo: {def_err}")
+            except Exception as def_err: logger.error(f"Error loading default logo during fallback: {def_err}")
             return None
 
     def _load_team_logo(self, team_name: str, league: str) -> Optional[Image.Image]:
         try:
             sport = get_sport_category_for_path(league.upper())
-            if not sport: logger.error(f"No sport for league: {league} (team: {team_name})"); return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
-            team_dir = self._ensure_team_dir_exists(league)
-            if not team_dir: return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
+            if not sport: 
+                logger.error(f"No sport category determined for league: {league} (when loading team: {team_name})"); 
+                return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
             
-            normalized_team_name = normalize_team_name(team_name)
-            logo_path = os.path.join(team_dir, f"{normalized_team_name}.png"); absolute_logo_path = os.path.abspath(logo_path)
-            logger.info(f"Attempting to load team logo: {absolute_logo_path}")
+            team_dir = self._ensure_team_dir_exists(league) # Uses league (e.g. NHL, NFL) for subdirectory
+            if not team_dir: 
+                return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
+            
+            normalized_team_name = normalize_team_name(team_name) # Uses mapping or simple normalization
+            logo_path = os.path.join(team_dir, f"{normalized_team_name}.png")
+            absolute_logo_path = os.path.abspath(logo_path)
+            logger.info(f"Attempting to load team logo: Team='{team_name}', Normalized='{normalized_team_name}', League='{league}', Sport='{sport}', Path='{absolute_logo_path}'")
 
-            if os.path.exists(absolute_logo_path): return Image.open(absolute_logo_path).convert("RGBA")
-            else: logger.warning(f"Team logo not found: {absolute_logo_path}. Using default."); return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
+            if os.path.exists(absolute_logo_path):
+                return Image.open(absolute_logo_path).convert("RGBA")
+            else:
+                logger.warning(f"Team logo not found: {absolute_logo_path}. Using default logo.");
+                return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
         except Exception as e:
-            logger.error(f"Error in _load_team_logo for {team_name} ({league}): {e}", exc_info=True)
-            try: return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
-            except Exception as def_err: logger.error(f"Error loading default team logo: {def_err}")
-            return None
+            logger.error(f"Error in _load_team_logo for {team_name} (league {league}): {e}", exc_info=True)
+            try:
+                return Image.open(self.DEFAULT_LOGO_PATH).convert("RGBA") if os.path.exists(self.DEFAULT_LOGO_PATH) else None
+            except Exception as def_err:
+                logger.error(f"Error loading default team logo during fallback: {def_err}")
+                return None
 
     def _ensure_team_dir_exists(self, league: str) -> Optional[str]:
         try:
-            sport = get_sport_category_for_path(league.upper())
-            if not sport: logger.error(f"No sport for league: {league}"); return None
-            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, sport, league.upper())
-            os.makedirs(team_dir, exist_ok=True); return team_dir
-        except Exception as e: logger.error(f"Error ensuring team directory for {league}: {e}", exc_info=True); return None
+            sport = get_sport_category_for_path(league.upper()) # Determine sport category (e.g., HOCKEY)
+            if not sport: 
+                logger.error(f"No sport category for league: {league} in _ensure_team_dir_exists"); 
+                return None
+            # Path should be like: static/logos/teams/HOCKEY/NHL/
+            team_dir = os.path.join(self.LEAGUE_TEAM_BASE_DIR, sport, league.upper()) 
+            os.makedirs(team_dir, exist_ok=True)
+            return team_dir
+        except Exception as e:
+            logger.error(f"Error ensuring team directory for league {league} (sport: {sport}): {e}", exc_info=True)
+            return None
     
-    def _normalize_team_name(self, team_name: str) -> str: return normalize_team_name(team_name) # DEPRECATED - Use global
-    def _format_odds_with_sign(self, odds: float) -> str: return f"+{int(odds)}" if odds > 0 else str(int(odds))
+    def _normalize_team_name(self, team_name: str) -> str: # DEPRECATED - Using global team_mappings.py
+        return normalize_team_name(team_name)
+
+    def _format_odds_with_sign(self, odds: float) -> str:
+        return f"+{int(odds)}" if odds > 0 else str(int(odds))
