@@ -1,3 +1,6 @@
+# api/sports_api.py
+# Service for fetching sports data from TheSportsDB API
+
 import logging
 import aiohttp
 import asyncio
