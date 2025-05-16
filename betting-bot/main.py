@@ -94,14 +94,24 @@ class BettingBot(commands.Bot):
             'setid.py',
             'stats.py',
         ]
+        loaded_commands = []
         for filename in cog_files:
-            if os.path.exists(os.path.join(commands_dir, filename)):
+            file_path = os.path.join(commands_dir, filename)
+            if os.path.exists(file_path):
                 extension = f'commands.{filename[:-3]}'
                 try:
                     await self.load_extension(extension)
+                    loaded_commands.append(extension)
                     logger.info('Successfully loaded extension: %s', extension)
                 except Exception as e:
                     logger.error("Failed to load extension %s: %s", extension, e, exc_info=True)
+            else:
+                logger.warning("Command file not found: %s", file_path)
+        
+        logger.info("Total loaded extensions: %s", loaded_commands)
+        # Verify commands after loading
+        commands_list = [cmd.name for cmd in self.tree.get_commands()]
+        logger.info("Available commands after loading: %s", commands_list)
 
     async def sync_commands_with_retry(self, guild: Optional[discord.Guild] = None, retries: int = 3, delay: int = 5):
         for attempt in range(1, retries + 1):
@@ -159,16 +169,25 @@ class BettingBot(commands.Bot):
             logger.debug("- %s (%s)", guild.name, guild.id)
         logger.info("Latency: %.2f ms", self.latency * 1000)
         try:
-            # Clear existing commands
-            self.tree.clear_commands(guild=None)
+            # Log all loaded commands before syncing
+            loaded_commands = [cmd.name for cmd in self.tree.get_commands()]
+            logger.info("Loaded commands before syncing: %s", loaded_commands)
             
-            # Sync global commands
+            # Sync global commands first
             synced = await self.tree.sync()
             logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
             
-            # Log all commands for debugging
+            # Sync specifically for Cookin' Books guild
+            cookin_books_guild = discord.Object(id=1328126227013439601)
+            self.tree.copy_global_to(guild=cookin_books_guild)
+            guild_synced = await self.tree.sync(guild=cookin_books_guild)
+            logger.info("Guild commands synced for Cookin' Books: %s", [cmd.name for cmd in guild_synced])
+            
+            # Verify commands after syncing
             global_commands = [cmd.name for cmd in self.tree.get_commands()]
-            logger.info("Global commands available: %s", global_commands)
+            guild_commands = [cmd.name for cmd in self.tree.get_commands(guild=cookin_books_guild)]
+            logger.info("Final global commands: %s", global_commands)
+            logger.info("Final guild commands for Cookin' Books: %s", guild_commands)
         except Exception as e:
             logger.error("Failed to sync command tree: %s", e, exc_info=True)
         logger.info('------ Bot is Ready ------')
