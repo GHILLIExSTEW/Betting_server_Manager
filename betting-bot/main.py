@@ -139,9 +139,13 @@ class BettingBot(commands.Bot):
             logger.critical("Database connection pool failed to initialize. Bot cannot continue.")
             await self.close()
             sys.exit("Database connection failed.")
+        
+        # Load extensions first
         await self.load_extensions()
         commands_list = [cmd.name for cmd in self.tree.get_commands()]
         logger.info("Registered commands before syncing: %s", commands_list)
+        
+        # Start services
         logger.info("Starting services...")
         service_starts = [
             self.admin_service.start(),
@@ -168,36 +172,24 @@ class BettingBot(commands.Bot):
         for guild in self.guilds:
             logger.debug("- %s (%s)", guild.name, guild.id)
         logger.info("Latency: %.2f ms", self.latency * 1000)
+        
         try:
-            # Get current commands before clearing
+            # Get current commands
             current_commands = [cmd.name for cmd in self.tree.get_commands()]
             logger.info("Current commands before sync: %s", current_commands)
             
-            # Clear existing commands
-            self.tree.clear_commands(guild=None)
-            logger.info("Cleared existing global commands")
-            
-            # Clear guild-specific commands
-            cookin_books_guild = discord.Object(id=1328126227013439601)
-            self.tree.clear_commands(guild=cookin_books_guild)
-            logger.info("Cleared existing guild commands")
-            
-            # Reload all commands
-            await self.load_extensions()
-            
-            # Verify commands are loaded
-            loaded_commands = [cmd.name for cmd in self.tree.get_commands()]
-            logger.info("Commands after reloading: %s", loaded_commands)
-            
-            if not loaded_commands:
-                logger.error("No commands loaded after reloading extensions!")
-                return
+            if not current_commands:
+                logger.error("No commands found! Reloading extensions...")
+                await self.load_extensions()
+                current_commands = [cmd.name for cmd in self.tree.get_commands()]
+                logger.info("Commands after reloading: %s", current_commands)
             
             # Sync global commands
             synced = await self.tree.sync()
             logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
             
             # Sync to Cookin' Books guild
+            cookin_books_guild = discord.Object(id=1328126227013439601)
             try:
                 # Copy global commands to guild
                 self.tree.copy_global_to(guild=cookin_books_guild)
