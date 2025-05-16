@@ -90,7 +90,6 @@ class BettingBot(commands.Bot):
         cog_files = [
             'admin.py',
             'betting.py',
-            'load_logos.py',
             'remove_user.py',
             'setid.py',
             'stats.py',
@@ -163,23 +162,13 @@ class BettingBot(commands.Bot):
             # Clear existing commands
             self.tree.clear_commands(guild=None)
             
-            # Register commands for Cookin' Books guild
-            cookin_books_guild = discord.Object(id=1328126227013439601)
-            self.tree.clear_commands(guild=cookin_books_guild)
-            
-            # First sync global commands
+            # Sync global commands
             synced = await self.tree.sync()
             logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
             
-            # Then sync guild commands for Cookin' Books
-            synced = await self.tree.sync(guild=cookin_books_guild)
-            logger.info("Guild commands synced for Cookin' Books: %s", [cmd.name for cmd in synced])
-            
             # Log all commands for debugging
             global_commands = [cmd.name for cmd in self.tree.get_commands()]
-            guild_commands = [cmd.name for cmd in self.tree.get_commands(guild=cookin_books_guild)]
             logger.info("Global commands available: %s", global_commands)
-            logger.info("Guild commands available for Cookin' Books: %s", guild_commands)
         except Exception as e:
             logger.error("Failed to sync command tree: %s", e, exc_info=True)
         logger.info('------ Bot is Ready ------')

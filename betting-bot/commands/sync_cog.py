@@ -29,23 +29,13 @@ class SyncCog(commands.Cog):
             # Clear existing commands
             self.bot.tree.clear_commands(guild=None)
             
-            # Register commands for Cookin' Books guild
-            cookin_books_guild = discord.Object(id=1328126227013439601)
-            self.bot.tree.clear_commands(guild=cookin_books_guild)
-            
-            # First sync global commands
+            # Sync global commands
             synced = await self.bot.tree.sync()
             logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
             
-            # Then sync guild commands for Cookin' Books
-            synced = await self.bot.tree.sync(guild=cookin_books_guild)
-            logger.info("Guild commands synced for Cookin' Books: %s", [cmd.name for cmd in synced])
-            
             # Log all commands for debugging
             global_commands = [cmd.name for cmd in self.bot.tree.get_commands()]
-            guild_commands = [cmd.name for cmd in self.bot.tree.get_commands(guild=cookin_books_guild)]
             logger.info("Global commands available: %s", global_commands)
-            logger.info("Guild commands available for Cookin' Books: %s", guild_commands)
 
             await interaction.followup.send(
                 "Commands synced successfully!", ephemeral=True
