@@ -29,13 +29,12 @@ class SyncCog(commands.Cog):
             # Clear existing commands
             self.bot.tree.clear_commands(guild=None)
             
-            # Sync global commands
+            # First sync global commands
             await self.bot.sync_commands_with_retry()
             
-            # For Cookin' Books, copy global commands and sync load_logos
+            # For Cookin' Books, sync all commands including load_logos
             if interaction.guild_id == 1328126227013439601:
                 cookin_books_guild = discord.Object(id=1328126227013439601)
-                self.bot.tree.copy_global_to(guild=cookin_books_guild)
                 await self.bot.tree.sync(guild=cookin_books_guild)
 
             await interaction.followup.send(
