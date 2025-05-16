@@ -13,6 +13,44 @@ from typing import Optional
 import subprocess
 from datetime import datetime, timezone
 
+# --- Logging Setup ---
+log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+log_format = os.getenv('LOG_FORMAT', '%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # This is betting-bot/
+log_file_name = 'bot_activity.log'
+log_file_path = os.path.join(BASE_DIR, 'logs', log_file_name) if not os.path.isabs(os.getenv('LOG_FILE', '')) else os.getenv('LOG_FILE', os.path.join(BASE_DIR, 'logs', log_file_name))
+
+log_dir = os.path.dirname(log_file_path)
+if log_dir and not os.path.exists(log_dir):
+    os.makedirs(log_dir, exist_ok=True)
+
+logging.basicConfig(
+    level=log_level,
+    format=log_format,
+    handlers=[
+        logging.FileHandler(log_file_path, encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+discord_logger = logging.getLogger('discord')
+discord_logger.setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
+
+# --- Path Setup ---
+DOTENV_PATH = os.path.join(BASE_DIR, '.env')
+
+if os.path.exists(DOTENV_PATH):
+    load_dotenv(dotenv_path=DOTENV_PATH)
+    print(f"Loaded environment variables from: {DOTENV_PATH}")
+else:
+    PARENT_DOTENV_PATH = os.path.join(os.path.dirname(BASE_DIR), '.env')
+    if os.path.exists(PARENT_DOTENV_PATH):
+        load_dotenv(dotenv_path=PARENT_DOTENV_PATH)
+        print(f"Loaded environment variables from: {PARENT_DOTENV_PATH}")
+    else:
+        print(f"WARNING: .env file not found at {DOTENV_PATH} or {PARENT_DOTENV_PATH}")
+
 from data.db_manager import DatabaseManager
 from services.admin_service import AdminService
 from services.analytics_service import AnalyticsService
@@ -33,48 +71,9 @@ except ModuleNotFoundError as e:
             "Betting commands and game data fetching will be disabled. "
             "Please install thesportsdb==0.2.1 to enable full functionality."
         )
-        GameService = None  # Set to None to skip GameService initialization
+        GameService = None
     else:
-        raise  # Re-raise other import errors
-
-# --- Path Setup ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # This is betting-bot/
-DOTENV_PATH = os.path.join(BASE_DIR, '.env')
-
-if os.path.exists(DOTENV_PATH):
-    load_dotenv(dotenv_path=DOTENV_PATH)
-    print(f"Loaded environment variables from: {DOTENV_PATH}")
-else:
-    # If main.py is in betting-bot/ and .env is in Betting_server_Manager-master/
-    PARENT_DOTENV_PATH = os.path.join(os.path.dirname(BASE_DIR), '.env')
-    if os.path.exists(PARENT_DOTENV_PATH):
-        load_dotenv(dotenv_path=PARENT_DOTENV_PATH)
-        print(f"Loaded environment variables from: {PARENT_DOTENV_PATH}")
-    else:
-        print(f"WARNING: .env file not found at {DOTENV_PATH} or {PARENT_DOTENV_PATH}")
-
-# --- Logging Setup ---
-log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
-log_level = getattr(logging, log_level_str, logging.INFO)
-log_format = os.getenv('LOG_FORMAT', '%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-log_file_name = 'bot_activity.log'
-log_file_path = os.path.join(BASE_DIR, 'logs', log_file_name) if not os.path.isabs(os.getenv('LOG_FILE', '')) else os.getenv('LOG_FILE', os.path.join(BASE_DIR, 'logs', log_file_name))
-
-log_dir = os.path.dirname(log_file_path)
-if log_dir and not os.path.exists(log_dir):
-    os.makedirs(log_dir, exist_ok=True)
-
-logging.basicConfig(
-    level=log_level,
-    format=log_format,
-    handlers=[
-        logging.FileHandler(log_file_path, encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-discord_logger = logging.getLogger('discord')
-discord_logger.setLevel(logging.WARNING)
-logger = logging.getLogger(__name__)
+        raise
 
 # --- Environment Variable Access ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -165,7 +164,6 @@ class BettingBot(commands.Bot):
             file_path = os.path.join(commands_dir, filename)
             if os.path.exists(file_path):
                 extension = f'commands.{filename[:-3]}'
-                # Skip betting.py if GameService is unavailable
                 if filename == 'betting.py' and self.game_service is None:
                     logger.warning("Skipping betting.py extension due to missing GameService (thesportsdb not installed)")
                     continue
@@ -334,46 +332,4 @@ class SyncCog(commands.Cog):
     async def sync_command(self, interaction: discord.Interaction):
         logger.info("Manual sync initiated by %s in guild %s", interaction.user, interaction.guild_id)
         try:
-            await interaction.response.defer(ephemeral=True)
-            commands_list = [cmd.name for cmd in self.bot.tree.get_commands()]
-            logger.debug("Commands to sync: %s", commands_list)
-            await self.bot.sync_commands_with_retry()
-            await interaction.followup.send("Global commands synced successfully!", ephemeral=True)
-        except Exception as e:
-            logger.error("Failed to sync commands: %s", e, exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"Failed to sync commands: {e}", ephemeral=True)
-            else:
-                await interaction.followup.send(f"Failed to sync commands: {e}", ephemeral=True)
-
-async def setup_sync_cog(bot: BettingBot):
-    await bot.add_cog(SyncCog(bot))
-    logger.info("SyncCog loaded")
-
-# --- Main Execution ---
-def main():
-    bot = BettingBot()
-    async def run_bot():
-        await setup_sync_cog(bot)
-        await bot.start(BOT_TOKEN)
-    try:
-        logger.info("Starting bot...")
-        asyncio.run(run_bot())
-    except discord.LoginFailure:
-        logger.critical("Login failed: Invalid Discord token provided in .env file.")
-    except discord.PrivilegedIntentsRequired as e:
-        shard_id_info = f" (Shard ID: {e.shard_id})" if e.shard_id else ""
-        logger.critical("Privileged Intents%s are required but not enabled in the Discord Developer Portal.", shard_id_info)
-        logger.critical("Enable 'Presence Intent', 'Server Members Intent', and 'Message Content Intent'.")
-    except KeyboardInterrupt:
-        logger.info("Bot shutdown requested via KeyboardInterrupt.")
-    except Exception as e:
-        logger.critical("An unexpected error occurred while running the bot: %s", e, exc_info=True)
-    finally:
-        if bot.is_closed() is False:
-            logger.info("Ensuring bot is closed in main finally block.")
-            asyncio.run(bot.close())
-        logger.info("Bot process finished.")
-
-if __name__ == '__main__':
-    main()
+            await interaction.response.defer
