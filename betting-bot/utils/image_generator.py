@@ -236,10 +236,11 @@ class BetSlipGenerator:
         
         if line:
             line_w, line_h = self._get_text_dimensions(line, line_font)
+            y += 10  # Extra space after team names, before line
             draw.text((center_x, y), line, font=line_font, fill=text_color, anchor="mt")
-            y += line_h + 12
+            y += line_h + 24  # More space after line, before separator
 
-        draw.line([(self.padding + 20, y), (image_width - self.padding - 20, y)], fill=divider_color, width=2); y += 12
+        draw.line([(self.padding + 20, y), (image_width - self.padding - 20, y)], fill=divider_color, width=2); y += 18  # More space after separator
 
         odds_text = self._format_odds_with_sign(odds)
         odds_w, odds_h = self._get_text_dimensions(odds_text, odds_font)
