@@ -105,17 +105,13 @@ class DatabaseManager:
         rowcount = None
         try:
             async with pool.acquire() as conn:
-                # Ensure autocommit is handled correctly per connection if needed,
-                # though pool setting should manage it.
                 async with conn.cursor() as cursor:
                     rowcount = await cursor.execute(query, flat_args)
-                    # Try to get lastrowid specifically after INSERTs that affected rows
-                    # Note: behavior might differ for multi-row inserts
                     if rowcount is not None and rowcount > 0 and query.strip().upper().startswith("INSERT"):
                          last_id = cursor.lastrowid
-                    # Explicitly commit if autocommit=False for the pool/connection
-                    # await conn.commit() # Only if autocommit is False
-            # Return both rowcount and lastrowid
+                    # Explicitly commit after any write operation
+                    if query.strip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
+                        await conn.commit()
             return rowcount, last_id
         except Exception as e:
             logger.error(f"Error executing query: {query} Args: {flat_args}. Error: {e}", exc_info=True)
