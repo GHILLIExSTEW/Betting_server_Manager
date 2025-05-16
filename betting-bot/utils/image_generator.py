@@ -162,7 +162,7 @@ class BetSlipGenerator:
 
     def _draw_teams_section(self, img: Image.Image, draw: ImageDraw.Draw, image_width: int, home_team: str, away_team: str, home_logo: Optional[Image.Image], away_logo: Optional[Image.Image]):
         y_base = 85
-        logo_size = (70, 70)
+        logo_size = (120, 120)
         text_y_offset = logo_size[1] + 8
         team_name_font = self.fonts['font_b_24']
         text_color = 'white'

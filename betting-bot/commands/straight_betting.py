@@ -843,12 +843,26 @@ class StraightBetWorkflowView(View):
                 self.stop()
                 return
 
+            # First verify the bet exists
+            bet_exists = await self.bot.db_manager.fetchval(
+                "SELECT 1 FROM bets WHERE bet_serial = %s",
+                (current_bet_serial,)
+            )
+            
+            if not bet_exists:
+                logger.error(f"Bet {current_bet_serial} not found in database.")
+                await interaction.followup.send("Error: Bet not found in database.", ephemeral=True)
+                self.stop()
+                return
+
+            # Update the units
             rowcount, _ = await self.bot.db_manager.execute(
                 "UPDATE bets SET units = %s WHERE bet_serial = %s",
                 (units, current_bet_serial)
             )
-            if not rowcount:
-                logger.error(f"Failed to update units for bet {current_bet_serial} in DB. Bet might not exist.")
+            
+            if rowcount == 0:
+                logger.error(f"Failed to update units for bet {current_bet_serial} in DB.")
                 await interaction.followup.send("Error: Could not update units for the bet.", ephemeral=True)
                 self.stop()
                 return
