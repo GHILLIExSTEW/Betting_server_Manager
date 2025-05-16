@@ -229,6 +229,7 @@ async def setup(bot: commands.Bot):
         logger.warning("LoadLogosCog not loaded: TEST_GUILD_ID missing or invalid in .env.")
         return
     
-    # Register the cog globally but restrict usage to TEST_GUILD_ID
-    await bot.add_cog(LoadLogosCog(bot))
-    logger.info(f"LoadLogosCog loaded globally with usage restricted to guild {TEST_GUILD_ID}")
+    # Register the cog as a guild command for Cookin' Books
+    guild = discord.Object(id=TEST_GUILD_ID)
+    await bot.add_cog(LoadLogosCog(bot), guilds=[guild])
+    logger.info(f"LoadLogosCog loaded as guild command for guild {TEST_GUILD_ID}")

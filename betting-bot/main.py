@@ -168,16 +168,18 @@ class BettingBot(commands.Bot):
             self.tree.clear_commands(guild=cookin_books_guild)
             
             # First sync global commands
-            await self.sync_commands_with_retry()
+            synced = await self.tree.sync()
+            logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
             
-            # Copy global commands to Cookin' Books
-            self.tree.copy_global_to(guild=cookin_books_guild)
+            # Then sync guild commands for Cookin' Books
+            synced = await self.tree.sync(guild=cookin_books_guild)
+            logger.info("Guild commands synced for Cookin' Books: %s", [cmd.name for cmd in synced])
             
-            # Sync guild commands for Cookin' Books
-            await self.tree.sync(guild=cookin_books_guild)
-            
-            commands_list = [cmd.name for cmd in self.tree.get_commands()]
-            logger.info("Commands available after sync: %s", commands_list)
+            # Log all commands for debugging
+            global_commands = [cmd.name for cmd in self.tree.get_commands()]
+            guild_commands = [cmd.name for cmd in self.tree.get_commands(guild=cookin_books_guild)]
+            logger.info("Global commands available: %s", global_commands)
+            logger.info("Guild commands available for Cookin' Books: %s", guild_commands)
         except Exception as e:
             logger.error("Failed to sync command tree: %s", e, exc_info=True)
         logger.info('------ Bot is Ready ------')
