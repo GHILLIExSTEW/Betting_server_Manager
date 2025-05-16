@@ -273,6 +273,9 @@ class BetSlipGenerator:
         if can_draw_lock:
             self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color, draw_it=True)
 
+        y += units_text_part_h + 30  # Add extra space after units before footer
+        return y
+
     def _draw_parlay_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool, img: Image.Image, team_logos: List[Optional[Image.Image]]):
         y = 85
         center_x = image_width / 2
@@ -467,8 +470,8 @@ class BetSlipGenerator:
                 self._draw_footer(draw, width, y_end + self.padding, bet_id, timestamp)
             else:
                 self._draw_teams_section(img, draw, width, home_team, away_team, home_logo_pil, away_logo_pil)
-                self._draw_straight_details(draw, width, height, line, odds, units, bet_id, timestamp, img)
-                self._draw_footer(draw, width, height, bet_id, timestamp)
+                y_end = self._draw_straight_details(draw, width, height, line, odds, units, bet_id, timestamp, img)
+                self._draw_footer(draw, width, y_end + self.padding, bet_id, timestamp)
 
             logger.info(f"Bet slip generated OK for bet ID: {bet_id}")
             return img.convert("RGB")
