@@ -172,6 +172,20 @@ class BettingBot(commands.Bot):
         logger.info("Bot setup_hook completed successfully - commands will be synced in on_ready")
 
     async def on_ready(self):
+        # --- ONE-TIME COMMAND CLEANUP: Remove after running once! ---
+        logger.info('Running one-time global command cleanup...')
+        # Clear global commands
+        await self.tree.clear_commands(guild=None)
+        # Clear per-guild commands for all guilds
+        for guild in self.guilds:
+            await self.tree.clear_commands(guild=guild)
+        # Sync only global commands
+        await self.tree.sync()
+        logger.info('Cleared all commands and synced only global commands. Please remove this block after confirming fix.')
+        # Optionally, exit after cleanup to avoid running the bot twice
+        import sys
+        sys.exit('One-time command cleanup complete. Please remove the cleanup code from main.py.')
+        # --- END ONE-TIME CLEANUP ---
         logger.info('Logged in as %s (%s)', self.user.name, self.user.id)
         logger.info("discord.py API version: %s", discord.__version__)
         logger.info("Python version: %s", sys.version)
