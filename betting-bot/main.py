@@ -118,10 +118,17 @@ class BettingBot(commands.Bot):
             try:
                 if guild:
                     guild_obj = discord.Object(id=guild.id)
+                    # Clear existing guild commands first
+                    self.tree.clear_commands(guild=guild_obj)
+                    # Copy global commands to guild
                     self.tree.copy_global_to(guild=guild_obj)
+                    # Sync guild commands
                     synced = await self.tree.sync(guild=guild_obj)
                     logger.info("Commands synced to guild %s: %s", guild.id, [cmd.name for cmd in synced])
                 else:
+                    # Clear existing global commands first
+                    self.tree.clear_commands(guild=None)
+                    # Sync global commands
                     synced = await self.tree.sync()
                     logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
                 return True
@@ -133,6 +140,7 @@ class BettingBot(commands.Bot):
         return False
 
     async def setup_hook(self):
+        """Initialize the bot and load extensions."""
         logger.info("Starting setup_hook...")
         await self.db_manager.connect()
         if not self.db_manager._pool:
@@ -142,8 +150,10 @@ class BettingBot(commands.Bot):
         
         # Load extensions first
         await self.load_extensions()
-        commands_list = [cmd.name for cmd in self.tree.get_commands()]
-        logger.info("Registered commands before syncing: %s", commands_list)
+        
+        # Log registered commands
+        commands = [cmd.name for cmd in self.tree.get_commands()]
+        logger.info("Registered commands: %s", commands)
         
         # Start services
         logger.info("Starting services...")
@@ -162,7 +172,7 @@ class BettingBot(commands.Bot):
                 service_name = service_starts[i].__self__.__class__.__name__ if hasattr(service_starts[i], '__self__') else f"Service {i}"
                 logger.error("Error starting %s: %s", service_name, result, exc_info=True)
         logger.info("Services startup initiated.")
-        logger.info("Bot setup_hook completed successfully.")
+        logger.info("Bot setup_hook completed successfully - commands will be synced in on_ready")
 
     async def on_ready(self):
         logger.info('Logged in as %s (%s)', self.user.name, self.user.id)
@@ -184,9 +194,13 @@ class BettingBot(commands.Bot):
                 current_commands = [cmd.name for cmd in self.tree.get_commands()]
                 logger.info("Commands after reloading: %s", current_commands)
             
-            # Sync global commands
-            synced = await self.tree.sync()
-            logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
+            # Sync global commands first
+            try:
+                synced = await self.tree.sync()
+                logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
+            except Exception as e:
+                logger.error("Failed to sync global commands: %s", e)
+                return
             
             # Sync to Cookin' Books guild
             cookin_books_guild = discord.Object(id=1328126227013439601)
