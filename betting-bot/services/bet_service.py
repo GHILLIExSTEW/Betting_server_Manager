@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import discord
 import json
+import asyncio
 
 # Use relative imports if possible
 try:
@@ -540,15 +541,16 @@ class BetService:
                  # Use INSERT ... ON DUPLICATE KEY UPDATE to handle existing records for the bet
                  unit_query = """
                      INSERT INTO unit_records (
-                         bet_serial, guild_id, user_id, year, month, units, odds, monthly_result_value, created_at
-                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         bet_serial, guild_id, user_id, year, month, units, odds, monthly_result_value, yearly_result_value, created_at
+                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                      ON DUPLICATE KEY UPDATE
                          monthly_result_value = VALUES(monthly_result_value),
+                         yearly_result_value = VALUES(yearly_result_value),
                          created_at = VALUES(created_at) # Update timestamp on resolve
                  """
                  unit_params = (
                      bet_serial, bet_data['guild_id'], bet_data['user_id'], year, month,
-                     units_staked, odds, result_value,
+                     units_staked, odds, result_value, result_value,
                      update_time # Use the same timestamp as status update
                  )
                  await self.db_manager.execute(unit_query, unit_params)
