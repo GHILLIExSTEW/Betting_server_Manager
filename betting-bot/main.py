@@ -170,7 +170,21 @@ class BettingBot(commands.Bot):
         for guild in self.guilds:
             logger.debug("- %s (%s)", guild.name, guild.id)
         logger.info("Latency: %.2f ms", self.latency * 1000)
-        
+
+        # --- ONE-TIME COMMAND CLEANUP: Remove after running once! ---
+        logger.info('Running one-time global and per-guild command cleanup...')
+        # Clear global commands (do not await)
+        self.tree.clear_commands(guild=None)
+        # Clear per-guild commands for all guilds
+        for guild in self.guilds:
+            await self.tree.clear_commands(guild=guild)
+        # Sync only global commands
+        await self.tree.sync()
+        logger.info('Cleared all commands and synced only global commands. Please remove this block after confirming fix.')
+        import sys
+        sys.exit('One-time command cleanup complete. Please remove this block from on_ready.')
+        # --- END CLEANUP BLOCK ---
+
         try:
             # Get current commands
             current_commands = [cmd.name for cmd in self.tree.get_commands()]
@@ -200,8 +214,7 @@ class BettingBot(commands.Bot):
 
     async def on_guild_join(self, guild: discord.Guild):
         logger.info("Joined new guild: %s (%s)", guild.name, guild.id)
-        if guild.id == 1328126227013439601:
-            await self.sync_commands_with_retry(guild=guild)
+        # No command syncing on guild join - we only use global commands
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         if payload.user_id == self.user.id:
@@ -263,10 +276,9 @@ class SyncCog(commands.Cog):
             await interaction.response.defer(ephemeral=True)
             commands_list = [cmd.name for cmd in self.bot.tree.get_commands()]
             logger.debug("Commands to sync: %s", commands_list)
+            # Only sync global commands
             await self.bot.sync_commands_with_retry()
-            if interaction.guild_id == 1328126227013439601:
-                await self.bot.sync_commands_with_retry(guild=interaction.guild)
-            await interaction.followup.send("Commands synced successfully!", ephemeral=True)
+            await interaction.followup.send("Global commands synced successfully!", ephemeral=True)
         except Exception as e:
             logger.error("Failed to sync commands: %s", e, exc_info=True)
             if not interaction.response.is_done():
