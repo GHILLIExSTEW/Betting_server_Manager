@@ -1,21 +1,35 @@
 # download_team_logos.py
-import csv
+import sys
 import os
+
+# Adjust Python's import path to include the 'betting-bot' directory
+# This allows 'from config.asset_paths' to work when the script is in betting-bot/utils/
+# and run with betting-bot/ as the CWD.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) # utils/
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR) # betting-bot/
+
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# Now your regular imports should work
+import csv
 import requests
 import time
 import logging
 from io import BytesIO
 from PIL import Image, UnidentifiedImageError
 
-# Assuming this script is in betting-bot/utils/ or similar, adjust path to root
-# Or ensure your PYTHONPATH includes the betting-bot directory
 try:
     from config.asset_paths import SPORT_CATEGORIES, DEFAULT_FALLBACK_CATEGORY
-    from config.leagues import LEAGUE_IDS # Contains league name to sport mapping
-    from config.team_mappings import normalize_team_name # For sanitizing team names
-except ImportError:
-    print("Error: Could not import from config package. Make sure this script is run from the 'betting-bot' directory or your PYTHONPATH is set correctly.")
-    exit()
+    from config.leagues import LEAGUE_IDS
+    from config.team_mappings import normalize_team_name
+except ImportError as e:
+    # This print will go to stderr because of the exit code
+    print(f"CRITICAL ERROR: Could not import from config package: {e}. "
+          f"Ensure this script is in a subdirectory of 'betting-bot' (e.g., utils/) "
+          f"and that the 'config' package is in 'betting-bot/config/'. "
+          f"PROJECT_ROOT was: {PROJECT_ROOT}", file=sys.stderr)
+    sys.exit(1) # IMPORTANT: Exit with a non-zero code for errors
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
