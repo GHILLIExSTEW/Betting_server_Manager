@@ -176,9 +176,9 @@ class BettingBot(commands.Bot):
         logger.info('Running one-time global command cleanup...')
         # Clear global commands (do NOT await)
         self.tree.clear_commands(guild=None)
-        # Clear per-guild commands for all guilds (await these)
+        # Clear per-guild commands for all guilds (do NOT await)
         for guild in self.guilds:
-            await self.tree.clear_commands(guild=guild)
+            self.tree.clear_commands(guild=guild)
         # Sync only global commands
         await self.tree.sync()
         logger.info('Cleared all commands and synced only global commands. Please remove this block after confirming fix.')
