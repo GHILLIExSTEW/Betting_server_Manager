@@ -135,8 +135,12 @@ class SportsAPI:
             with open(json_file_path, "r") as f:
                 events_data = json.load(f)
 
-            if not events_data or "events" not in events_data:
-                logger.warning(f"No events in JSON file: {json_file_path}")
+            if (
+                not events_data
+                or "events" not in events_data
+                or not events_data["events"]
+            ):
+                logger.warning(f"No events in JSON file or 'events' is null/empty: {json_file_path}")
                 return
 
             # Map league to sport
