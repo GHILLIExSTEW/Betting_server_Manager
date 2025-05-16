@@ -17,6 +17,9 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Log successful import of thesportsdb
+logger.info("Successfully imported thesportsdb module")
+
 class SportsAPI:
     def __init__(self, db_path: str = "data/betting.db"):
         self.session: Optional[aiohttp.ClientSession] = None
@@ -25,17 +28,22 @@ class SportsAPI:
         # Set TheSportsDB API key
         if self.api_key:
             os.environ["THESPORTSDB_API_KEY"] = self.api_key
+            logger.info("TheSportsDB API key set successfully")
+        else:
+            logger.warning("No API_KEY found in .env; using default TheSportsDB free API")
 
     async def start(self):
         """Initialize the API client session."""
         if not self.session:
             self.session = aiohttp.ClientSession()
+        logger.info("SportsAPI session started")
 
     async def close(self):
         """Close the API client session."""
         if self.session:
             await self.session.close()
             self.session = None
+        logger.info("SportsAPI session closed")
 
     async def get_live_fixtures(self, league: str) -> List[Dict]:
         """Get live fixtures for a specific league."""
@@ -62,6 +70,7 @@ class SportsAPI:
                 }
                 for event in events_data["events"][:25]  # Limit to 25 as per original
             ]
+            logger.debug(f"Fetched {len(fixtures)} fixtures for league {league}")
             return fixtures
 
         except Exception as e:
