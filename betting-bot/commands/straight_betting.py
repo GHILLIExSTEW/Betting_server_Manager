@@ -843,29 +843,32 @@ class StraightBetWorkflowView(View):
                 self.stop()
                 return
 
-            # First verify the bet exists
-            bet_exists = await self.bot.db_manager.fetchval(
-                "SELECT 1 FROM bets WHERE bet_serial = %s",
+            # First verify the bet exists and get current units
+            current_units = await self.bot.db_manager.fetchval(
+                "SELECT units FROM bets WHERE bet_serial = %s",
                 (current_bet_serial,)
             )
             
-            if not bet_exists:
+            if current_units is None:
                 logger.error(f"Bet {current_bet_serial} not found in database.")
                 await interaction.followup.send("Error: Bet not found in database.", ephemeral=True)
                 self.stop()
                 return
 
-            # Update the units
-            rowcount, _ = await self.bot.db_manager.execute(
-                "UPDATE bets SET units = %s WHERE bet_serial = %s",
-                (units, current_bet_serial)
-            )
-            
-            if rowcount == 0:
-                logger.error(f"Failed to update units for bet {current_bet_serial} in DB.")
-                await interaction.followup.send("Error: Could not update units for the bet.", ephemeral=True)
-                self.stop()
-                return
+            # Only update if units have changed
+            if current_units != units:
+                rowcount, _ = await self.bot.db_manager.execute(
+                    "UPDATE bets SET units = %s WHERE bet_serial = %s",
+                    (units, current_bet_serial)
+                )
+                
+                if rowcount == 0:
+                    logger.error(f"Failed to update units for bet {current_bet_serial} in DB.")
+                    await interaction.followup.send("Error: Could not update units for the bet.", ephemeral=True)
+                    self.stop()
+                    return
+            else:
+                logger.debug(f"Units unchanged for bet {current_bet_serial} ({units}). Skipping update.")
 
             self.bet_details['units'] = units
             self.bet_details['units_str'] = str(units)
