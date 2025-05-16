@@ -169,7 +169,11 @@ class BettingBot(commands.Bot):
             logger.debug("- %s (%s)", guild.name, guild.id)
         logger.info("Latency: %.2f ms", self.latency * 1000)
         try:
-            # Clear existing commands first
+            # Get current commands before clearing
+            current_commands = [cmd.name for cmd in self.tree.get_commands()]
+            logger.info("Current commands before sync: %s", current_commands)
+            
+            # Clear existing commands
             self.tree.clear_commands(guild=None)
             logger.info("Cleared existing global commands")
             
@@ -178,41 +182,45 @@ class BettingBot(commands.Bot):
             self.tree.clear_commands(guild=cookin_books_guild)
             logger.info("Cleared existing guild commands")
             
-            # Log all loaded commands before syncing
-            loaded_commands = [cmd.name for cmd in self.tree.get_commands()]
-            logger.info("Loaded commands before syncing: %s", loaded_commands)
+            # Reload all commands
+            await self.load_extensions()
             
-            # Sync global commands first
+            # Verify commands are loaded
+            loaded_commands = [cmd.name for cmd in self.tree.get_commands()]
+            logger.info("Commands after reloading: %s", loaded_commands)
+            
+            if not loaded_commands:
+                logger.error("No commands loaded after reloading extensions!")
+                return
+            
+            # Sync global commands
             synced = await self.tree.sync()
             logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
             
-            # Special handling for Cookin' Books guild
+            # Sync to Cookin' Books guild
             try:
-                # First try to sync directly to the guild
-                guild_synced = await self.tree.sync(guild=cookin_books_guild)
-                logger.info("Direct guild sync successful: %s", [cmd.name for cmd in guild_synced])
-            except discord.HTTPException as e:
-                logger.warning("Direct guild sync failed, trying alternative method: %s", e)
-                # If direct sync fails, try copying global commands first
+                # Copy global commands to guild
                 self.tree.copy_global_to(guild=cookin_books_guild)
+                # Sync guild commands
                 guild_synced = await self.tree.sync(guild=cookin_books_guild)
-                logger.info("Alternative guild sync successful: %s", [cmd.name for cmd in guild_synced])
+                logger.info("Guild commands synced for Cookin' Books: %s", [cmd.name for cmd in guild_synced])
+            except Exception as e:
+                logger.error("Failed to sync guild commands: %s", e)
+                # Try alternative sync method
+                try:
+                    guild_synced = await self.tree.sync(guild=cookin_books_guild)
+                    logger.info("Alternative guild sync successful: %s", [cmd.name for cmd in guild_synced])
+                except Exception as e:
+                    logger.error("Alternative guild sync failed: %s", e)
             
-            # Verify commands after syncing
+            # Final verification
             global_commands = [cmd.name for cmd in self.tree.get_commands()]
             guild_commands = [cmd.name for cmd in self.tree.get_commands(guild=cookin_books_guild)]
             logger.info("Final global commands: %s", global_commands)
             logger.info("Final guild commands for Cookin' Books: %s", guild_commands)
             
-            # Additional verification for Cookin' Books guild
             if not guild_commands:
                 logger.error("No commands found for Cookin' Books guild after syncing!")
-                # Try one final sync attempt
-                try:
-                    final_sync = await self.tree.sync(guild=cookin_books_guild)
-                    logger.info("Final sync attempt successful: %s", [cmd.name for cmd in final_sync])
-                except Exception as e:
-                    logger.error("Final sync attempt failed: %s", e)
         except Exception as e:
             logger.error("Failed to sync command tree: %s", e, exc_info=True)
         logger.info('------ Bot is Ready ------')
