@@ -171,19 +171,6 @@ class BettingBot(commands.Bot):
             logger.debug("- %s (%s)", guild.name, guild.id)
         logger.info("Latency: %.2f ms", self.latency * 1000)
 
-        # --- ONE-TIME COMMAND CLEANUP: Remove after running once! ---
-        logger.info('Running one-time global and per-guild command cleanup...')
-        # Clear global commands (do not await)
-        self.tree.clear_commands(guild=None)
-        # Clear per-guild commands for all guilds
-        for guild in self.guilds:
-            self.tree.clear_commands(guild=guild)
-        # Sync only global commands
-        await self.tree.sync()
-        logger.info('Cleared all commands and synced only global commands. Please remove this block after confirming fix.')
-        sys.exit('One-time command cleanup complete. Please remove this block from on_ready.')
-        # --- END CLEANUP BLOCK ---
-
         try:
             # Get current commands
             current_commands = [cmd.name for cmd in self.tree.get_commands()]
