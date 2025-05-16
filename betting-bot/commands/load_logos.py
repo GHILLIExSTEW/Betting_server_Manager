@@ -85,12 +85,7 @@ def process_and_save_logo(
             potential_assets_dir = os.path.join(betting_bot_dir, 'assets')
             potential_static_dir = os.path.join(betting_bot_dir, 'static')
 
-            final_save_root = potential_assets_dir # Prefer 'assets'
-            # This check is runtime for the bot; here we assume 'assets' is the target.
-            # If your deployment uses 'static', adjust this logic or make it configurable.
-            # if not os.path.isdir(potential_assets_dir) and os.path.isdir(potential_static_dir):
-            # final_save_root = potential_static_dir
-            
+            final_save_root = potential_static_dir
             logos_base_dir = os.path.join(final_save_root, 'logos')
 
             if is_league:

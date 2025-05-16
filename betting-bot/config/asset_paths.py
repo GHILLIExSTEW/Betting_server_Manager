@@ -9,9 +9,9 @@ logger = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 FONT_DIR = os.path.join(ASSETS_DIR, "fonts")
-LOGO_DIR = os.path.join(ASSETS_DIR, "logos")
-TEAMS_SUBDIR = os.path.join(LOGO_DIR, "teams")
-LEAGUES_SUBDIR = os.path.join(LOGO_DIR, "leagues")
+# LOGO_DIR = os.path.join(ASSETS_DIR, "logos")
+# TEAMS_SUBDIR = os.path.join(LOGO_DIR, "teams")
+# LEAGUES_SUBDIR = os.path.join(LOGO_DIR, "leagues")
 
 # Sport categories and their leagues
 SPORT_CATEGORIES = {
@@ -128,19 +128,19 @@ def determine_asset_paths():
     # Create base directories if they don't exist
     os.makedirs(ASSETS_DIR, exist_ok=True)
     os.makedirs(FONT_DIR, exist_ok=True)
-    os.makedirs(LOGO_DIR, exist_ok=True)
-    os.makedirs(TEAMS_SUBDIR, exist_ok=True)
-    os.makedirs(LEAGUES_SUBDIR, exist_ok=True)
+    # os.makedirs(LOGO_DIR, exist_ok=True)
+    # os.makedirs(TEAMS_SUBDIR, exist_ok=True)
+    # os.makedirs(LEAGUES_SUBDIR, exist_ok=True)
     
     # Create sport category directories
-    for category in SPORT_CATEGORIES.keys():
-        os.makedirs(os.path.join(TEAMS_SUBDIR, category), exist_ok=True)
-        os.makedirs(os.path.join(LEAGUES_SUBDIR, category), exist_ok=True)
-        
-        # Create league subdirectories
-        for league in SPORT_CATEGORIES[category]:
-            os.makedirs(os.path.join(TEAMS_SUBDIR, category, league), exist_ok=True)
-            os.makedirs(os.path.join(LEAGUES_SUBDIR, category, league), exist_ok=True)
+    # for category in SPORT_CATEGORIES.keys():
+    #     os.makedirs(os.path.join(TEAMS_SUBDIR, category), exist_ok=True)
+    #     os.makedirs(os.path.join(LEAGUES_SUBDIR, category), exist_ok=True)
+    #     
+    #     # Create league subdirectories
+    #     for league in SPORT_CATEGORIES[category]:
+    #         os.makedirs(os.path.join(TEAMS_SUBDIR, category, league), exist_ok=True)
+    #         os.makedirs(os.path.join(LEAGUES_SUBDIR, category, league), exist_ok=True)
 
 # Initialize paths
 determine_asset_paths() 
