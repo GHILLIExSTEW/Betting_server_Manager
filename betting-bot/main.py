@@ -163,19 +163,20 @@ class BettingBot(commands.Bot):
             # Clear existing commands
             self.tree.clear_commands(guild=None)
             
-            # Register commands for Cookin' Books guild
+            # Register load_logos as a guild command for Cookin' Books only
             cookin_books_guild = discord.Object(id=1328126227013439601)
             self.tree.clear_commands(guild=cookin_books_guild)
             
-            # Copy all commands to Cookin' Books guild
+            # Make load_logos a guild command for Cookin' Books
             for cmd in self.tree.get_commands():
-                if cmd.name != "load_logos":  # Skip load_logos as it's global
-                    self.tree.add_command(cmd, guild=cookin_books_guild)
+                if cmd.name == "load_logos":
+                    cmd.guild_only = True
+                    cmd.guild_ids = [1328126227013439601]
             
-            # Sync global commands (load_logos)
+            # Sync global commands (all except load_logos)
             await self.sync_commands_with_retry()
             
-            # Sync guild commands for Cookin' Books
+            # Sync guild commands for Cookin' Books (load_logos)
             await self.tree.sync(guild=cookin_books_guild)
             
             commands_list = [cmd.name for cmd in self.tree.get_commands()]
