@@ -124,7 +124,7 @@ class GameService:
 
                 starting_games = await self.db.fetch_all(
                     """
-                    SELECT id, guild_id, league_id, home_team_name, away_team_name
+                    SELECT id, league_id, home_team_name, away_team_name
                     FROM api_games
                     WHERE status = %s AND start_time <= %s
                     """,
@@ -137,7 +137,7 @@ class GameService:
 
                 ending_games = await self.db.fetch_all(
                     """
-                    SELECT id, guild_id, score
+                    SELECT id, score
                     FROM api_games
                     WHERE status = %s AND end_time IS NOT NULL AND end_time <= %s
                     """,
