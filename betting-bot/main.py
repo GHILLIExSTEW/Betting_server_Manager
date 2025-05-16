@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import asyncio
 from typing import Optional
 import subprocess # For running the script as a subprocess
-from datetime import datetime # For the flag file timestamp
+from datetime import datetime, timezone# For the flag file timestamp
 
 from data.db_manager import DatabaseManager
 from services.admin_service import AdminService
