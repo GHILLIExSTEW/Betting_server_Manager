@@ -32,9 +32,10 @@ class SyncCog(commands.Cog):
             # Sync global commands
             await self.bot.sync_commands_with_retry()
             
-            # Only sync load_logos command for Cookin' Books
+            # For Cookin' Books, copy global commands and sync load_logos
             if interaction.guild_id == 1328126227013439601:
                 cookin_books_guild = discord.Object(id=1328126227013439601)
+                self.bot.tree.copy_global_to(guild=cookin_books_guild)
                 await self.bot.tree.sync(guild=cookin_books_guild)
 
             await interaction.followup.send(
