@@ -229,10 +229,6 @@ async def setup(bot: commands.Bot):
         logger.warning("LoadLogosCog not loaded: TEST_GUILD_ID missing or invalid in .env.")
         return
     
-    # Ensure guild ID is valid before creating discord.Object
-    try:
-        guild_object = discord.Object(id=TEST_GUILD_ID)
-        await bot.add_cog(LoadLogosCog(bot), guilds=[guild_object])
-        logger.info(f"LoadLogosCog loaded for guild {TEST_GUILD_ID}")
-    except TypeError as e: # Catches if TEST_GUILD_ID is None or invalid type for discord.Object
-        logger.error(f"Failed to load LoadLogosCog: Invalid TEST_GUILD_ID ({TEST_GUILD_ID}). Error: {e}")
+    # Register the cog globally but restrict usage to TEST_GUILD_ID
+    await bot.add_cog(LoadLogosCog(bot))
+    logger.info(f"LoadLogosCog loaded globally with usage restricted to guild {TEST_GUILD_ID}")
