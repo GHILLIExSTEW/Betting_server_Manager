@@ -89,30 +89,29 @@ async def run_one_time_logo_download():
 
         try:
             logger.info(f"Executing {LOGO_DOWNLOAD_SCRIPT_PATH} to download logos...")
-            # Using asyncio.create_subprocess_exec to run the script asynchronously
-            # sys.executable ensures we use the same Python interpreter
             process = await asyncio.create_subprocess_exec(
                 sys.executable, LOGO_DOWNLOAD_SCRIPT_PATH,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=BASE_DIR # Ensure the script runs with betting-bot/ as its CWD
+                cwd=BASE_DIR
             )
             
-            stdout, stderr = await process.communicate() # Wait for the script to finish
+            stdout, stderr = await process.communicate()
+
+            # Log stdout and stderr from the script
+            if stdout:
+                logger.info(f"Logo Script STDOUT:\n{stdout.decode().strip()}")
+            if stderr:
+                logger.warning(f"Logo Script STDERR:\n{stderr.decode().strip()}") # Log as warning or error
 
             if process.returncode == 0:
-                logger.info("Logo download script finished successfully.")
-                # Create the flag file upon successful completion
-                os.makedirs(os.path.dirname(LOGO_DOWNLOAD_FLAG_FILE), exist_ok=True) # Ensure data directory exists
+                logger.info("Logo download script finished (Return Code: 0).")
+                os.makedirs(os.path.dirname(LOGO_DOWNLOAD_FLAG_FILE), exist_ok=True)
                 with open(LOGO_DOWNLOAD_FLAG_FILE, 'w') as f:
                     f.write(datetime.now(timezone.utc).isoformat())
                 logger.info(f"Created flag file: {LOGO_DOWNLOAD_FLAG_FILE}")
             else:
                 logger.error(f"Logo download script failed. Return code: {process.returncode}")
-                if stdout:
-                    logger.error(f"Logo Script STDOUT: {stdout.decode().strip()}")
-                if stderr:
-                    logger.error(f"Logo Script STDERR: {stderr.decode().strip()}")
         except Exception as e:
             logger.error(f"Error running one-time logo download task: {e}", exc_info=True)
     else:
