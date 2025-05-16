@@ -273,7 +273,7 @@ class BetSlipGenerator:
         if can_draw_lock:
             self._draw_lock_element(img, draw, current_x, lock_drawn_y, lock_element_size, emoji_font, gold_color, draw_it=True)
 
-        y += units_text_part_h + 30  # Add extra space after units before footer
+        y += units_text_part_h + 35  # Add extra space after units before footer
         return y
 
     def _draw_parlay_details(self, draw: ImageDraw.Draw, image_width: int, image_height: int, legs: List[Dict], odds: float, units: float, bet_id: str, timestamp: datetime, is_same_game: bool, img: Image.Image, team_logos: List[Optional[Image.Image]]):
