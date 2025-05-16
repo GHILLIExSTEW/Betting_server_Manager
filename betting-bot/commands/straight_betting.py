@@ -798,12 +798,23 @@ class StraightBetWorkflowView(View):
                     else:
                         logger.warning(f"Capper avatar path '{custom_avatar_url}' for user {interaction.user.id} is not a direct URL. Using Discord avatar.")
 
+            # Fetch member_role from guild_settings
+            guild_settings = await self.bot.db_manager.fetch_one(
+                "SELECT member_role FROM guild_settings WHERE guild_id = %s",
+                (interaction.guild_id,)
+            )
+            
+            member_role_mention = ""
+            if guild_settings and guild_settings.get('member_role'):
+                member_role_mention = f"<@&{guild_settings['member_role']}> "
+
             webhooks = await post_channel.webhooks()
             webhook = discord.utils.find(lambda wh: wh.user and wh.user.id == self.bot.user.id, webhooks)
             if webhook is None:
                 webhook = await post_channel.create_webhook(name=f"{self.bot.user.name} Bets")
 
             sent_message = await webhook.send(
+                content=member_role_mention,
                 username=webhook_username,
                 avatar_url=webhook_avatar_url,
                 file=final_discord_file,
