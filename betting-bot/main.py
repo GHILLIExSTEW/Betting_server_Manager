@@ -118,19 +118,16 @@ class BettingBot(commands.Bot):
             try:
                 if guild:
                     guild_obj = discord.Object(id=guild.id)
-                    # Clear existing guild commands first
-                    self.tree.clear_commands(guild=guild_obj)
-                    # Copy global commands to guild
+                    # Copy global commands to guild without clearing first
                     self.tree.copy_global_to(guild=guild_obj)
                     # Sync guild commands
                     synced = await self.tree.sync(guild=guild_obj)
                     logger.info("Commands synced to guild %s: %s", guild.id, [cmd.name for cmd in synced])
                 else:
-                    # Clear existing global commands first
-                    self.tree.clear_commands(guild=None)
-                    # Sync global commands
+                    # Sync global commands without clearing first
                     synced = await self.tree.sync()
                     logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
+                    
                 return True
             except discord.HTTPException as e:
                 logger.error("Sync attempt %d/%d failed: %s", attempt, retries, e, exc_info=True)
@@ -196,8 +193,7 @@ class BettingBot(commands.Bot):
             
             # Sync global commands first
             try:
-                synced = await self.tree.sync()
-                logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
+                await self.sync_commands_with_retry()
             except Exception as e:
                 logger.error("Failed to sync global commands: %s", e)
                 return
@@ -205,19 +201,9 @@ class BettingBot(commands.Bot):
             # Sync to Cookin' Books guild
             cookin_books_guild = discord.Object(id=1328126227013439601)
             try:
-                # Copy global commands to guild
-                self.tree.copy_global_to(guild=cookin_books_guild)
-                # Sync guild commands
-                guild_synced = await self.tree.sync(guild=cookin_books_guild)
-                logger.info("Guild commands synced for Cookin' Books: %s", [cmd.name for cmd in guild_synced])
+                await self.sync_commands_with_retry(guild=cookin_books_guild)
             except Exception as e:
                 logger.error("Failed to sync guild commands: %s", e)
-                # Try alternative sync method
-                try:
-                    guild_synced = await self.tree.sync(guild=cookin_books_guild)
-                    logger.info("Alternative guild sync successful: %s", [cmd.name for cmd in guild_synced])
-                except Exception as e:
-                    logger.error("Alternative guild sync failed: %s", e)
             
             # Final verification
             global_commands = [cmd.name for cmd in self.tree.get_commands()]
