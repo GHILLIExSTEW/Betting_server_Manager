@@ -29,6 +29,8 @@ from utils.errors import (
     GameNotFoundError,
 )
 from utils.image_generator import BetSlipGenerator
+from utils.modals import StraightBetDetailsModal # Import the modal
+from config.leagues import LEAGUE_CONFIG
 
 logger = logging.getLogger(__name__)
 
