@@ -13,7 +13,7 @@ LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 LOG_FILE = 'logs/betting_bot.log'
 
 # API Configuration
-API_KEY = ''  # Set this in environment variables
+API_KEY = 675441  # Set this in environment variables
 API_TIMEOUT = 30  # seconds
 API_RETRY_ATTEMPTS = 3
 API_RETRY_DELAY = 5  # seconds
