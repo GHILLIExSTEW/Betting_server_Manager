@@ -290,27 +290,24 @@ class BetDetailsModal(Modal):
                 self.view.odds = odds_val
 
                 if "bet_serial" not in self.view.bet_details:
-                    async with self.view.bot.db_manager.pool.acquire() as conn:
-                        async with conn.transaction():
-                            bet_serial = await self.view.bot.bet_service.create_straight_bet(
-                                guild_id=interaction.guild_id,
-                                user_id=interaction.user.id,
-                                game_id=game_id_for_db,
-                                bet_type=self.view.bet_details.get("line_type", "game_line"),
-                                team=team_input,
-                                opponent=opponent_input,
-                                line=line_value,
-                                units=1.0,
-                                odds=odds_val,
-                                channel_id=None,
-                                league=self.view.bet_details.get("league", "UNKNOWN"),
-                                connection=conn
-                            )
-                            if not bet_serial:
-                                raise BetServiceError("Failed to create bet record (no serial returned).")
-                            self.view.bet_details["bet_serial"] = bet_serial
-                            self.view.bet_id = str(bet_serial)
-                            logger.debug(f"Bet record {bet_serial} created from modal for user {interaction.user.id}.")
+                    bet_serial = await self.view.bot.bet_service.create_straight_bet(
+                        guild_id=interaction.guild_id,
+                        user_id=interaction.user.id,
+                        game_id=game_id_for_db,
+                        bet_type=self.view.bet_details.get("line_type", "game_line"),
+                        team=team_input,
+                        opponent=opponent_input,
+                        line=line_value,
+                        units=1.0,
+                        odds=odds_val,
+                        channel_id=None,
+                        league=self.view.bet_details.get("league", "UNKNOWN")
+                    )
+                    if not bet_serial:
+                        raise BetServiceError("Failed to create bet record (no serial returned).")
+                    self.view.bet_details["bet_serial"] = bet_serial
+                    self.view.bet_id = str(bet_serial)
+                    logger.debug(f"Bet record {bet_serial} created from modal for user {interaction.user.id}.")
                 else:
                     logger.warning(f"Bet_serial {self.view.bet_details['bet_serial']} already exists when submitting modal. Check flow.")
                     self.view.bet_id = str(self.view.bet_details['bet_serial'])
@@ -733,20 +730,18 @@ class StraightBetWorkflowView(View):
             if not isinstance(post_channel, TextChannel):
                 raise ValueError(f"Channel ID {post_channel_id} is not a text channel.")
 
-            async with self.bot.db_manager.pool.acquire() as conn:
-                async with conn.transaction():
-                    rowcount, _ = await conn.execute(
-                        "UPDATE bets SET confirmed = 1, channel_id = %s, status = %s WHERE bet_serial = %s",
-                        (post_channel_id, 'pending', bet_serial)
-                    )
-                    if not rowcount:
-                        logger.warning(f"Failed to confirm bet {bet_serial} in DB or already confirmed/deleted.")
-                        current_bet_status = await conn.fetchrow(
-                            "SELECT confirmed, channel_id FROM bets WHERE bet_serial = %s",
-                            (bet_serial,)
-                        )
-                        if not (current_bet_status and current_bet_status['confirmed'] == 1 and current_bet_status['channel_id'] == post_channel_id):
-                            raise BetServiceError("Failed to confirm bet in DB and not already in desired state.")
+            rowcount, _ = await self.bot.db_manager.execute(
+                "UPDATE bets SET confirmed = 1, channel_id = %s, status = %s WHERE bet_serial = %s",
+                (post_channel_id, 'pending', bet_serial)
+            )
+            if not rowcount:
+                logger.warning(f"Failed to confirm bet {bet_serial} in DB or already confirmed/deleted.")
+                current_bet_status = await self.bot.db_manager.fetch_one(
+                    "SELECT confirmed, channel_id FROM bets WHERE bet_serial = %s",
+                    (bet_serial,)
+                )
+                if not (current_bet_status and current_bet_status['confirmed'] == 1 and current_bet_status['channel_id'] == post_channel_id):
+                    raise BetServiceError("Failed to confirm bet in DB and not already in desired state.")
 
             final_discord_file = None
             if self.preview_image_bytes:
@@ -848,17 +843,15 @@ class StraightBetWorkflowView(View):
                 self.stop()
                 return
 
-            async with self.bot.db_manager.pool.acquire() as conn:
-                async with conn.transaction():
-                    rowcount, _ = await conn.execute(
-                        "UPDATE bets SET units = %s WHERE bet_serial = %s",
-                        (units, current_bet_serial)
-                    )
-                    if not rowcount:
-                        logger.error(f"Failed to update units for bet {current_bet_serial} in DB. Bet might not exist.")
-                        await interaction.followup.send("Error: Could not update units for the bet.", ephemeral=True)
-                        self.stop()
-                        return
+            rowcount, _ = await self.bot.db_manager.execute(
+                "UPDATE bets SET units = %s WHERE bet_serial = %s",
+                (units, current_bet_serial)
+            )
+            if not rowcount:
+                logger.error(f"Failed to update units for bet {current_bet_serial} in DB. Bet might not exist.")
+                await interaction.followup.send("Error: Could not update units for the bet.", ephemeral=True)
+                self.stop()
+                return
 
             self.bet_details['units'] = units
             self.bet_details['units_str'] = str(units)
