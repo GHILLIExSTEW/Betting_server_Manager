@@ -177,7 +177,7 @@ class BettingBot(commands.Bot):
         self.tree.clear_commands(guild=None)
         # Clear per-guild commands for all guilds
         for guild in self.guilds:
-            await self.tree.clear_commands(guild=guild)
+            self.tree.clear_commands(guild=guild)
         # Sync only global commands
         await self.tree.sync()
         logger.info('Cleared all commands and synced only global commands. Please remove this block after confirming fix.')
