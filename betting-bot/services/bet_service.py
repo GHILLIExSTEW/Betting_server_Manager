@@ -506,6 +506,12 @@ class BetService:
                  odds = bet_data.get('odds')
                  result_value = 0.0
 
+                 # Ensure both are float for arithmetic
+                 if units_staked is not None:
+                     units_staked = float(units_staked)
+                 if odds is not None:
+                     odds = float(odds)
+
                  if new_status == 'won':
                      if odds is None or units_staked is None:
                          logger.error(f"Missing odds or units for winning bet {bet_serial}")
