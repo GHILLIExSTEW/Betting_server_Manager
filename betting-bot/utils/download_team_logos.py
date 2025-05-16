@@ -76,88 +76,89 @@ def download_and_save_image(league_name: str, team_name: str, logo_url: str):
     """
     Downloads an image from logo_url and saves it to the appropriate
     folder structure based on league and team name.
+    Prints status to stdout/stderr.
     """
+    # Standard output for confirmations, standard error for issues.
+    # The logger calls will also go to wherever the logger is configured (e.g. file and console).
+
     if not logo_url or not isinstance(logo_url, str) or not logo_url.startswith(('http://', 'https://')):
-        logger.warning(f"Skipping team '{team_name}' in league '{league_name}': Invalid or missing logo URL ('{logo_url}').")
+        message = f"SKIPPED: Team '{team_name}' (League: '{league_name}') - Invalid or missing logo URL ('{logo_url}')."
+        print(message, file=sys.stderr) # Also print to stderr for main.py to catch
+        logger.warning(message)
         return
 
     try:
-        # Determine sport and league code for path construction
-        current_league_sport = "OTHER_SPORTS" # Default
-        league_code_for_path = league_name.upper().replace(" ", "_") # Default
+        # ... (path determination logic remains the same) ...
+        current_league_sport = "OTHER_SPORTS" 
+        league_code_for_path = league_name.upper().replace(" ", "_") 
 
         for l_code, l_details in LEAGUE_IDS.items():
             if l_details["name"].lower() == league_name.lower():
                 current_league_sport = l_details["sport"]
-                league_code_for_path = l_code # Use the key like "NFL", "EPL"
+                league_code_for_path = l_code 
                 break
         
         sport_folder = get_sport_folder_name(current_league_sport)
-        
-        # Sanitize team name for filename using your existing function
         sanitized_team_name = normalize_team_name(team_name)
+
         if not sanitized_team_name:
-            logger.error(f"Could not generate a valid filename for team '{team_name}'. Skipping.")
+            message = f"ERROR: Could not generate a valid filename for team '{team_name}'. Skipping."
+            print(message, file=sys.stderr)
+            logger.error(message)
             return
-
-        # Construct save path: static/logos/teams/SPORT_CATEGORY/LEAGUE_CODE/team_name_sanitized.png
-        # Example: static/logos/teams/FOOTBALL/NFL/arizona_cardinals.png
-        # Example: static/logos/teams/SOCCER/EPL/arsenal.png
-        
-        # Handle NCAA separately for subfolders if desired (as in your load_logos.py)
-        if league_code_for_path.startswith("NCAA"):
-            # You might have NCAA Football, NCAA Basketball etc.
-            # The 'sport_folder' derived from LEAGUE_IDS should handle this.
-            # e.g. if league_code_for_path = "NCAAF", sport_folder becomes "FOOTBALL"
-            # Path: static/logos/teams/SPORT_CATEGORY_FROM_NCAA_TYPE/NCAAF_OR_NCAAB_CODE/
-            # The current `get_sport_folder_name` will use the sport from LEAGUE_IDS.
-            # The `league_code_for_path` will be the key from LEAGUE_IDS (e.g., "NFL", or your NCAA key).
-            # This means for NCAA, if your LEAGUE_IDS has "NCAAF": {"sport": "American Football"},
-            # sport_folder = "FOOTBALL", league_code_for_path = "NCAAF"
-            # path = SAVE_BASE_PATH / FOOTBALL / NCAAF / team_name.png
-            # This seems reasonable.
-             pass
-
 
         team_logo_dir = os.path.join(SAVE_BASE_PATH, sport_folder, league_code_for_path)
         os.makedirs(team_logo_dir, exist_ok=True)
         
-        file_extension = ".png" # Save all as PNG for consistency
+        file_extension = ".png" 
         file_name = f"{sanitized_team_name}{file_extension}"
         full_save_path = os.path.join(team_logo_dir, file_name)
 
         if os.path.exists(full_save_path):
-            logger.info(f"Logo already exists for {team_name} at {full_save_path}. Skipping download.")
+            message = f"EXISTS: Logo for '{team_name}' (League: '{league_name}') already at {full_save_path}. Skipping."
+            print(message) # Print to stdout
+            logger.info(message)
             return
 
+        print(f"ATTEMPTING: Download for '{team_name}' (League: '{league_name}') from '{logo_url}' to '{full_save_path}'") # Print to stdout
         logger.info(f"Downloading logo for '{team_name}' from '{logo_url}' to '{full_save_path}'")
         
         response = requests.get(logo_url, stream=True, timeout=DOWNLOAD_TIMEOUT_SECONDS)
-        response.raise_for_status() # Raise an exception for bad status codes
+        response.raise_for_status()
 
-        # Process with Pillow to ensure format and potentially resize
         try:
             img_bytes = BytesIO(response.content)
             with Image.open(img_bytes) as img:
                 if img.mode != 'RGBA':
                     img = img.convert('RGBA')
-                # Optional: Resize if needed, e.g., img.thumbnail((200,200), Image.Resampling.LANCZOS)
                 img.save(full_save_path, 'PNG', optimize=True)
-            logger.info(f"Successfully saved logo for {team_name} to {full_save_path}")
+            message = f"SUCCESS: Saved logo for '{team_name}' (League: '{league_name}') to {full_save_path}"
+            print(message) # Print to stdout
+            logger.info(message)
 
         except UnidentifiedImageError:
-            logger.error(f"Cannot identify image file from URL for {team_name}: {logo_url}")
+            message = f"ERROR: Cannot identify image file from URL for '{team_name}' (League: '{league_name}'): {logo_url}"
+            print(message, file=sys.stderr)
+            logger.error(message)
         except Exception as e_img:
-            logger.error(f"Error processing image for {team_name} from {logo_url}: {e_img}")
+            message = f"ERROR: Processing image for '{team_name}' (League: '{league_name}') from {logo_url}: {e_img}"
+            print(message, file=sys.stderr)
+            logger.error(message)
 
-        time.sleep(REQUEST_DELAY_SECONDS) # Be polite to servers
+        time.sleep(REQUEST_DELAY_SECONDS)
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error downloading logo for {team_name} from {logo_url}: {e}")
+        message = f"ERROR: Downloading logo for '{team_name}' (League: '{league_name}') from {logo_url}: {e}"
+        print(message, file=sys.stderr)
+        logger.error(message)
     except IOError as e:
-        logger.error(f"Error saving file for {team_name} to {full_save_path}: {e}")
+        message = f"ERROR: Saving file for '{team_name}' (League: '{league_name}') to {full_save_path}: {e}"
+        print(message, file=sys.stderr)
+        logger.error(message)
     except Exception as e:
-        logger.error(f"An unexpected error occurred for team {team_name}, URL {logo_url}: {e}")
+        message = f"UNEXPECTED ERROR: For team '{team_name}' (League: '{league_name}'), URL {logo_url}: {e}"
+        print(message, file=sys.stderr)
+        logger.error(message)
 
 
 def main():
