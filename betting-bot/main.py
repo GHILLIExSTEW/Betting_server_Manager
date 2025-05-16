@@ -163,12 +163,13 @@ class BettingBot(commands.Bot):
             # Clear existing commands
             self.tree.clear_commands(guild=None)
             
-            # First sync global commands
-            await self.sync_commands_with_retry()
-            
-            # For Cookin' Books, sync all commands including load_logos
+            # For Cookin' Books, register commands directly
             cookin_books_guild = discord.Object(id=1328126227013439601)
+            self.tree.clear_commands(guild=cookin_books_guild)
             await self.tree.sync(guild=cookin_books_guild)
+            
+            # For all other guilds, sync global commands
+            await self.sync_commands_with_retry()
             
             commands_list = [cmd.name for cmd in self.tree.get_commands()]
             logger.info("Commands available after sync: %s", commands_list)
