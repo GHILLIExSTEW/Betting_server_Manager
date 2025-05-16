@@ -124,7 +124,7 @@ class GameService:
 
                 starting_games = await self.db.fetch_all(
                     """
-                    SELECT id, league_id, home_team_name, away_team_name
+                    SELECT id, league_id, home_team_id, away_team_id
                     FROM api_games
                     WHERE status = %s AND start_time <= %s
                     """,
@@ -282,8 +282,9 @@ class GameService:
 
     def _create_game_embed(self, game: Dict) -> discord.Embed:
         """Create a Discord embed for a game."""
-        home_team = game.get('home_team_name', 'Home')
-        away_team = game.get('away_team_name', 'Away')
+        # NOTE: Team names should be looked up separately using home_team_id and away_team_id
+        home_team = f"Team ID: {game.get('home_team_id', 'N/A')}"
+        away_team = f"Team ID: {game.get('away_team_id', 'N/A')}"
         league = game.get('league_name', game.get('league_id', 'N/A'))
         status = game.get('status', 'N/A')
         score_data = game.get('score', {})
@@ -494,7 +495,7 @@ class GameService:
                 return cached_games
 
             query = """
-                SELECT id, home_team_name, away_team_name, start_time, status, score
+                SELECT id, home_team_id, away_team_id, start_time, status, score
                 FROM api_games
                 WHERE league_id = %s AND start_time LIKE %s
                 ORDER BY start_time ASC
@@ -504,8 +505,8 @@ class GameService:
             games_list = [
                 {
                     "id": game["id"],
-                    "home_team_name": game["home_team_name"],
-                    "away_team_name": game["away_team_name"],
+                    "home_team_id": game["home_team_id"],
+                    "away_team_id": game["away_team_id"],
                     "start_time": game["start_time"],
                     "status": game["status"],
                     "score": json.loads(game["score"]) if game["score"] else {}
@@ -532,8 +533,8 @@ class GameService:
 
             game_detail = {
                 "id": game["id"],
-                "home_team_name": game["home_team_name"],
-                "away_team_name": game["away_team_name"],
+                "home_team_id": game["home_team_id"],
+                "away_team_id": game["away_team_id"],
                 "start_time": game["start_time"],
                 "status": game["status"],
                 "score": json.loads(game["score"]) if game["score"] else {},
@@ -564,7 +565,7 @@ class GameService:
                 return cached_schedule
 
             query = """
-                SELECT id, home_team_name, away_team_name, start_time, status, score
+                SELECT id, home_team_id, away_team_id, start_time, status, score
                 FROM api_games
                 WHERE league_id = %s AND start_time BETWEEN %s AND %s
                 ORDER BY start_time ASC
@@ -573,8 +574,8 @@ class GameService:
             schedule_list = [
                 {
                     "id": game["id"],
-                    "home_team_name": game["home_team_name"],
-                    "away_team_name": game["away_team_name"],
+                    "home_team_id": game["home_team_id"],
+                    "away_team_id": game["away_team_id"],
                     "start_time": game["start_time"],
                     "status": game["status"],
                     "score": json.loads(game["score"]) if game["score"] else {}
