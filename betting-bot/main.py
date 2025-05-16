@@ -181,7 +181,6 @@ class BettingBot(commands.Bot):
         # Sync only global commands
         await self.tree.sync()
         logger.info('Cleared all commands and synced only global commands. Please remove this block after confirming fix.')
-        import sys
         sys.exit('One-time command cleanup complete. Please remove this block from on_ready.')
         # --- END CLEANUP BLOCK ---
 
