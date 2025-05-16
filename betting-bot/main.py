@@ -160,8 +160,8 @@ class BettingBot(commands.Bot):
             logger.debug("- %s (%s)", guild.name, guild.id)
         logger.info("Latency: %.2f ms", self.latency * 1000)
         try:
-            # Clear any existing commands first
-            await self.tree.clear_commands(guild=None)
+            # Clear existing commands
+            self.tree.clear_commands(guild=None)
             
             # Sync global commands
             await self.sync_commands_with_retry()

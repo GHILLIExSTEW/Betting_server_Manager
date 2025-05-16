@@ -26,8 +26,8 @@ class SyncCog(commands.Cog):
             commands_list = [cmd.name for cmd in self.bot.tree.get_commands()]
             logger.debug("Commands to sync: %s", commands_list)
 
-            # Clear existing commands first
-            await self.bot.tree.clear_commands(guild=None)
+            # Clear existing commands
+            self.bot.tree.clear_commands(guild=None)
             
             # Sync global commands
             await self.bot.sync_commands_with_retry()
