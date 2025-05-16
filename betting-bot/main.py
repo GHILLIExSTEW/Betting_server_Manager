@@ -1,3 +1,6 @@
+# main.py
+# Main entry point for the Betting_server_Manager Discord bot
+
 import os
 import sys
 import logging
@@ -7,22 +10,35 @@ from discord import app_commands
 from dotenv import load_dotenv
 import asyncio
 from typing import Optional
-import subprocess # For running the script as a subprocess
-from datetime import datetime, timezone# For the flag file timestamp
+import subprocess
+from datetime import datetime, timezone
 
 from data.db_manager import DatabaseManager
 from services.admin_service import AdminService
 from services.analytics_service import AnalyticsService
 from services.bet_service import BetService
-from services.game_service import GameService
 from services.user_service import UserService
 from services.voice_service import VoiceService
 from services.data_sync_service import DataSyncService
 from utils.image_generator import BetSlipGenerator
 from commands.sync_cog import setup_sync_cog
 
+# Try to import GameService, handle thesportsdb import error
+try:
+    from services.game_service import GameService
+except ModuleNotFoundError as e:
+    if "thesportsdb" in str(e):
+        logger.warning(
+            "Failed to import GameService due to missing 'thesportsdb' module. "
+            "Betting commands and game data fetching will be disabled. "
+            "Please install thesportsdb==0.2.1 to enable full functionality."
+        )
+        GameService = None  # Set to None to skip GameService initialization
+    else:
+        raise  # Re-raise other import errors
+
 # --- Path Setup ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # This is betting-bot/
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # This is betting-bot/
 DOTENV_PATH = os.path.join(BASE_DIR, '.env')
 
 if os.path.exists(DOTENV_PATH):
@@ -30,7 +46,6 @@ if os.path.exists(DOTENV_PATH):
     print(f"Loaded environment variables from: {DOTENV_PATH}")
 else:
     # If main.py is in betting-bot/ and .env is in Betting_server_Manager-master/
-    # then BASE_DIR (betting-bot) needs to go up one level for PARENT_DOTENV_PATH
     PARENT_DOTENV_PATH = os.path.join(os.path.dirname(BASE_DIR), '.env')
     if os.path.exists(PARENT_DOTENV_PATH):
         load_dotenv(dotenv_path=PARENT_DOTENV_PATH)
@@ -38,13 +53,11 @@ else:
     else:
         print(f"WARNING: .env file not found at {DOTENV_PATH} or {PARENT_DOTENV_PATH}")
 
-
 # --- Logging Setup ---
 log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
 log_format = os.getenv('LOG_FORMAT', '%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-# Ensure log file path is relative to BASE_DIR (betting-bot/) if not absolute
-log_file_name = 'bot_activity.log' # Keep it simple
+log_file_name = 'bot_activity.log'
 log_file_path = os.path.join(BASE_DIR, 'logs', log_file_name) if not os.path.isabs(os.getenv('LOG_FILE', '')) else os.getenv('LOG_FILE', os.path.join(BASE_DIR, 'logs', log_file_name))
 
 log_dir = os.path.dirname(log_file_path)
@@ -71,10 +84,8 @@ if not BOT_TOKEN:
     sys.exit("Missing DISCORD_TOKEN")
 
 # --- Path for the logo download script and flag file ---
-# Assuming download_team_logos.py is in betting-bot/utils/
 LOGO_DOWNLOAD_SCRIPT_PATH = os.path.join(BASE_DIR, "utils", "download_team_logos.py")
 LOGO_DOWNLOAD_FLAG_FILE = os.path.join(BASE_DIR, "data", ".logos_downloaded_flag")
-
 
 async def run_one_time_logo_download():
     """
@@ -98,11 +109,10 @@ async def run_one_time_logo_download():
             
             stdout, stderr = await process.communicate()
 
-            # Log stdout and stderr from the script
             if stdout:
                 logger.info(f"Logo Script STDOUT:\n{stdout.decode().strip()}")
             if stderr:
-                logger.warning(f"Logo Script STDERR:\n{stderr.decode().strip()}") # Log as warning or error
+                logger.warning(f"Logo Script STDERR:\n{stderr.decode().strip()}")
 
             if process.returncode == 0:
                 logger.info("Logo download script finished (Return Code: 0).")
@@ -117,7 +127,6 @@ async def run_one_time_logo_download():
     else:
         logger.info(f"Logos already downloaded (flag file '{LOGO_DOWNLOAD_FLAG_FILE}' exists). Skipping download.")
 
-
 # --- Bot Definition ---
 class BettingBot(commands.Bot):
     def __init__(self):
@@ -130,10 +139,10 @@ class BettingBot(commands.Bot):
         self.admin_service = AdminService(self, self.db_manager)
         self.analytics_service = AnalyticsService(self, self.db_manager)
         self.bet_service = BetService(self, self.db_manager)
-        self.game_service = GameService(self, self.db_manager)
+        self.game_service = GameService(self, self.db_manager) if GameService else None
         self.user_service = UserService(self, self.db_manager)
         self.voice_service = VoiceService(self, self.db_manager)
-        self.data_sync_service = DataSyncService(self.game_service, self.db_manager)
+        self.data_sync_service = DataSyncService(self.game_service, self.db_manager) if self.game_service else None
         self.bet_slip_generators = {}
 
     async def get_bet_slip_generator(self, guild_id: int) -> BetSlipGenerator:
@@ -149,13 +158,17 @@ class BettingBot(commands.Bot):
             'remove_user.py',
             'setid.py',
             'stats.py',
-            'load_logos.py', # Assuming you want to keep this manual command too
+            'load_logos.py',
         ]
         loaded_commands = []
         for filename in cog_files:
             file_path = os.path.join(commands_dir, filename)
             if os.path.exists(file_path):
                 extension = f'commands.{filename[:-3]}'
+                # Skip betting.py if GameService is unavailable
+                if filename == 'betting.py' and self.game_service is None:
+                    logger.warning("Skipping betting.py extension due to missing GameService (thesportsdb not installed)")
+                    continue
                 try:
                     await self.load_extension(extension)
                     loaded_commands.append(extension)
@@ -166,14 +179,12 @@ class BettingBot(commands.Bot):
                 logger.warning("Command file not found: %s", file_path)
         
         logger.info("Total loaded extensions: %s", loaded_commands)
-        # Verify commands after loading
         commands_list = [cmd.name for cmd in self.tree.get_commands()]
         logger.info("Available commands after loading: %s", commands_list)
 
     async def sync_commands_with_retry(self, guild: Optional[discord.Guild] = None, retries: int = 3, delay: int = 5):
         for attempt in range(1, retries + 1):
             try:
-                # Only sync global commands
                 synced = await self.tree.sync()
                 logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
                 return True
@@ -188,11 +199,7 @@ class BettingBot(commands.Bot):
         """Initialize the bot and load extensions."""
         logger.info("Starting setup_hook...")
         
-        # --- Run one-time logo download task ---
-        # This should be run before services that might depend on these assets,
-        # or at least before the bot is fully "ready" if image generation happens early.
-        await run_one_time_logo_download() # Call the new function
-        # --- End one-time logo download task ---
+        await run_one_time_logo_download()
 
         await self.db_manager.connect()
         if not self.db_manager._pool:
@@ -200,24 +207,24 @@ class BettingBot(commands.Bot):
             await self.close()
             sys.exit("Database connection failed.")
         
-        # Load extensions first
         await self.load_extensions()
         
-        # Log registered commands
-        commands_list = [cmd.name for cmd in self.tree.get_commands()] # Corrected variable name
+        commands_list = [cmd.name for cmd in self.tree.get_commands()]
         logger.info("Registered commands: %s", commands_list)
         
-        # Start services
         logger.info("Starting services...")
         service_starts = [
             self.admin_service.start(),
             self.analytics_service.start(),
             self.bet_service.start(),
-            self.game_service.start(),
             self.user_service.start(),
             self.voice_service.start(),
-            self.data_sync_service.start(),
         ]
+        if self.game_service:
+            service_starts.append(self.game_service.start())
+        if self.data_sync_service:
+            service_starts.append(self.data_sync_service.start())
+        
         results = await asyncio.gather(*service_starts, return_exceptions=True)
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -236,25 +243,22 @@ class BettingBot(commands.Bot):
         logger.info("Latency: %.2f ms", self.latency * 1000)
 
         try:
-            # Get current commands
             current_commands = [cmd.name for cmd in self.tree.get_commands()]
             logger.info("Current commands before sync: %s", current_commands)
             
-            if not current_commands: #This check should be if self.tree.get_commands() is empty, not if list from it is.
-                logger.error("No commands found! Attempting to reload extensions...") # Ensure this path makes sense.
+            if not current_commands:
+                logger.error("No commands found! Attempting to reload extensions...")
                 await self.load_extensions()
                 current_commands = [cmd.name for cmd in self.tree.get_commands()]
                 logger.info("Commands after reloading: %s", current_commands)
             
-            # Sync only global commands
             try:
                 await self.sync_commands_with_retry()
                 logger.info("Global commands synced successfully")
             except Exception as e:
                 logger.error("Failed to sync global commands: %s", e)
-                return # Potentially exit or handle if sync is critical
+                return
             
-            # Final verification
             global_commands = [cmd.name for cmd in self.tree.get_commands()]
             logger.info("Final global commands: %s", global_commands)
             
@@ -264,12 +268,10 @@ class BettingBot(commands.Bot):
 
     async def on_guild_join(self, guild: discord.Guild):
         logger.info("Joined new guild: %s (%s)", guild.name, guild.id)
-        # No command syncing on guild join - we only use global commands
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         if payload.user_id == self.user.id:
             return
-        # Ensure bet_service and pending_reactions are initialized
         if hasattr(self, 'bet_service') and hasattr(self.bet_service, 'pending_reactions') and \
            payload.message_id in self.bet_service.pending_reactions:
             logger.debug("Processing reaction add: %s by %s on bot message %s", payload.emoji, payload.user_id, payload.message_id)
@@ -285,26 +287,26 @@ class BettingBot(commands.Bot):
 
     async def on_interaction(self, interaction: discord.Interaction):
         command_name = interaction.command.name if interaction.command else 'N/A'
-        # Log essential details, avoid logging potentially sensitive data if not needed
         logger.debug("Interaction: type=%s, cmd=%s, user=%s(ID:%s), guild=%s, ch=%s",
                      interaction.type, command_name, interaction.user,
                      interaction.user.id, interaction.guild_id, interaction.channel_id)
-        # Default processing for interactions (e.g., command dispatch)
-        # This is typically handled by superclass unless you need specific pre-processing
-        # await self.process_application_commands(interaction) # This would be if you override default dispatch
 
     async def close(self):
         logger.info("Initiating graceful shutdown...")
         try:
             logger.info("Stopping services...")
             stop_tasks = [
-                self.data_sync_service.stop(),
-                self.voice_service.stop(),
+                self.admin_service.stop(),
+                self.analytics_service.stop(),
                 self.bet_service.stop(),
-                self.game_service.stop(),
                 self.user_service.stop(),
-                self.admin_service.stop()
+                self.voice_service.stop(),
             ]
+            if self.game_service:
+                stop_tasks.append(self.game_service.stop())
+            if self.data_sync_service:
+                stop_tasks.append(self.data_sync_service.stop())
+            
             results = await asyncio.gather(*stop_tasks, return_exceptions=True)
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
@@ -323,10 +325,8 @@ class BettingBot(commands.Bot):
             logger.info("Bot shutdown complete.")
 
 # --- Manual Sync Command (as a Cog) ---
-# SyncCog and setup_sync_cog remain the same from your provided code
-
 class SyncCog(commands.Cog):
-    def __init__(self, bot: BettingBot): # Type hint bot
+    def __init__(self, bot: BettingBot):
         self.bot = bot
 
     @app_commands.command(name="sync", description="Manually sync bot commands (admin only)")
@@ -337,8 +337,7 @@ class SyncCog(commands.Cog):
             await interaction.response.defer(ephemeral=True)
             commands_list = [cmd.name for cmd in self.bot.tree.get_commands()]
             logger.debug("Commands to sync: %s", commands_list)
-            # Only sync global commands
-            await self.bot.sync_commands_with_retry() # Call the bot's method
+            await self.bot.sync_commands_with_retry()
             await interaction.followup.send("Global commands synced successfully!", ephemeral=True)
         except Exception as e:
             logger.error("Failed to sync commands: %s", e, exc_info=True)
@@ -347,16 +346,15 @@ class SyncCog(commands.Cog):
             else:
                 await interaction.followup.send(f"Failed to sync commands: {e}", ephemeral=True)
 
-async def setup_sync_cog(bot: BettingBot): # Type hint bot
+async def setup_sync_cog(bot: BettingBot):
     await bot.add_cog(SyncCog(bot))
     logger.info("SyncCog loaded")
-
 
 # --- Main Execution ---
 def main():
     bot = BettingBot()
     async def run_bot():
-        await setup_sync_cog(bot) # Ensure SyncCog is set up
+        await setup_sync_cog(bot)
         await bot.start(BOT_TOKEN)
     try:
         logger.info("Starting bot...")
@@ -372,10 +370,9 @@ def main():
     except Exception as e:
         logger.critical("An unexpected error occurred while running the bot: %s", e, exc_info=True)
     finally:
-        # Ensure graceful shutdown of the bot if it was running
-        if bot.is_closed() is False: # Check if not already closed
-             logger.info("Ensuring bot is closed in main finally block.")
-             asyncio.run(bot.close()) # This might be tricky if loop is already stopped
+        if bot.is_closed() is False:
+            logger.info("Ensuring bot is closed in main finally block.")
+            asyncio.run(bot.close())
         logger.info("Bot process finished.")
 
 if __name__ == '__main__':
