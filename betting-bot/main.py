@@ -160,14 +160,15 @@ class BettingBot(commands.Bot):
             logger.debug("- %s (%s)", guild.name, guild.id)
         logger.info("Latency: %.2f ms", self.latency * 1000)
         try:
-            # Sync global commands once for all servers
+            # First, sync global commands (excluding load_logos)
             await self.sync_commands_with_retry()
-            # Register guild-specific commands for Cookin' Books
+            
+            # Then, sync load_logos command specifically for Cookin' Books
             cookin_books_guild = discord.Object(id=1328126227013439601)
             self.tree.copy_global_to(guild=cookin_books_guild)
-            # Ensure load_logos is registered only for Cookin' Books
             synced = await self.tree.sync(guild=cookin_books_guild)
             logger.info("Guild-specific commands synced to Cookin' Books (1328126227013439601): %s", [cmd.name for cmd in synced])
+            
             commands_list = [cmd.name for cmd in self.tree.get_commands()]
             logger.info("Commands available after sync: %s", commands_list)
         except Exception as e:

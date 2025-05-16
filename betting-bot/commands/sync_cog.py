@@ -26,10 +26,14 @@ class SyncCog(commands.Cog):
             commands_list = [cmd.name for cmd in self.bot.tree.get_commands()]
             logger.debug("Commands to sync: %s", commands_list)
 
-            await self.bot.sync_commands_with_retry() # Global sync
-            for guild in self.bot.guilds: # Sync to all guilds
-                await self.bot.sync_commands_with_retry(guild=guild)
-                await asyncio.sleep(0.5) # Small delay
+            # Sync global commands first
+            await self.bot.sync_commands_with_retry()
+            
+            # If this is Cookin' Books guild, sync load_logos command
+            if interaction.guild_id == 1328126227013439601:
+                cookin_books_guild = discord.Object(id=1328126227013439601)
+                self.bot.tree.copy_global_to(guild=cookin_books_guild)
+                await self.bot.sync_commands_with_retry(guild=cookin_books_guild)
 
             await interaction.followup.send(
                 "Commands synced successfully!", ephemeral=True
