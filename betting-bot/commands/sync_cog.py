@@ -26,23 +26,16 @@ class SyncCog(commands.Cog):
             commands_list = [cmd.name for cmd in self.bot.tree.get_commands()]
             logger.debug("Commands to sync: %s", commands_list)
 
-            # Sync global commands
+            # Only sync global commands
             synced = await self.bot.tree.sync()
             logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
             
-            # Copy global commands to Cookin' Books
-            cookin_books_guild = discord.Object(id=1328126227013439601)
-            self.bot.tree.copy_global_to(guild=cookin_books_guild)
-            await self.bot.tree.sync(guild=cookin_books_guild)
-            
-            # Log all commands for debugging
+            # Log final command list for verification
             global_commands = [cmd.name for cmd in self.bot.tree.get_commands()]
-            guild_commands = [cmd.name for cmd in self.bot.tree.get_commands(guild=cookin_books_guild)]
-            logger.info("Global commands available: %s", global_commands)
-            logger.info("Guild commands available for Cookin' Books: %s", guild_commands)
+            logger.info("Final global commands: %s", global_commands)
 
             await interaction.followup.send(
-                "Commands synced successfully!", ephemeral=True
+                "Global commands synced successfully!", ephemeral=True
             )
         except Exception as e:
             logger.error("Failed to sync commands: %s", e, exc_info=True)
