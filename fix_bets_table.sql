@@ -25,4 +25,28 @@ CREATE TABLE bets (
 
 -- Recreate the index
 CREATE INDEX idx_bets_guild_user ON bets(guild_id, user_id);
-CREATE INDEX idx_bets_status ON bets(status); 
+CREATE INDEX idx_bets_status ON bets(status);
+
+-- Create api_games table if it doesn't exist
+CREATE TABLE IF NOT EXISTS api_games (
+    id VARCHAR(50) PRIMARY KEY,
+    league_id VARCHAR(50) NOT NULL,
+    home_team_name VARCHAR(255) NOT NULL,
+    away_team_name VARCHAR(255) NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP NULL,
+    status VARCHAR(50) NOT NULL,
+    score JSON,
+    odds JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Create indexes for api_games
+CREATE INDEX idx_api_games_league ON api_games(league_id);
+CREATE INDEX idx_api_games_status ON api_games(status);
+CREATE INDEX idx_api_games_start_time ON api_games(start_time);
+CREATE INDEX idx_api_games_end_time ON api_games(end_time);
+
+-- Add any missing columns to existing tables
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS bet_details JSON; 
