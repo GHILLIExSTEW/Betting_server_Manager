@@ -169,6 +169,15 @@ class BettingBot(commands.Bot):
             logger.debug("- %s (%s)", guild.name, guild.id)
         logger.info("Latency: %.2f ms", self.latency * 1000)
         try:
+            # Clear existing commands first
+            self.tree.clear_commands(guild=None)
+            logger.info("Cleared existing global commands")
+            
+            # Clear guild-specific commands
+            cookin_books_guild = discord.Object(id=1328126227013439601)
+            self.tree.clear_commands(guild=cookin_books_guild)
+            logger.info("Cleared existing guild commands")
+            
             # Log all loaded commands before syncing
             loaded_commands = [cmd.name for cmd in self.tree.get_commands()]
             logger.info("Loaded commands before syncing: %s", loaded_commands)
@@ -178,7 +187,6 @@ class BettingBot(commands.Bot):
             logger.info("Global commands synced: %s", [cmd.name for cmd in synced])
             
             # Sync specifically for Cookin' Books guild
-            cookin_books_guild = discord.Object(id=1328126227013439601)
             self.tree.copy_global_to(guild=cookin_books_guild)
             guild_synced = await self.tree.sync(guild=cookin_books_guild)
             logger.info("Guild commands synced for Cookin' Books: %s", [cmd.name for cmd in guild_synced])
